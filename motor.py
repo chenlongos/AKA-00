@@ -53,9 +53,9 @@ def bread(left, right):
     left.brake()
     right.brake()
 
-def sleep(left, right, speed=0):
-    left.set_speed(speed)
-    right.set_speed(speed)
+def sleep(left, right):
+    left.set_speed(0)
+    right.set_speed(0)
 
 def main():
     left_motor = Motor(0, 0, 1)
