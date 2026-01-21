@@ -43,17 +43,43 @@ class STS3215:
         data = int(speed).to_bytes(2, 'little')
         self.write_reg(servo_id, 0x2E, data)
 
+
+def grab(servo):
+    servo.move_to_position(1, 1800)
+    servo.move_to_position(2, 2400)
+    servo.move_to_position(3, 4000)
+    time.sleep(1)
+    servo.move_to_position(3, 3300)
+    time.sleep(1)
+    servo.move_to_position(1, 2600)
+    servo.move_to_position(2, 2500)
+    servo.move_to_position(3, 3300)
+
+def release(servo):
+    servo.move_to_position(3, 3700)
+
+
 def main():
     # 实例化，注意波特率必须与系统设置及电机设置一致
     servo = STS3215("/dev/ttyS2", baudrate=115200)
 
-    servo_id = 1
+    servo.set_speed(1, 1500)
+    servo.set_speed(2, 1500)
+    servo.set_speed(3, 1500)
 
-    servo.set_speed(servo_id, 1000)
+    # grab(servo)
 
-    # 单舵机阻塞动作
-    servo.move_to_position(servo_id, 1000)
-    time.sleep(1)
+    # release(servo)
+
+    # 初始位置
+    # servo.move_to_position(1, 2600)
+    # servo.move_to_position(2, 2500)
+    # servo.move_to_position(3, 3000)
+
+    # 夹取位置
+    # servo.move_to_position(1, 1800)
+    # servo.move_to_position(2, 2500)
+    # servo.move_to_position(3, 4000)
 
 if __name__ == '__main__':
     main()
