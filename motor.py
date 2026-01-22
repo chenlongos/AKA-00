@@ -2,21 +2,34 @@ import time
 from periphery import PWM
 
 # 配置常量
-PERIOD_NS = 10000
+CHIP_CONFIGS = {
+    'sg2002' : {'period_ns': 10000},
+    'rk3588' : {'period_ns': 500000}
+}
 
 class Motor:
-    def __init__(self, chip, ch1, ch2):
+    def __init__(self, chip, ch1, ch2, chip_type='sg2002'):
         # 硬件初始化
-        self.pwm1 = PWM(chip, ch1)
-        self.pwm2 = PWM(chip, ch2)
+        self.chip_type = chip_type
+        self.period_ns = CHIP_CONFIGS[chip_type]['period_ns']
+
+        if chip_type == 'sg2002':
+            self.pwm1 = PWM(chip, ch1)
+            self.pwm2 = PWM(chip, ch2)
+        elif chip_type == 'rk3588':
+            self.pwm1 = PWM(chip, 0)
+            self.pwm2 = PWM(ch1, 0)
+        else:
+            raise ValueError(f"Unsupported chip type: {chip_type}")
+        
         for p in (self.pwm1, self.pwm2):
-            p.period_ns = PERIOD_NS
-            p.duty_cycle_ns = 5000
+            p.period_ns = self.period_ns
+            p.duty_cycle_ns = self.period_ns // 2
             p.enable()
 
     def set_speed(self, speed):
         speed = max(-255, min(255, speed))
-        duty = int(abs(speed) * PERIOD_NS // 255)
+        duty = int(abs(speed) * self.period_ns // 255)
         if speed == 0:
             self.pwm1.duty_cycle_ns = 0
             self.pwm2.duty_cycle_ns = 0
@@ -28,7 +41,7 @@ class Motor:
             self.pwm2.duty_cycle_ns = duty
 
     def brake(self, val=255):
-        duty = int(val * PERIOD_NS // 255)
+        duty = int(val * self.period_ns // 255)
         self.pwm1.duty_cycle_ns = duty
         self.pwm2.duty_cycle_ns = duty
 
@@ -53,13 +66,17 @@ def bread(left, right):
     left.brake()
     right.brake()
 
-def sleep(left, right):
-    left.set_speed(0)
-    right.set_speed(0)
+def sleep(left, right, speed=0):
+    left.set_speed(speed)
+    right.set_speed(speed)
 
 def main():
-    left_motor = Motor(0, 0, 1)
-    right_motor = Motor(4, 2, 3)
+    # sg2002
+    # left_motor = Motor(0, 0, 1) 
+    # right_motor = Motor(4, 2, 3) 
+    # rk3588
+    left_motor = Motor(0, 1, 0, chip_type='rk3588')      # (pin5, pin3)
+    right_motor = Motor(4, 5, 0, chip_type='rk3588')     # (pin16, pin18)
 
     print("前进")
     forward(left_motor, right_motor, 500)
