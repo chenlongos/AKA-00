@@ -2,12 +2,17 @@ import time
 
 from flask import Flask, request, jsonify, render_template
 
+from arm import STS3215, grab, release
 from motor import Motor, forward, backward, turn_left, turn_right, sleep, bread
 
 left_motor = Motor(4, 0, 1)
 right_motor = Motor(4, 2, 3)
 
 app = Flask(__name__)
+servo = STS3215("/dev/ttyS2", baudrate=115200)
+servo.set_speed(1, 1500)
+servo.set_speed(2, 1500)
+servo.set_speed(3, 1500)
 
 @app.route('/')
 def index():
@@ -31,6 +36,10 @@ def control():
         turn_right(left_motor, right_motor, speed)
     elif action == 'stop':
         bread(left_motor, right_motor)
+    elif action == 'grab':
+        grab(servo)
+    elif action == 'release':
+        release(servo)
 
     if milliseconds > 0 and action in ['up', 'down', 'left', 'right']:
         time.sleep(milliseconds / 1000.0)
