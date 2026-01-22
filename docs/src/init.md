@@ -48,6 +48,14 @@ ps | grep avahi
 为
 <主机名>-<冲突后缀>.local
 
+修改 /etc/hosts和 /etc/hostname
+
+修改/etc/avahi/下的
+avahi-daemon.conf
+
+之后kill avahi的pid
+之后 avahi-daemon -D
+
 7. 生成证书
 ```shell
 openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
