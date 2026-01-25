@@ -55,13 +55,34 @@ class STS3215:
         data = int(torque).to_bytes(1, 'little')
         self.write_reg(servo_id, 0x24, data)
 
+    def set_operating_mode(self, servo_id, mode):
+        data = int(mode).to_bytes(1, 'little')
+        self.write_reg(servo_id, 0x21, data)
+
+    def set_p_coefficient(self, servo_id, mode):
+        data = int(mode).to_bytes(1, 'little')
+        self.write_reg(servo_id, 0x15, data)
+
+    def set_i_coefficient(self, servo_id, mode):
+        data = int(mode).to_bytes(1, 'little')
+        self.write_reg(servo_id, 0x17, data)
+
+    def set_d_coefficient(self, servo_id, mode):
+        data = int(mode).to_bytes(1, 'little')
+        self.write_reg(servo_id, 0x16, data)
+
 def arm_init(servo):
-    servo.set_speed(1, 1500)
-    servo.set_speed(2, 1500)
-    servo.set_speed(3, 1500)
-    servo.set_max_torque_limit(3, 500)
-    servo.set_protection_current(3, 250)
-    servo.set_overload_torque(3, 25)
+    for i in range(1,4):
+        servo.set_operating_mode(i, 0)
+        servo.set_speed(i, 1500)
+        servo.set_p_coefficient(i, 16)
+        servo.set_i_coefficient(i, 0)
+        servo.set_d_coefficient(i, 32)
+
+        if i == 3:
+            servo.set_max_torque_limit(i, 500)
+            servo.set_protection_current(i, 250)
+            servo.set_overload_torque(i, 25)
 
 def grab(servo):
     servo.move_to_position(1, 1800)
@@ -82,12 +103,7 @@ def main():
     # 实例化，注意波特率必须与系统设置及电机设置一致
     servo = STS3215("/dev/ttyS2", baudrate=115200)
 
-    servo.set_speed(1, 1500)
-    servo.set_speed(2, 1500)
-    servo.set_speed(3, 1500)
-    servo.set_max_torque_limit(3, 500)
-    servo.set_protection_current(3, 250)
-    servo.set_overload_torque(3, 25)
+    arm_init(servo)
 
     # grab(servo)
 
