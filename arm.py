@@ -43,6 +43,25 @@ class STS3215:
         data = int(speed).to_bytes(2, 'little')
         self.write_reg(servo_id, 0x2E, data)
 
+    def set_max_torque_limit(self, servo_id, torque):
+        data = int(torque).to_bytes(2, 'little')
+        self.write_reg(servo_id, 0x10, data)
+
+    def set_protection_current(self, servo_id, torque):
+        data = int(torque).to_bytes(2, 'little')
+        self.write_reg(servo_id, 0x40, data)
+
+    def set_overload_torque(self, servo_id, torque):
+        data = int(torque).to_bytes(1, 'little')
+        self.write_reg(servo_id, 0x24, data)
+
+def arm_init(servo):
+    servo.set_speed(1, 1500)
+    servo.set_speed(2, 1500)
+    servo.set_speed(3, 1500)
+    servo.set_max_torque_limit(3, 500)
+    servo.set_protection_current(3, 250)
+    servo.set_overload_torque(3, 25)
 
 def grab(servo):
     servo.move_to_position(1, 1800)
@@ -66,6 +85,9 @@ def main():
     servo.set_speed(1, 1500)
     servo.set_speed(2, 1500)
     servo.set_speed(3, 1500)
+    servo.set_max_torque_limit(3, 500)
+    servo.set_protection_current(3, 250)
+    servo.set_overload_torque(3, 25)
 
     # grab(servo)
 
