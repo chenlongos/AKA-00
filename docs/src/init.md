@@ -16,7 +16,7 @@ echo "nameserver 8.8.8.8" > /etc/resolv.conf
 2. 安装依赖
 
 ```python
-pip install -r requirements.txt
+# pip install -r requirements.txt
 ```
 
 5. 运行程序
@@ -30,17 +30,8 @@ python3 car_control_server.py
 nohup python3 car_control_server.py > app.log 2>&1 &
 ```
 
-6. 开机自启动脚本
+6. mDNS配置(暂没实现)
 
-在 /etc/init.d下新建配置文件 S99appinit
-
-输入
-
-```shell
-
-```
-
-6. mDNS配置
 sg2002 内置支持了avahi，用
 ```shell
 ps | grep avahi
