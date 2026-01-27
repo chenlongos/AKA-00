@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>SG2002 小车控制</title>
+    <title>AKA-00机器人控制</title>
     <style>
         body { font-family: sans-serif; text-align: center; background: #f0f0f0; touch-action: manipulation; }
         .container { display: grid; grid-template-columns: repeat(3, 100px); grid-gap: 15px; justify-content: center; margin-top: 50px; }
@@ -20,7 +20,8 @@
     </style>
 </head>
 <body>
-    <h2>SG2002 机器人控制</h2>
+    <h2>AKA-00机器人控制</h2>
+    <h3 id="ip">IP: 获取中...</h3>
 
     <div class="container">
         <div style="grid-column: 2;"><button onclick="send('up')">前进</button></div>
@@ -38,6 +39,9 @@
     <div class="status" id="status">准备就绪</div>
 
     <script>
+        window.onload = function() {
+            get_ip();
+        };
         function send(action) {
             const statusDiv = document.getElementById('status');
             statusDiv.innerText = "执行: " + action;
@@ -49,6 +53,31 @@
                     statusDiv.innerText = "错误: " + err;
                 });
         }
+        function get_ip(action = "") {
+            // 可选：显示状态
+            const statusDiv = document.getElementById("status");
+            if (statusDiv) {
+                statusDiv.innerText = "获取 IP";
+            }
+
+            fetch("/ip")
+                .then(res => res.json())
+                .then(data => {
+                    console.log("device ip:", data.ip);
+
+                // 页面显示
+                const ipDiv = document.getElementById("ip");
+                if (ipDiv) {
+                    ipDiv.innerText = "IP: " + data.ip;
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                if (statusDiv) {
+                    statusDiv.innerText = "获取 IP 失败";
+                }
+        });
+}
     </script>
 </body>
 </html>

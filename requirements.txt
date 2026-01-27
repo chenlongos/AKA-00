@@ -1,4 +1,3 @@
 pyserial
 python-periphery
 flask
-python-st3215
