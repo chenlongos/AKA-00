@@ -1,7 +1,6 @@
 import serial
 import time
 
-
 class STS3215:
     def __init__(self, port="/dev/ttyS2", baudrate=115200):  # 已修改为115200
         self.ser = serial.Serial(
