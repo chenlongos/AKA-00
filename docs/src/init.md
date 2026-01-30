@@ -111,3 +111,27 @@ exit 0
 ```
 app::sysinit:/etc/init.d/appinit start
 ```
+
+9. 网络配置
+
+```shell
+ctrl_interface=/var/run/wpa_supplicant
+ap_scan=1
+
+network={
+  ssid="wifi名"
+  psk="wifi密码"
+  priority=8
+}
+
+network={
+  ssid="BoBoPhone"
+  psk="********"
+  priority=5
+}
+
+network={
+  key_mgmt=NONE
+  priority=1
+}
+```
