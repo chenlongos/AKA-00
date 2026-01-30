@@ -79,12 +79,14 @@ def arm_init(servo):
         servo.set_i_coefficient(i, 0)
         servo.set_d_coefficient(i, 32)
 
-        if i == 3:
+        if i == 3 or i == 1:
             servo.set_max_torque_limit(i, 500)
             servo.set_protection_current(i, 250)
             servo.set_overload_torque(i, 25)
 
 def grab(servo):
+    servo.move_to_position(3, 4000)
+    time.sleep(0.7)
     servo.move_to_position(1, 1800)
     servo.move_to_position(2, 2400)
     servo.move_to_position(3, 4000)
