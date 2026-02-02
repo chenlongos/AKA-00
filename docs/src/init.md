@@ -1,137 +1,136 @@
 1. 连接网络
-方式一、通过wifi直接连接网络
 
-方式二、在win上，通过usb共享网络之后进行一些配置
-```shell
-ip addr flush dev usb0
-ip addr add 192.168.137.100/24 dev usb0
-ip link set usb0 up
+    方式一、通过wifi直接连接网络
 
-ip route del default
-ip route add default via 192.168.137.1
+    方式二、在win上，通过usb共享网络之后进行一些配置
+    ```shell
+    ip addr flush dev usb0
+    ip addr add 192.168.137.100/24 dev usb0
+    ip link set usb0 up
 
-echo "nameserver 8.8.8.8" > /etc/resolv.conf
-```
+    ip route del default
+    ip route add default via 192.168.137.1
+
+    echo "nameserver 8.8.8.8" > /etc/resolv.conf
+    ```
 
 2. 安装依赖
 
-```python
-# pip install -r requirements.txt
-```
+    ```python
+    pip install -r requirements.txt
+    ```
 
-5. 运行程序
+3. 运行程序
 
-```python
-python3 car_control_server.py
-```
+    ```python
+    python3 car_control_server.py
 
-后台启动##
-```python
-nohup python3 car_control_server.py > app.log 2>&1 &
-```
+    # 后台启动
+    nohup python3 car_control_server.py > app.log 2>&1 &
+    ```
 
-6. mDNS配置(暂没实现)
+4. mDNS配置(暂没实现)
 
-sg2002 内置支持了avahi，用
-```shell
-ps | grep avahi
-```
-可以发现
-```shell
-470 avahi avahi-daemon: running [licheervnano-366e.local]
-```
-为
-<主机名>-<冲突后缀>.local
+    sg2002 内置支持了avahi，用
+    ```shell
+    ps | grep avahi
+    ```
+    可以发现
+    ```shell
+    470 avahi avahi-daemon: running [licheervnano-366e.local]
+    ```
+    为
+    <主机名>-<冲突后缀>.local
 
-修改 /etc/hosts和 /etc/hostname
+    修改 /etc/hosts和 /etc/hostname
 
-修改/etc/avahi/下的
-avahi-daemon.conf
+    修改/etc/avahi/下的
+    avahi-daemon.conf
 
-之后kill avahi的pid
-之后 avahi-daemon -D
+    之后kill avahi的pid
+    之后 avahi-daemon -D
 
-7. 生成证书
-```shell
-openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 3650 -nodes
-```
+5. 生成证书
 
-# 无交互生成自签名证书，有效期10年（3650天）
-openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 3650 -nodes -subj "/C=CN/ST=Beijing/L=Beijing/O=MyOrg/OU=MyDept/CN=localhost"
+    ```shell
+    openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 3650 -nodes
 
-8. 开机自启动
+    # 无交互生成自签名证书，有效期10年（3650天）
+    openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 3650 -nodes -subj "/C=CN/ST=Beijing/L=Beijing/O=MyOrg/OU=MyDept/CN=localhost"
+    ```
+6. 开机自启动
 
-在/etc/init.d 文件中 添加 一个appinit文件，输入
+    在/etc/init.d 文件中 添加 一个appinit文件，输入
 
-```shell
-#!/bin/sh
-# 程序路径
-APP_PATH="/root/AKA-00"
-# 程序运行用户（一般嵌入式用 root）
-RUN_USER="root"
+    ```shell
+    #!/bin/sh
+    # 程序路径
+    APP_PATH="/root/AKA-00"
+    # 程序运行用户（一般嵌入式用 root）
+    RUN_USER="root"
 
-# 启动函数
-start() {
-	chmod +x /root/AKA-00/init.sh
-	/root/AKA-00/init.sh
-}
+    # 启动函数
+    start() {
+        chmod +x /root/AKA-00/init.sh
+        /root/AKA-00/init.sh
+    }
 
-# 停止函数（可选，便于手动管理）
-stop() {}
+    # 停止函数（可选，便于手动管理）
+    stop() {}
 
-# 重启函数（可选）
-restart() {
-    stop
-    sleep 1
-    start
-}
-
-# 脚本参数处理
-case "$1" in
-    start)
-        start
-        ;;
-    stop)
+    # 重启函数（可选）
+    restart() {
         stop
-        ;;
-    restart)
-        restart
-        ;;
-    *)
-        echo "Usage: $0 {start|stop|restart}"
-        exit 1
-        ;;
-esac
+        sleep 1
+        start
+    }
 
-exit 0
-```
+    # 脚本参数处理
+    case "$1" in
+        start)
+            start
+            ;;
+        stop)
+            stop
+            ;;
+        restart)
+            restart
+            ;;
+        *)
+            echo "Usage: $0 {start|stop|restart}"
+            exit 1
+            ;;
+    esac
 
-之后在 /etc/inittab 中加入一行，就可以开机自启动，代码要放在AKA-00下
+    exit 0
+    ```
 
-```
-app::sysinit:/etc/init.d/appinit start
-```
+    之后在 /etc/inittab 中加入一行，就可以开机自启动，代码要放在AKA-00下
 
-9. 网络配置
+    ```
+    app::sysinit:/etc/init.d/appinit start
+    ```
 
-```shell
-ctrl_interface=/var/run/wpa_supplicant
-ap_scan=1
+7. 网络配置
 
-network={
-  ssid="wifi名"
-  psk="wifi密码"
-  priority=8
-}
+    ```shell
+    ctrl_interface=/var/run/wpa_supplicant
+    ap_scan=1
 
-network={
-  ssid="BoBoPhone"
-  psk="********"
-  priority=5
-}
+    network={
+    ssid="wifi名"
+    psk="wifi密码"
+    priority=8
+    }
 
-network={
-  key_mgmt=NONE
-  priority=1
-}
-```
+    network={
+    ssid="BoBoPhone"
+    psk="********"
+    priority=5
+    }
+
+    network={
+    key_mgmt=NONE
+    priority=1
+    }
+    ```
