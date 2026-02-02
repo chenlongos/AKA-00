@@ -62,7 +62,7 @@ def turn_right(left, right, speed=255):
     left.set_speed(-speed)
     right.set_speed(speed)
 
-def bread(left, right):
+def brake(left, right):
     left.brake()
     right.brake()
 
@@ -94,7 +94,7 @@ def main():
     forward(left_motor, right_motor, 500)
     time.sleep(2)
     print("刹车")
-    bread(left_motor, right_motor)
+    brake(left_motor, right_motor)
     time.sleep(2)
     print("前进")
     forward(left_motor, right_motor, 500)
