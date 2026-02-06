@@ -38,6 +38,12 @@
 
     <div class="status" id="status">准备就绪</div>
 
+    <div onclick="redirect()">
+        <button id="jump-btn" style="margin-top: 20px; background: #9C27B0; box-shadow: 0 4px #7B1FA2; width: 140px; height: 100px; font-size: 14px;">
+            点击进入实训平台
+        </button>
+    </div>
+
     <script>
         window.onload = function() {
             get_ip();
@@ -76,8 +82,26 @@
                 if (statusDiv) {
                     statusDiv.innerText = "获取 IP 失败";
                 }
-        });
-}
+            });
+        }
+        function redirect() {
+            const statusDiv = document.getElementById("status");
+            if (statusDiv) {
+                statusDiv.innerText = "获取 IP";
+            }
+            fetch("/ip")
+                .then(res => res.json())
+                .then(data => {
+                    const ip = data.ip;
+                    const targetUrl = "https://ai.maodouketang.cn/";
+                    const fullUrl = `${targetUrl}?ip=${encodeURIComponent(ip)}`;
+                    window.location.replace(fullUrl);
+            }).catch(err => {
+                console.error("跳转失败:", err);
+                statusDiv.innerText = "跳转失败";
+                alert("无法获取IP，请稍后重试");
+            });
+        }
     </script>
 </body>
 </html>
