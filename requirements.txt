@@ -1,3 +1,6 @@
 pyserial
 python-periphery
 flask
+torch
+accelerate
+einops
