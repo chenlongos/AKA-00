@@ -7,7 +7,7 @@ import time
 from flask import Flask, request, jsonify, render_template
 
 from arm import STS3215, grab, release, arm_init
-from motor import Motor, forward, backward, turn_left, turn_right, sleep, bread
+from motor import Motor, forward, backward, turn_left, turn_right, sleep, brake
 
 left_motor = Motor(4, 0, 1)
 right_motor = Motor(4, 2, 3)
@@ -54,7 +54,7 @@ def control():
     elif action == 'right':
         turn_right(left_motor, right_motor, speed)
     elif action == 'stop':
-        bread(left_motor, right_motor)
+        brake(left_motor, right_motor)
     elif action == 'grab':
         grab(servo)
     elif action == 'release':
