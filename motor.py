@@ -72,7 +72,7 @@ def sleep(left, right, speed=0):
 
 def main():
     # sg2002
-    # left_motor = Motor(0, 0, 1) 
+    # left_motor = Motor(4, 0, 1)
     # right_motor = Motor(4, 2, 3) 
     # rk3588
     left_motor = Motor(0, 1, 0, chip_type='rk3588')      # (pin5, pin3)
