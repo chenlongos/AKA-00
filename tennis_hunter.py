@@ -1,11 +1,11 @@
 import cv2
-import os, time
+import os, time, logging
 from datetime import datetime
-from enum import Enum
 import json
 import numpy as np
-from arm import STS3215, grab, release as arm_release, arm_init
-from motor import Motor, forward, backward, turn_left, turn_right, sleep, brake
+from dataclasses import dataclass, field
+from arm import STS3215, grab1, grab_pos, release as arm_release, release_pos, arm_init
+from motor import Motor, forward, backward, turn_left, turn_right,forward_left, forward_right, sleep as motor_sleep, brake
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 IMAGE_DIR = os.path.abspath(os.path.join(BASE_DIR, '.', 'images'))
@@ -13,6 +13,13 @@ OUTPUT_DIR = os.path.join(BASE_DIR, 'output')
 OUTPUT_JSON = os.path.join(BASE_DIR, 'output_results.json')
 OUTPUT_IMG_DIR = os.path.join(BASE_DIR, 'output', 'images') 
 HARDWARE_MODE = 'rk3588'   # cpu, rk3588
+
+# 日志级别
+logging.basicConfig(
+    level = logging.INFO, 
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
 if HARDWARE_MODE == 'cpu':
     import onnxruntime as ort
 elif HARDWARE_MODE == 'rk3588':
@@ -20,18 +27,6 @@ elif HARDWARE_MODE == 'rk3588':
     rknn = RKNN()
 else:
     raise ValueError(f"不支持的硬件模式: {HARDWARE_MODE}")
-
-img_size = 640
-CROP_SIZE = 120
-fast_speed = 120  # max:240
-normal_speed = 30  # max:240
-slow_speed = 40  # max:240
-scanning_speed = 60  # max:240
-max_speed = 240
-
-class RobotStatus(Enum):
-    FIND_TENNIS = "find_tennis"
-    FIND_BUCKET = "find_bucket"
 
 # 初始化模型
 if HARDWARE_MODE == 'cpu':
@@ -43,20 +38,7 @@ elif HARDWARE_MODE == 'rk3588':
     rknn.load_rknn(MODEL_PATH)
     rknn.init_runtime(target='rk3588')
 
-# 初始化机械臂
-servo = STS3215("/dev/ttyACM0", baudrate=115200)
-arm_init(servo)
-
-# 初始化车轮
-left_motor = Motor(0, 1, 0, chip_type='rk3588')
-right_motor = Motor(4, 5, 0, chip_type='rk3588')
-sleep(left_motor, right_motor)
-
-def timestamp():
-    now = datetime.now()
-    return now.strftime("%Y-%m-%d %H:%M:%S") + f".{now.microsecond // 1000:03d}"
-
-def letterbox(img, new_shape=(img_size, img_size), color=(114, 114, 114)):
+def letterbox(img, new_shape=(640, 640), color=(114, 114, 114)):
     """
     YOLOv8 官方预处理函数，保持宽高比 resize + center pad
     """
@@ -74,11 +56,13 @@ def letterbox(img, new_shape=(img_size, img_size), color=(114, 114, 114)):
     return img
 
 def yolo_infer(img_or_frame):
+    img_size = 640
+
     if isinstance(img_or_frame, str):
         # 输入是图像路径
         orig_img = cv2.imread(img_or_frame)
         if orig_img is None:
-            print(f" 无法读取图像: {img_or_frame}")
+            logging.warning(f" 无法读取图像: {img_or_frame}")
             return []
     else:
         # 输入是视频帧（ndarray）
@@ -100,12 +84,12 @@ def yolo_infer(img_or_frame):
     mask = conf_scores > 0.25
 
     # dbg:
-    # print("ONNX Output Shape:", pred.shape)
+    # logging.debug(f"ONNX Output Shape: {pred.shape})
     # dbg_max_scores = np.max(pred[:, 4:], axis=1)
-    # print("ONNX Max Scores Top 10:", np.sort(dbg_max_scores)[-10:])
-    # print(f"Raw output shape: {outputs[0].shape}")
-    # print(f"Pred shape after processing: {pred.shape}")
-    # print(f"Sample confidence: {conf_scores[:5]}")
+    # logging.debug(f"ONNX Max Scores Top 10: {np.sort(dbg_max_scores)[-10:]})
+    # logging.debug(f"Raw output shape: {outputs[0].shape}")
+    # logging.debug(f"Pred shape after processing: {pred.shape}")
+    # logging.debug(f"Sample confidence: {conf_scores[:5]}")
 
     pred = pred[mask]
     boxes_xywh = boxes_xywh[mask]
@@ -115,8 +99,7 @@ def yolo_infer(img_or_frame):
     raw_boxes = []
     for i in range(len(boxes_xywh)):
         cx, cy, w, h = boxes_xywh[i]
-        # letterbox 预处理后，坐标无需复杂的 pad/scale 反推
-        # 因为我们知道 letterbox 的 pad 参数，可以精确还原
+        #  使用letterbox 的 pad 参数精确还原
         shape = orig_img.shape[:2]
         r = min(img_size / shape[0], img_size / shape[1])
         new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))
@@ -160,6 +143,20 @@ def release():
         rknn.release()
     # 其它硬件无 release 操作
 
+def show_box(frame, result):
+    if HARDWARE_MODE != "cpu":
+        return
+    
+    for box in result:
+        x, y, w, h = box.x, box.y, box.w, box.h
+        center_x = x + w // 2
+        center_y = y + h // 2
+        pt1, pt2 = (x, y), (x + w, y + h)
+        cv2.rectangle(frame, pt1, pt2, (0, 255, 0), 2)
+        cv2.circle(frame, (center_x, center_y), 5, (0, 0, 255), -1)
+
+    cv2.imshow("frame", frame)
+
 def get_red_bucket_local(frame):
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
@@ -184,104 +181,215 @@ def get_red_bucket_local(frame):
 
     return boxes
 
+@dataclass
+class Robot:
+    CROP_SIZE = 80
+    X_LEFT_GRAB = 216
+    X_RIGHT_GRAB = 256
+    TENNIS_WIDTH_FAR = 310
+    TENNIS_WIDTH_NEAR = 390
+    MAX_SPEED = 240
+    status: str = "chase_tennis" # 机器人状态: chase_tennis, chase_bucket, grab_tennis, position_tennis, release_tennis
+    prev_status: str = ""
+    box_cur_width: int = 0
+    move_direction: str = "stop"  # 机器人移动方向: left, right, forward, backward, stop
+    fast_speed = MAX_SPEED // 2     # 120
+    normal_speed = MAX_SPEED // 4   # 60
+    slow_speed = MAX_SPEED // 8     # 30
+    aiming_speed = MAX_SPEED // 8  # 30
+    scanning_tennis = MAX_SPEED // 4  # 60
+    scanning_bucket = MAX_SPEED // 3    # 80
+    speed: int = normal_speed   # 机器人移动速度: max, fast, normal, slow, aiming, scanning
+    grab_confirm_count = 0
+
+    servo: STS3215 = field(init=False)
+    left_motor: Motor = field(init=False)
+    right_motor: Motor = field(init=False)
+
+    def __post_init__(self):
+        # 初始化机械臂
+        self.servo = STS3215("/dev/ttyACM0", baudrate=115200)
+        arm_init(self.servo)
+        grab_pos(self.servo)
+
+        # 初始化车轮
+        self.left_motor = Motor(0, 1, 0, chip_type='rk3588')
+        self.right_motor = Motor(4, 5, 0, chip_type='rk3588')
+        motor_sleep(self.left_motor, self.right_motor)
+
+    def update_status(self):
+        if self.status == "chase_tennis":
+            if self.move_direction == "stop":
+                self.status = "position_tennis"
+                self.prev_status = "chase_tennis" 
+        elif self.status == "position_tennis":
+            if self.move_direction == "stop":
+                self.status = "grab_tennis"
+                self.prev_status = "position_tennis"
+            elif not self.TENNIS_WIDTH_FAR < self.box_cur_width < self.TENNIS_WIDTH_NEAR:
+                self.status = "chase_tennis"
+                self.prev_status = "position_tennis"
+        elif self.status == "chase_bucket" and self.box_cur_width >= 640:
+            self.status = "release_tennis"
+            self.prev_status = "chase_bucket"
+
+    def set_direction_speed(self, width, result):
+        result_sorted = sorted(result, key=lambda x: x['w'], reverse=True)
+        box = result_sorted[0]
+        x, y, w, h = box["x"], box["y"], box["w"], box["h"]
+        self.box_cur_width = w
+        logging.info("x,y,w,h: %d,%d,%d,%d", x, y, w, h)
+
+        # position_tennis: just slow turn
+        if self.status == "position_tennis":
+            brake(self.left_motor, self.right_motor)
+            if x < self.X_LEFT_GRAB:
+                self.move_direction = "left"
+                self.speed = self.aiming_speed
+            elif x > self.X_RIGHT_GRAB:
+                self.move_direction = "right"
+                self.speed = self.aiming_speed
+            else:
+                self.move_direction = "stop"    # at grab position
+                self.speed = 0
+            return
+
+        left_find = (width - self.CROP_SIZE) // 2
+        right_find = left_find + self.CROP_SIZE
+        left = max(0, left_find)
+        right = min(width, right_find)
+        center_x = x + w // 2
+
+        # chase_tennis and chase_bucket: set speed
+        if self.status == "chase_tennis":
+            if w < self.TENNIS_WIDTH_FAR * 0.4:
+                self.speed = self.MAX_SPEED
+            elif w < self.TENNIS_WIDTH_FAR * 0.5:
+                self.speed = self.fast_speed
+            elif w < self.TENNIS_WIDTH_FAR * 0.7:
+                self.speed = self.normal_speed
+            else:
+                self.speed = self.slow_speed
+        elif self.status == "chase_bucket":
+            self.speed = self.MAX_SPEED
+        else:
+            self.speed = 0
+        
+        # chase_tennis and chase_bucket: set direction
+        if center_x < left and not self.TENNIS_WIDTH_FAR < w < self.TENNIS_WIDTH_NEAR:
+            self.move_direction = "left"
+        elif center_x > right and not self.TENNIS_WIDTH_FAR < w < self.TENNIS_WIDTH_NEAR:
+            self.move_direction = "right"
+        elif not self.status == "chase_bucket" and w > self.TENNIS_WIDTH_NEAR:
+            self.move_direction = "backward"
+        elif not self.status == "chase_bucket" and w < self.TENNIS_WIDTH_FAR:
+            self.move_direction = "forward"
+        elif self.status == "chase_bucket" and w < width :
+            self.move_direction = "forward"
+        else:
+            self.move_direction = "stop"    # need change to positon_tennis
+            self.speed = 0
+
+    def move(self):
+        self.grab_confirm_count = 0
+        if self.move_direction == "left":
+            if not self.status == "chase_bucket" and self.box_cur_width > self.TENNIS_WIDTH_FAR * 0.7:
+                turn_left(self.left_motor, self.right_motor, self.aiming_speed)
+            elif self.status == "chase_bucket" and self.box_cur_width > 640 * 0.7:
+                turn_left(self.left_motor, self.right_motor, self.scanning_bucket)
+            else:
+                forward_left(self.left_motor, self.right_motor, self.speed)
+        elif self.move_direction == "right":
+            if not self.status == "chase_bucket" and self.box_cur_width > self.TENNIS_WIDTH_FAR * 0.7:
+                turn_right(self.left_motor, self.right_motor, self.aiming_speed)
+            elif self.status == "chase_bucket" and self.box_cur_width > 640 * 0.7:
+                turn_right(self.left_motor, self.right_motor, self.scanning_bucket)
+            else:
+                forward_right(self.left_motor, self.right_motor, self.speed)
+        elif self.move_direction == "forward":
+            forward(self.left_motor, self.right_motor, self.speed)
+        elif self.move_direction == "backward":
+            backward(self.left_motor, self.right_motor, self.speed)
+        else:
+            brake(self.left_motor, self.right_motor)
+
+    def grab_tennis(self):
+        if self.status == "grab_tennis":
+            brake(self.left_motor, self.right_motor)
+            self.grab_confirm_count += 1
+            if self.grab_confirm_count >= 10:
+                grab1(self.servo)
+                self.grab_confirm_count = 0
+                self.prev_status = "grab_tennis"
+                time.sleep(1)
+                pos_servo3 = self.servo.get_position(3)
+                if pos_servo3 == None or pos_servo3 < 3050:
+                    grab_pos(self.servo)
+                    backward(self.left_motor, self.right_motor, self.fast_speed)
+                    time.sleep(0.5)
+                    self.status = "chase_tennis"
+                    return
+                backward(self.left_motor, self.right_motor, self.fast_speed)
+                time.sleep(1)
+                self.status = "chase_bucket"
+                release_pos(self.servo)
+
+    def release_tennis(self):
+        if self.status == "release_tennis":
+            brake(self.left_motor, self.right_motor)
+            arm_release(self.servo)
+            time.sleep(1)
+            backward(self.left_motor, self.right_motor, self.fast_speed)
+            time.sleep(2)
+            self.status = "chase_tennis"
+            self.prev_status = "release_tennis"
+            grab_pos(self.servo)
+
+    def idle(self):
+        self.grab_confirm_count = 0
+        if self.status == "chase_bucket":
+            turn_left(self.left_motor, self.right_motor, self.scanning_bucket)
+        elif self.prev_status in ("chase_tennis", "position_tennis"):
+            backward(self.left_motor, self.right_motor, self.normal_speed)
+            time.sleep(0.5)
+        else:
+            turn_right(self.left_motor, self.right_motor, self.scanning_tennis)
+
 def main_v():
-    print("正在打开摄像头...")
+    logging.info("正在打开摄像头...")
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         raise IOError("无法打开摄像头")
     
-    current_status = RobotStatus.FIND_TENNIS
-    std_width = 385
-    pos_confirm_count = 0
+    robot = Robot()
 
     while True:
         ret, frame = cap.read()
         height, width = frame.shape[:2]
 
-        left_tennis = 440 - CROP_SIZE // 2
-        right_tennis = left_tennis + CROP_SIZE
-        left_bucket = (width - CROP_SIZE) // 2
-        right_bucket = left_bucket + CROP_SIZE
+        logging.debug(f" 解算开始")
+        if robot.status == "chase_bucket":
+            result = get_red_bucket_local(frame)
+        else:
+            result = yolo_infer(frame)
+        logging.debug(f" 解算完成")
 
-        left_tennis = max(0, left_tennis)
-        right_tennis = min(width, right_tennis)
-        left_bucket = max(0, left_bucket)
-        right_bucket = min(width, right_bucket)
+        if result and len(result) > 0:
+            robot.update_status()
+            logging.info(f"update_status, status: {robot.status}")
+            robot.set_direction_speed(width, result)
+            logging.info(f"set_direction_speed, direction, speed: {robot.move_direction}, {robot.speed}")
+        else:
+            logging.info("idle")
+            robot.idle()
+            continue
 
-        if current_status == RobotStatus.FIND_TENNIS:
-            left = left_tennis
-            right = right_tennis
-        elif current_status == RobotStatus.FIND_BUCKET:
-            left = left_bucket
-            right = right_bucket
-
-        try:
-            print(f" 解算开始, 时间戳: {timestamp()}")
-            if current_status == RobotStatus.FIND_TENNIS:
-                result = yolo_infer(frame)
-            elif current_status == RobotStatus.FIND_BUCKET:
-                result = get_red_bucket_local(frame)
-            print(f" 解算完成, 时间戳: {timestamp()}")
-
-            if result and len(result) > 0:
-                box = result[0]
-                x, y, w, h = box["x"], box["y"], box["w"], box["h"]
-                w = max(w, h)
-                print("x,y,w,h: ",x,y,w,h)
-                center_x = x + w // 2
-                if center_x < left :
-                    print(" 慢速左转")
-                    pos_confirm_count = 0
-                    if current_status == RobotStatus.FIND_TENNIS :
-                        turn_left(left_motor, right_motor, slow_speed)
-                    else:
-                        turn_left(left_motor, right_motor, scanning_speed) 
-                elif center_x > right :
-                    print(" 慢速右转")
-                    pos_confirm_count = 0
-                    if current_status == RobotStatus.FIND_TENNIS :
-                        turn_right(left_motor, right_motor, slow_speed)
-                    else:
-                        turn_right(left_motor, right_motor, scanning_speed)
-                elif w > (std_width * 0.95) and current_status == RobotStatus.FIND_TENNIS :
-                    print(" 普速后退")
-                    pos_confirm_count = 0
-                    backward(left_motor, right_motor, normal_speed)
-                elif w < (std_width * 0.85) and current_status == RobotStatus.FIND_TENNIS :
-                    pos_confirm_count = 0
-                    if w < (std_width * 0.7) :
-                        print(" 快速前进")
-                        forward(left_motor, right_motor, fast_speed)
-                    else :
-                        print(" 普速前进")
-                        forward(left_motor, right_motor, normal_speed)
-                elif w < 640 and current_status == RobotStatus.FIND_BUCKET :
-                    print("红桶太远")
-                    forward(left_motor, right_motor, max_speed)
-                else:
-                    if current_status == RobotStatus.FIND_TENNIS:
-                        print("抓取网球:", pos_confirm_count )
-                        brake(left_motor, right_motor)
-                        pos_confirm_count += 1
-                        if pos_confirm_count >= 10:
-                            grab(servo)
-                            time.sleep(2)
-                            current_status = RobotStatus.FIND_BUCKET
-                    else:
-                        print("释放网球")
-                        brake(left_motor, right_motor)
-                        arm_release(servo)
-                        time.sleep(1)
-                        backward(left_motor, right_motor, fast_speed)
-                        time.sleep(2)
-                        current_status = RobotStatus.FIND_TENNIS
-            else:
-                print(" 目标不在区域内")
-                pos_confirm_count = 0
-                turn_left(left_motor, right_motor, scanning_speed)
-
-        except Exception as e:
-            print(f" 错误处理: {e}")
+        if robot.status == "grab_tennis":
+            robot.grab_tennis()
+        elif robot.status == "release_tennis":
+            robot.release_tennis()
+        else:
+            robot.move()
 
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -315,9 +423,9 @@ def main():
             cv2.imwrite(save_path, img)
 
             total_nums += len(result)
-            print(f" 处理完成: {fname:<20}, 目标数: {len(result)}, 总目标数：{total_nums}")
+            logging.info(f" 处理完成: {fname:<20}, 目标数: {len(result)}, 总目标数：{total_nums}")
         except Exception as e:
-            print(f" 错误处理 {fname}: {e}")
+            logging.error(f" 错误处理 {fname}: {e}")
             all_results[fname] = []
 
     # ===== 保存为 JSON 文件 =====
@@ -328,12 +436,12 @@ def main():
     avg_time = int(sum(timing_values) / len(timing_values) if timing_values else 0)
     max_time = max(timing_values) if timing_values else 0
     min_time = min(timing_values) if timing_values else 0
-    print(f" 平均推理时间: {avg_time} ms")
-    print(f" 最大推理时间: {max_time} ms")
-    print(f" 最小推理时间: {min_time} ms")
-    print(f" 总目标数：{total_nums}")
-    print(f" 所有结果已保存到: {OUTPUT_JSON}")
-    print(f" 检测框图片已保存至: {OUTPUT_IMG_DIR}")
+    logging.info(f" 平均推理时间: {avg_time} ms")
+    logging.info(f" 最大推理时间: {max_time} ms")
+    logging.info(f" 最小推理时间: {min_time} ms")
+    logging.info(f" 总目标数：{total_nums}")
+    logging.info(f" 所有结果已保存到: {OUTPUT_JSON}")
+    logging.info(f" 检测框图片已保存至: {OUTPUT_IMG_DIR}")
 
     # 释放资源
     release()
