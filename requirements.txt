@@ -4,3 +4,4 @@ flask
 torch
 accelerate
 einops
+torchvision
