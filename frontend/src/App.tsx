@@ -177,7 +177,7 @@ function App() {
                 <button style={{
                     background: "#9C27B0",
                     boxShadow: "0 4px #7B1FA2",
-                    width: "140px",
+                    width: "150px",
                     height: "100px",
                     fontSize: "14px",
                     border: "none",
