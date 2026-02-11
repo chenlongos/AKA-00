@@ -1,6 +1,6 @@
 import {useEffect, useRef} from "react"
 
-const START_STATE = {
+const INITIAL_STATE = {
     x: 400,          // 初始 X 坐标
     y: 300,          // 初始 Y 坐标
     angle: -Math.PI / 2, // 初始角度 (弧度)，-PI/2 朝上
@@ -10,7 +10,7 @@ const START_STATE = {
 const SimPage = () => {
     const canvasRef = useRef<HTMLCanvasElement | null>(null)
     const gameState = useRef({
-        ...START_STATE,
+        ...INITIAL_STATE,
         maxSpeed: 5,     // 最大速度
         acceleration: 0.2, // 加速度
         friction: 0.95,  // 摩擦力 (模拟惯性)
@@ -92,6 +92,7 @@ const SimPage = () => {
     }
 
     // --- 绘图逻辑 ---
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     const draw = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => {
         const state = gameState.current
 
@@ -150,7 +151,7 @@ const SimPage = () => {
             window.removeEventListener('keyup', handleKeyUp)
             window.cancelAnimationFrame(animationFrameId)
         }
-    }, [])
+    }, [draw])
 
     // --- 外部指令模拟 ---
     const sendCommand = (cmd: string) => {
@@ -162,10 +163,10 @@ const SimPage = () => {
     }
 
     const resetCar = () => {
-        gameState.current.x = START_STATE.x
-        gameState.current.y = START_STATE.y
-        gameState.current.angle = START_STATE.angle
-        gameState.current.speed = START_STATE.speed
+        gameState.current.x = INITIAL_STATE.x
+        gameState.current.y = INITIAL_STATE.y
+        gameState.current.angle = INITIAL_STATE.angle
+        gameState.current.speed = INITIAL_STATE.speed
     }
 
     return (
