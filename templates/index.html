@@ -1,107 +1,14 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AKA-00机器人控制</title>
-    <style>
-        body { font-family: sans-serif; text-align: center; background: #f0f0f0; touch-action: manipulation; }
-        .container { display: grid; grid-template-columns: repeat(3, 100px); grid-gap: 15px; justify-content: center; margin-top: 50px; }
-        .arm-controls { margin-top: 40px; display: flex; justify-content: center; gap: 20px; }
-        button {
-            width: 90px; height: 90px; border: none; border-radius: 15px;
-            background: #2196F3; color: white; font-weight: bold; font-size: 16px;
-            box-shadow: 0 4px #1976D2; cursor: pointer;
-        }
-        button:active { background: #1976D2; box-shadow: 0 0; transform: translateY(4px); }
-        .stop-btn { background: #f44336; box-shadow: 0 4px #d32f2f; grid-column: 2; }
-        .grab-btn { background: #ff9800; box-shadow: 0 4px #ef6c00; width: 120px; }
-        .status { margin-top: 20px; color: #666; }
-    </style>
-</head>
-<body>
-    <h2>AKA-00机器人控制</h2>
-    <h3 id="ip">IP: 获取中...</h3>
-
-    <div class="container">
-        <div style="grid-column: 2;"><button onclick="send('up')">前进</button></div>
-        <div style="grid-row: 2; grid-column: 1;"><button onclick="send('left')">左转</button></div>
-        <div style="grid-row: 2; grid-column: 2;"><button class="stop-btn" onclick="send('stop')">停止</button></div>
-        <div style="grid-row: 2; grid-column: 3;"><button onclick="send('right')">右转</button></div>
-        <div style="grid-row: 3; grid-column: 2;"><button onclick="send('down')">后退</button></div>
-    </div>
-
-    <div class="arm-controls">
-        <button class="grab-btn" onclick="send('grab')">抓取 (Grab)</button>
-        <button class="grab-btn" style="background:#4CAF50; box-shadow: 0 4px #388E3C;" onclick="send('release')">释放 (Release)</button>
-    </div>
-
-    <div class="status" id="status">准备就绪</div>
-
-    <div onclick="redirect()">
-        <button id="jump-btn" style="margin-top: 20px; background: #9C27B0; box-shadow: 0 4px #7B1FA2; width: 140px; height: 100px; font-size: 14px;">
-            点击进入实训平台
-        </button>
-    </div>
-
-    <script>
-        window.onload = function() {
-            get_ip();
-        };
-        function send(action) {
-            const statusDiv = document.getElementById('status');
-            statusDiv.innerText = "执行: " + action;
-            // 拼接 URL 访问我们写的 Flask 接口
-            fetch(`/control?action=${action}&speed=50&time=0`)
-                .then(response => response.json())
-                .then(data => console.log(data))
-                .catch(err => {
-                    statusDiv.innerText = "错误: " + err;
-                });
-        }
-        function get_ip(action = "") {
-            // 可选：显示状态
-            const statusDiv = document.getElementById("status");
-            if (statusDiv) {
-                statusDiv.innerText = "获取 IP";
-            }
-
-            fetch("/ip")
-                .then(res => res.json())
-                .then(data => {
-                    console.log("device ip:", data.ip);
-
-                // 页面显示
-                const ipDiv = document.getElementById("ip");
-                if (ipDiv) {
-                    ipDiv.innerText = "IP: " + data.ip;
-                }
-            })
-            .catch(err => {
-                console.error(err);
-                if (statusDiv) {
-                    statusDiv.innerText = "获取 IP 失败";
-                }
-            });
-        }
-        function redirect() {
-            const statusDiv = document.getElementById("status");
-            if (statusDiv) {
-                statusDiv.innerText = "获取 IP";
-            }
-            fetch("/ip")
-                .then(res => res.json())
-                .then(data => {
-                    const ip = data.ip;
-                    const targetUrl = "https://ai.maodouketang.cn/";
-                    const fullUrl = `${targetUrl}?ip=${encodeURIComponent(ip)}`;
-                    window.location.replace(fullUrl);
-            }).catch(err => {
-                console.error("跳转失败:", err);
-                statusDiv.innerText = "跳转失败";
-                alert("无法获取IP，请稍后重试");
-            });
-        }
-    </script>
-</body>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='vite.svg') }}" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>frontend</title>
+    <script type="module" crossorigin src="{{ url_for('static', filename='assets/index.js') }}"></script>
+    <link rel="stylesheet" crossorigin href="{{ url_for('static', filename='assets/index.css') }}">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
 </html>
