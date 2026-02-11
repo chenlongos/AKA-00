@@ -1,12 +1,16 @@
 import {useEffect, useRef} from "react"
 
+const START_STATE = {
+    x: 400,          // 初始 X 坐标
+    y: 300,          // 初始 Y 坐标
+    angle: -Math.PI / 2, // 初始角度 (弧度)，-PI/2 朝上
+    speed: 0,        // 当前速度
+}
+
 const SimPage = () => {
     const canvasRef = useRef<HTMLCanvasElement | null>(null)
     const gameState = useRef({
-        x: 400,          // 初始 X 坐标
-        y: 300,          // 初始 Y 坐标
-        angle: -Math.PI / 2, // 初始角度 (弧度)，-PI/2 朝上
-        speed: 0,        // 当前速度
+        ...START_STATE,
         maxSpeed: 5,     // 最大速度
         acceleration: 0.2, // 加速度
         friction: 0.95,  // 摩擦力 (模拟惯性)
@@ -158,10 +162,10 @@ const SimPage = () => {
     }
 
     const resetCar = () => {
-        gameState.current.x = 400
-        gameState.current.y = 300
-        gameState.current.angle = -Math.PI / 2
-        gameState.current.speed = 0
+        gameState.current.x = START_STATE.x
+        gameState.current.y = START_STATE.y
+        gameState.current.angle = START_STATE.angle
+        gameState.current.speed = START_STATE.speed
     }
 
     return (
