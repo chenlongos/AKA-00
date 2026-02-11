@@ -12,7 +12,7 @@ from motor import Motor, forward, backward, turn_left, turn_right, sleep, brake
 left_motor = Motor(4, 0, 1)
 right_motor = Motor(4, 2, 3)
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder="static", template_folder="templates")
 servo = STS3215("/dev/ttyS2", baudrate=115200)
 arm_init(servo)
 
