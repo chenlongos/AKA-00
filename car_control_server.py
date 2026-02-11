@@ -9,12 +9,12 @@ from flask import Flask, request, jsonify, render_template
 from arm import STS3215, grab, release, arm_init
 from motor import Motor, forward, backward, turn_left, turn_right, sleep, brake
 
-left_motor = Motor(4, 0, 1)
-right_motor = Motor(4, 2, 3)
+# left_motor = Motor(4, 0, 1)
+# right_motor = Motor(4, 2, 3)
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
-servo = STS3215("/dev/ttyS2", baudrate=115200)
-arm_init(servo)
+# servo = STS3215("/dev/ttyS2", baudrate=115200)
+# arm_init(servo)
 
 def get_ip(ifname="wlan0"):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -27,17 +27,26 @@ def get_ip(ifname="wlan0"):
     )
 
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+# @app.route('/')
+# def index():
+#     return render_template('index.html')
 
-@app.route("/ip")
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def serve_react(path):
+    # 如果是 API 开头，不处理
+    if path.startswith("api"):
+        return {"error": "API Not Found"}, 404
+
+    return render_template("index.html")
+
+@app.route("/api/ip")
 def ip():
     return jsonify({
         "ip": get_ip()
     })
 
-@app.route('/control', methods=['GET'])
+@app.route('/api/control', methods=['GET'])
 def control():
     action = request.args.get('action')
     speed = int(request.args.get('speed', 50))
@@ -46,23 +55,30 @@ def control():
     speed = speed * 240 // 50
     # --- 运动逻辑 ---
     if action == 'up':
-        forward(left_motor, right_motor, speed)
+        print('up')
+        # forward(left_motor, right_motor, speed)
     elif action == 'down':
-        backward(left_motor, right_motor, speed)
+        print('down')
+        # backward(left_motor, right_motor, speed)
     elif action == 'left':
-        turn_left(left_motor, right_motor, speed)
+        print('left')
+        # turn_left(left_motor, right_motor, speed)
     elif action == 'right':
-        turn_right(left_motor, right_motor, speed)
+        print('right')
+        # turn_right(left_motor, right_motor, speed)
     elif action == 'stop':
-        brake(left_motor, right_motor)
+        print('stop')
+        # brake(left_motor, right_motor)
     elif action == 'grab':
-        grab(servo)
+        print('grab')
+        # grab(servo)
     elif action == 'release':
-        release(servo)
+        print('release')
+        # release(servo)
 
     if milliseconds > 0 and action in ['up', 'down', 'left', 'right']:
         time.sleep(milliseconds / 1000.0)
-        sleep(left_motor, right_motor)
+        # sleep(left_motor, right_motor)
 
         return jsonify({"status": "success", "message": f"{action} for {milliseconds}s done"})
 
@@ -77,4 +93,4 @@ def run_https():
 
 if __name__ == '__main__':
     threading.Thread(target=run_http).start()
-    threading.Thread(target=run_https).start()
+    # threading.Thread(target=run_https).start()
