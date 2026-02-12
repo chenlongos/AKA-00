@@ -4,6 +4,11 @@ import {sendAction} from "../api/socket.ts";
 const BaseControlPage = () => {
     const [ip, setIp] = useState("获取中...");
     const [status, setStatus] = useState("准备就绪");
+    const [isUp, setIsUp] = useState(false);
+    const [isDown, setIsDown] = useState(false);
+    const [isLeft, setIsLeft] = useState(false);
+    const [isRight, setIsRight] = useState(false);
+    const [isStop, setIsStop] = useState(false);
     const [isSimulator, setIsSimulator] = useState(false);
 
     useEffect(() => {
@@ -26,7 +31,6 @@ const BaseControlPage = () => {
 
     const send = (action: string) => {
         setStatus("执行: " + action);
-        console.log("执行: " + action);
         if (!isSimulator) {
             fetch(`/api/control?action=${action}&speed=50&time=0`)
                 .then((res) => res.json())
@@ -36,6 +40,35 @@ const BaseControlPage = () => {
             sendAction(action)
         }
     };
+
+    useEffect(() => {
+        let animationFrameId: number
+        const renderLoop = () => {
+            if (isUp) {
+                send('up')
+            }
+            if (isDown) {
+                send('down')
+            }
+            if (isLeft) {
+                send('left')
+            }
+            if (isRight) {
+                send('right')
+            }
+            if (isStop) {
+                send('stop')
+            }
+            animationFrameId = window.requestAnimationFrame(renderLoop)
+        }
+
+        renderLoop()
+
+        return () => {
+            window.cancelAnimationFrame(animationFrameId)
+        }
+
+    }, [isDown, isLeft, isRight, isStop, isUp, send])
 
     const redirect = () => {
         setStatus("获取 IP...");
@@ -84,13 +117,14 @@ const BaseControlPage = () => {
                         boxShadow: "0 4px #1976D2",
                         cursor: "pointer"
                     }}
-                            onMouseDown={() => send('up')}
+                            onMouseDown={() => setIsUp(true)}
                             onTouchStart={(e) => {
-                                e.preventDefault();
-                                send('up');
+                                e.preventDefault()
+                                setIsUp(true)
                             }}
-                            onMouseUp={() => send('stop')}
-                            onTouchEnd={() => send('stop')}
+                            onMouseUp={() => setIsStop(true)}
+                            onMouseLeave={() => setIsStop(true)}
+                            onTouchEnd={() => setIsStop(true)}
                     >前进
                     </button>
                 </div>
@@ -106,13 +140,13 @@ const BaseControlPage = () => {
                         fontSize: "16px",
                         boxShadow: "0 4px #1976D2",
                         cursor: "pointer"
-                    }} onMouseDown={() => send('left')}
+                    }} onMouseDown={() => setIsLeft(true)}
                             onTouchStart={(e) => {
                                 e.preventDefault();
-                                send('left');
+                                setIsLeft(true);
                             }}
-                            onMouseUp={() => send('stop')}
-                            onTouchEnd={() => send('stop')}
+                            onMouseUp={() => setIsStop(true)}
+                            onTouchEnd={() => setIsStop(true)}
                     >左转
                     </button>
                 </div>
@@ -149,13 +183,13 @@ const BaseControlPage = () => {
                         fontSize: "16px",
                         boxShadow: "0 4px #1976D2",
                         cursor: "pointer"
-                    }} onMouseDown={() => send('right')}
+                    }} onMouseDown={() => setIsRight(true)}
                             onTouchStart={(e) => {
                                 e.preventDefault();
-                                send('right');
+                                setIsRight(true);
                             }}
-                            onMouseUp={() => send('stop')}
-                            onTouchEnd={() => send('stop')}>右转
+                            onMouseUp={() => setIsStop(true)}
+                            onTouchEnd={() => setIsStop(true)}>右转
                     </button>
                 </div>
                 <div style={{gridRow: 3, gridColumn: 2}}>
@@ -170,13 +204,13 @@ const BaseControlPage = () => {
                         fontSize: "16px",
                         boxShadow: "0 4px #1976D2",
                         cursor: "pointer"
-                    }} onMouseDown={() => send('down')}
+                    }} onMouseDown={() => setIsDown(true)}
                             onTouchStart={(e) => {
                                 e.preventDefault();
-                                send('down');
+                                setIsDown(true);
                             }}
-                            onMouseUp={() => send('stop')}
-                            onTouchEnd={() => send('stop')}>后退
+                            onMouseUp={() => setIsStop(true)}
+                            onTouchEnd={() => setIsStop(true)}>后退
                     </button>
                 </div>
             </div>
