@@ -23,11 +23,6 @@ class CarModel:
             "x": self.x,
             "y": self.y,
             "angle": self.angle,
-            "speed": self.speed,
-            "acceleration": self.acceleration,
-            "maxSpeed": self.maxSpeed,
-            "friction": self.friction,
-            "rotationSpeed": self.rotationSpeed,
         }
 
 
