@@ -59,15 +59,23 @@ const SimPage = () => {
         state.y += Math.sin(state.angle) * state.speed
 
         // 简单的边界检测 (碰到墙壁反弹)
-        if (state.x < 0 || state.x > 800) {
+        if (checkCollision(state.x, state.y)) {
             state.x -= Math.cos(state.angle) * state.speed * 2
-            state.speed = 0
-        }
-        if (state.y < 0 || state.y > 600) {
             state.y -= Math.sin(state.angle) * state.speed * 2
             state.speed = 0
         }
     }
+
+    // 检查点是否在任何障碍物内
+    const checkCollision = (x: number, y: number) => {
+        // 边界检查
+        if (x < 0 || x > MAP_W || y < 0 || y > MAP_H) return true;
+        // 障碍物检查
+        return OBSTACLES.some(obs =>
+            x > obs.x && x < obs.x + obs.w &&
+            y > obs.y && y < obs.y + obs.h
+        );
+    };
 
     const drawGrid = (ctx: CanvasRenderingContext2D, w: number, h: number) => {
         ctx.strokeStyle = '#e0e0e0'
@@ -208,7 +216,7 @@ const SimPage = () => {
         // 遍历每一条射线
         for (let i = 0; i < rayCount; i++) {
             // 当前射线角度 = 车角度 - 半个FOV + 增量
-            const rayAngle = (angle - fov / 2) + (i / rayCount) * fov;
+            const rayAngle = (angle + Math.PI - fov / 2) + (i / rayCount) * fov;
 
             // 计算这一条射线碰到了什么，以及距离是多少
             const hit = castRay(x, y, rayAngle);
