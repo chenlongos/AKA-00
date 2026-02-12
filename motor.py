@@ -50,6 +50,14 @@ def forward(left, right, speed=255):
     left.set_speed(speed)
     right.set_speed(speed)
 
+def forward_left(left, right, speed=255):
+    left.set_speed(speed)
+    right.set_speed(speed * 0.8)
+
+def forward_right(left, right, speed=255):
+    left.set_speed(speed * 0.8)
+    right.set_speed(speed)
+
 def backward(left, right, speed=255):
     left.set_speed(-speed)
     right.set_speed(-speed)
