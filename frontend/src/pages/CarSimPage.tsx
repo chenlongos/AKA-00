@@ -163,7 +163,7 @@ const CarSimulator = () => {
     };
 
     // --- 核心算法：光线投射 (Raycasting) ---
-    const drawFirstPerson = (ctx) => {
+    const drawFirstPerson = (ctx:CanvasRenderingContext2D) => {
         const w = ctx.canvas.width;
         const h = ctx.canvas.height;
         const {x, y, angle} = gameState.current;
