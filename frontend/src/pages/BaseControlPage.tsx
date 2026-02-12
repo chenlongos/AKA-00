@@ -1,8 +1,10 @@
 import {useEffect, useState} from "react";
+import {sendAction} from "../api/socket.ts";
 
 const BaseControlPage = () => {
     const [ip, setIp] = useState("获取中...");
     const [status, setStatus] = useState("准备就绪");
+    const [isSimulator, setIsSimulator] = useState(false);
 
     useEffect(() => {
         const getIp = () => {
@@ -14,8 +16,7 @@ const BaseControlPage = () => {
                     setIp("IP: " + data.ip);
                     setStatus("准备就绪");
                 })
-                .catch((err) => {
-                    console.error(err);
+                .catch(() => {
                     setStatus("获取 IP 失败");
                 });
         };
@@ -25,10 +26,15 @@ const BaseControlPage = () => {
 
     const send = (action: string) => {
         setStatus("执行: " + action);
-        fetch(`/api/control?action=${action}&speed=50&time=0`)
-            .then((res) => res.json())
-            .then((data) => console.log(data))
-            .catch((err) => setStatus("错误: " + err));
+        console.log("执行: " + action);
+        if (!isSimulator) {
+            fetch(`/api/control?action=${action}&speed=50&time=0`)
+                .then((res) => res.json())
+                .then((data) => console.log(data))
+                .catch((err) => setStatus("错误: " + err));
+        } else {
+            sendAction(action)
+        }
     };
 
     const redirect = () => {
@@ -46,6 +52,7 @@ const BaseControlPage = () => {
                 alert("无法获取IP，请稍后重试");
             });
     };
+
     return (
         <div style={{
             fontFamily: "sans-serif",
@@ -76,7 +83,15 @@ const BaseControlPage = () => {
                         fontSize: "16px",
                         boxShadow: "0 4px #1976D2",
                         cursor: "pointer"
-                    }} onClick={() => send("up")}>前进
+                    }}
+                            onMouseDown={() => send('up')}
+                            onTouchStart={(e) => {
+                                e.preventDefault();
+                                send('up');
+                            }}
+                            onMouseUp={() => send('stop')}
+                            onTouchEnd={() => send('stop')}
+                    >前进
                     </button>
                 </div>
                 <div style={{gridRow: 2, gridColumn: 1}}>
@@ -91,7 +106,14 @@ const BaseControlPage = () => {
                         fontSize: "16px",
                         boxShadow: "0 4px #1976D2",
                         cursor: "pointer"
-                    }} onClick={() => send("left")}>左转
+                    }} onMouseDown={() => send('left')}
+                            onTouchStart={(e) => {
+                                e.preventDefault();
+                                send('left');
+                            }}
+                            onMouseUp={() => send('stop')}
+                            onTouchEnd={() => send('stop')}
+                    >左转
                     </button>
                 </div>
                 <div style={{gridRow: 2, gridColumn: 2}}>
@@ -105,7 +127,13 @@ const BaseControlPage = () => {
                         fontWeight: "bold",
                         fontSize: "16px",
                         border: "none"
-                    }} onClick={() => send("stop")}>
+                    }} onMouseDown={() => send('stop')}
+                            onTouchStart={(e) => {
+                                e.preventDefault();
+                                send('stop');
+                            }}
+                            onMouseUp={() => send('stop')}
+                            onTouchEnd={() => send('stop')}>
                         停止
                     </button>
                 </div>
@@ -121,7 +149,13 @@ const BaseControlPage = () => {
                         fontSize: "16px",
                         boxShadow: "0 4px #1976D2",
                         cursor: "pointer"
-                    }} onClick={() => send("right")}>右转
+                    }} onMouseDown={() => send('right')}
+                            onTouchStart={(e) => {
+                                e.preventDefault();
+                                send('right');
+                            }}
+                            onMouseUp={() => send('stop')}
+                            onTouchEnd={() => send('stop')}>右转
                     </button>
                 </div>
                 <div style={{gridRow: 3, gridColumn: 2}}>
@@ -136,7 +170,13 @@ const BaseControlPage = () => {
                         fontSize: "16px",
                         boxShadow: "0 4px #1976D2",
                         cursor: "pointer"
-                    }} onClick={() => send("down")}>后退
+                    }} onMouseDown={() => send('down')}
+                            onTouchStart={(e) => {
+                                e.preventDefault();
+                                send('down');
+                            }}
+                            onMouseUp={() => send('stop')}
+                            onTouchEnd={() => send('stop')}>后退
                     </button>
                 </div>
             </div>
@@ -172,19 +212,37 @@ const BaseControlPage = () => {
 
             <div style={{marginTop: "20px", color: "#666"}}>{status}</div>
 
-            <div style={{marginTop: "20px"}}>
-                <button style={{
-                    background: "#9C27B0",
-                    boxShadow: "0 4px #7B1FA2",
-                    width: "150px",
-                    height: "100px",
-                    fontSize: "14px",
-                    border: "none",
-                    borderRadius: "15px",
-                    color: "#fff"
-                }} onClick={redirect}>
-                    点击进入实训平台
-                </button>
+            <div style={{display: 'flex', flexDirection: 'row', justifyContent: 'space-around'}}>
+                <div style={{marginTop: "20px"}}>
+                    <button style={{
+                        background: "#9C27B0",
+                        boxShadow: "0 4px #7B1FA2",
+                        width: "150px",
+                        height: "100px",
+                        fontSize: "14px",
+                        border: "none",
+                        borderRadius: "15px",
+                        color: "#fff"
+                    }} onClick={redirect}>
+                        点击进入实训平台
+                    </button>
+                </div>
+                <div style={{marginTop: "20px"}}>
+                    <button style={{
+                        background: "#9C27B0",
+                        boxShadow: "0 4px #7B1FA2",
+                        width: "150px",
+                        height: "100px",
+                        fontSize: "14px",
+                        border: "none",
+                        borderRadius: "15px",
+                        color: "#fff"
+                    }} onClick={() => {
+                        setIsSimulator(!isSimulator);
+                    }}>
+                        {isSimulator ? '模拟遥控器' : '小车遥控器'}
+                    </button>
+                </div>
             </div>
         </div>
     );
