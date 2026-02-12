@@ -1,4 +1,4 @@
-import {useEffect, useState} from "react";
+import {useEffect, useRef, useState} from "react";
 import {sendAction} from "../api/socket.ts";
 import ControlButton from "../components/ControlButton.tsx";
 
@@ -6,6 +6,9 @@ const BaseControlPage = () => {
     const [ip, setIp] = useState("获取中...");
     const [status, setStatus] = useState("准备就绪");
     const [isSimulator, setIsSimulator] = useState(false);
+
+    // 当前正在执行的动作（用于模拟器每帧发送）
+    const currentActionRef = useRef<string | null>(null);
 
     useEffect(() => {
         const getIp = () => {
@@ -28,20 +31,39 @@ const BaseControlPage = () => {
     const send = (action: string) => {
         setStatus("执行: " + action);
         if (!isSimulator) {
+            console.log("http send " + action);
             fetch(`/api/control?action=${action}&speed=50&time=0`)
                 .then((res) => res.json())
                 .then((data) => console.log(data))
                 .catch((err) => setStatus("错误: " + err));
-        } else {
-            sendAction(action)
+        }
+    };
+
+    // ==== 按钮事件处理 ====
+    const handlePressStart = (action: string) => {
+        currentActionRef.current = action;
+        if (!isSimulator) {
+            send(action); // 实车立即发
+        }
+    };
+
+    const handlePressEnd = () => {
+        currentActionRef.current = null;
+        if (!isSimulator) {
+            send("stop"); // 实车发 stop
         }
     };
 
     useEffect(() => {
+        if (!isSimulator) return; // 只在模拟器模式运行
         let animationFrameId: number
         const renderLoop = () => {
-            animationFrameId = window.requestAnimationFrame(renderLoop)
-        }
+            const action = currentActionRef.current;
+            if (action !== null) {
+                sendAction(action); // 每帧发送当前动作
+            }
+            animationFrameId = requestAnimationFrame(renderLoop);
+        };
 
         renderLoop()
 
@@ -49,7 +71,7 @@ const BaseControlPage = () => {
             window.cancelAnimationFrame(animationFrameId)
         }
 
-    }, [send])
+    }, [isSimulator])
 
     const redirect = () => {
         setStatus("获取 IP...");
@@ -117,35 +139,36 @@ const BaseControlPage = () => {
             >
                 <div/>
                 <ControlButton
-                    onPressStart={() => send("up")}
-                    onPressEnd={() => send("stop")}
+                    onPressStart={() => handlePressStart("up")}
+                    onPressEnd={() => handlePressEnd()}
                 >
                     前进
                 </ControlButton>
                 <div style={{display: 'flex', gap: "20px"}}>
                     <ControlButton
-                        onPressStart={() => send("left")}
-                        onPressEnd={() => send("stop")}
+                        onPressStart={() => handlePressStart("left")}
+                        onPressEnd={() => handlePressEnd()}
                     >
                         左转
                     </ControlButton>
                     <ControlButton
                         variant="danger"
-                        onPressStart={() => send("stop")}
+                        onPressStart={() => handlePressStart("stop")}
+                        onPressEnd={() => handlePressEnd()}
                     >
                         停止
                     </ControlButton>
                     <ControlButton
-                        onPressStart={() => send("right")}
-                        onPressEnd={() => send("stop")}
+                        onPressStart={() => handlePressStart("right")}
+                        onPressEnd={() => handlePressEnd()}
                     >
                         右转
                     </ControlButton>
                 </div>
 
                 <ControlButton
-                    onPressStart={() => send("down")}
-                    onPressEnd={() => send("stop")}
+                    onPressStart={() => handlePressStart("down")}
+                    onPressEnd={() => handlePressEnd()}
                 >
                     后退
                 </ControlButton>

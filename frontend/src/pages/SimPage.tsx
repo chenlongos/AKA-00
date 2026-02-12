@@ -1,13 +1,6 @@
 import {useEffect, useRef} from "react"
-import {getCarState, resetCat, sendAction, socket} from "../api/socket.ts";
+import {getCarState, resetCar, sendAction, socket} from "../api/socket.ts";
 import type {Car} from "../model/car.ts";
-
-const INITIAL_STATE = {
-    x: 400,          // 初始 X 坐标
-    y: 300,          // 初始 Y 坐标
-    angle: -Math.PI / 2, // 初始角度 (弧度)，-PI/2 朝上
-    speed: 0,        // 当前速度
-}
 
 // 定义障碍物 (x, y, w, h, color)
 const OBSTACLES = [
@@ -29,11 +22,9 @@ const SimPage = () => {
     const fpvRef = useRef<HTMLCanvasElement | null>(null);     // 第一人称视角
 
     const carState = useRef({
-        ...INITIAL_STATE,
-        maxSpeed: 5,     // 最大速度
-        acceleration: 0.2, // 加速度
-        friction: 0.95,  // 摩擦力 (模拟惯性)
-        rotationSpeed: 0.05 // 转向灵敏度
+        x: 400,          // 初始 X 坐标
+        y: 300,          // 初始 Y 坐标
+        angle: -Math.PI / 2, // 初始角度 (弧度)，-PI/2 朝上
     })
 
     useEffect(() => {
@@ -42,7 +33,6 @@ const SimPage = () => {
             carState.current.x = car.x + INITIAL_LOCAL_W
             carState.current.y = car.y + INITIAL_LOCAL_H
             carState.current.angle = car.angle
-            carState.current.speed = car.speed
         });
         return () => {
             socket.off('car_state');
@@ -52,6 +42,7 @@ const SimPage = () => {
     const keys = useRef<Record<string, boolean>>({})
 
     // --- 物理计算逻辑 ---
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     const updatePhysics = () => {
         // 前进 / 后退
         if (keys.current['ArrowUp'] || keys.current['KeyW']) {
@@ -120,6 +111,7 @@ const SimPage = () => {
     }
 
     // --- 绘图逻辑 ---
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     const drawTopDown = (ctx: CanvasRenderingContext2D) => {
         // 清空画布
         ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
@@ -218,6 +210,7 @@ const SimPage = () => {
         return minDist === Infinity ? null : {distance: minDist, color: hitColor};
     };
 
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     const drawFirstPerson = (ctx: CanvasRenderingContext2D) => {
         const w = ctx.canvas.width;
         const h = ctx.canvas.height;
@@ -312,14 +305,6 @@ const SimPage = () => {
         setTimeout(() => {
             keys.current[cmd] = false
         }, 200) // 模拟按键按下200毫秒
-    }
-
-    const resetCar = () => {
-        carState.current.x = INITIAL_STATE.x
-        carState.current.y = INITIAL_STATE.y
-        carState.current.angle = INITIAL_STATE.angle
-        carState.current.speed = INITIAL_STATE.speed
-        resetCat()
     }
 
     return (
