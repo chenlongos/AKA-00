@@ -1,4 +1,6 @@
 import {useEffect, useRef} from "react"
+import {getCarState, resetCat, sendAction, socket} from "../api/socket.ts";
+import type {Car} from "../model/car.ts";
 
 const INITIAL_STATE = {
     x: 400,          // 初始 X 坐标
@@ -19,10 +21,14 @@ const OBSTACLES = [
 const MAP_W = 800;
 const MAP_H = 600;
 
+const INITIAL_LOCAL_W = MAP_W / 2;
+const INITIAL_LOCAL_H = MAP_H / 2;
+
 const SimPage = () => {
     const canvasRef = useRef<HTMLCanvasElement | null>(null)
     const fpvRef = useRef<HTMLCanvasElement | null>(null);     // 第一人称视角
-    const gameState = useRef({
+
+    const carState = useRef({
         ...INITIAL_STATE,
         maxSpeed: 5,     // 最大速度
         acceleration: 0.2, // 加速度
@@ -30,39 +36,40 @@ const SimPage = () => {
         rotationSpeed: 0.05 // 转向灵敏度
     })
 
+    useEffect(() => {
+        getCarState()
+        socket.on('car_state', (car: Car) => {
+            carState.current.x = car.x + INITIAL_LOCAL_W
+            carState.current.y = car.y + INITIAL_LOCAL_H
+            carState.current.angle = car.angle
+            carState.current.speed = car.speed
+        });
+        return () => {
+            socket.off('car_state');
+        }
+    }, [])
+
     const keys = useRef<Record<string, boolean>>({})
 
     // --- 物理计算逻辑 ---
     const updatePhysics = () => {
-        const state = gameState.current
-
         // 前进 / 后退
         if (keys.current['ArrowUp'] || keys.current['KeyW']) {
-            if (state.speed < state.maxSpeed) state.speed += state.acceleration
+            sendAction("up")
         }
         if (keys.current['ArrowDown'] || keys.current['KeyS']) {
-            if (state.speed > -state.maxSpeed / 2) state.speed -= state.acceleration
+            sendAction("down")
         }
-
         if (keys.current['ArrowLeft'] || keys.current['KeyA']) {
-            state.angle -= state.rotationSpeed
+            sendAction("left")
         }
         if (keys.current['ArrowRight'] || keys.current['KeyD']) {
-            state.angle += state.rotationSpeed
+            sendAction("right")
         }
-
-        // 应用摩擦力 (自然减速)
-        state.speed *= state.friction
-
-        // 更新坐标 (核心三角函数：x = v*cos(θ), y = v*sin(θ))
-        state.x += Math.cos(state.angle) * state.speed
-        state.y += Math.sin(state.angle) * state.speed
-
+        const state = carState.current
         // 简单的边界检测 (碰到墙壁反弹)
         if (checkCollision(state.x, state.y)) {
-            state.x -= Math.cos(state.angle) * state.speed * 2
-            state.y -= Math.sin(state.angle) * state.speed * 2
-            state.speed = 0
+            sendAction("stop")
         }
     }
 
@@ -95,7 +102,7 @@ const SimPage = () => {
     }
 
     const drawCarBody = (ctx: CanvasRenderingContext2D) => {
-        const {x, y, angle} = gameState.current;
+        const {x, y, angle} = carState.current;
         ctx.save();
         ctx.translate(x, y);
         ctx.rotate(angle);
@@ -134,7 +141,7 @@ const SimPage = () => {
         // 3. 绘制小车 (此时原点就是车身中心)
         drawCarBody(ctx)
 
-        const {x, y, angle} = gameState.current;
+        const {x, y, angle} = carState.current;
         ctx.strokeStyle = 'rgba(0,0,0,0.1)';
         ctx.beginPath();
         ctx.moveTo(x, y);
@@ -148,7 +155,12 @@ const SimPage = () => {
     }
 
     // 数学公式：射线与线段相交检测
-    const getRaySegmentIntersection = (rx: number, ry:number, rdx: number, rdy: number, wall: {x1: number, y1: number, x2: number, y2: number}) => {
+    const getRaySegmentIntersection = (rx: number, ry: number, rdx: number, rdy: number, wall: {
+        x1: number,
+        y1: number,
+        x2: number,
+        y2: number
+    }) => {
         const {x1, y1, x2, y2} = wall;
         const v1x = x1 - rx;
         const v1y = y1 - ry;
@@ -209,7 +221,7 @@ const SimPage = () => {
     const drawFirstPerson = (ctx: CanvasRenderingContext2D) => {
         const w = ctx.canvas.width;
         const h = ctx.canvas.height;
-        const {x, y, angle} = gameState.current;
+        const {x, y, angle} = carState.current;
 
         // 天空和地面
         ctx.fillStyle = '#87CEEB'; // 天空蓝
@@ -291,7 +303,7 @@ const SimPage = () => {
             window.removeEventListener('keyup', handleKeyUp)
             window.cancelAnimationFrame(animationFrameId)
         }
-    }, [drawTopDown, drawFirstPerson])
+    }, [drawTopDown, drawFirstPerson, updatePhysics])
 
     // --- 外部指令模拟 ---
     const sendCommand = (cmd: string) => {
@@ -303,16 +315,23 @@ const SimPage = () => {
     }
 
     const resetCar = () => {
-        gameState.current.x = INITIAL_STATE.x
-        gameState.current.y = INITIAL_STATE.y
-        gameState.current.angle = INITIAL_STATE.angle
-        gameState.current.speed = INITIAL_STATE.speed
+        carState.current.x = INITIAL_STATE.x
+        carState.current.y = INITIAL_STATE.y
+        carState.current.angle = INITIAL_STATE.angle
+        carState.current.speed = INITIAL_STATE.speed
+        resetCat()
     }
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', justifyContent: 'space-around', alignItems: 'center' }}>
+        <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '20px',
+            justifyContent: 'space-around',
+            alignItems: 'center'
+        }}>
             <h2>小车模拟器</h2>
-            <div style={{ display: 'flex', flexDirection: 'row', gap: '20px' }}>
+            <div style={{display: 'flex', flexDirection: 'row', gap: '20px'}}>
                 <div style={{display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px'}}>
                     {/* 左侧：上帝视角 */}
                     <div style={{position: 'relative', border: '2px solid #333'}}>

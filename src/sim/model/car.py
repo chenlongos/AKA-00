@@ -1,39 +1,34 @@
 import math
-import time
+
 
 class CarModel:
     def __init__(self):
         self.x = 0.0
         self.y = 0.0
-        self.theta = 0.0
+        self.angle = -math.pi / 2
+        self.speed = 0.0
+        self.acceleration = 0.2
+        self.maxSpeed = 5
+        self.friction = 0.95
+        self.rotationSpeed = 0.05
 
-        self.v = 0.0
-        self.w = 0.0
-
-        self.max_v = 2.0
-        self.max_w = 2.0
-
-        self.last_cmd_time = time.time()
-
-    def set_cmd(self, v, w):
-        self.v = max(min(v, self.max_v), -self.max_v)
-        self.w = max(min(w, self.max_w), -self.max_w)
-        self.last_cmd_time = time.time()
-
-    def update(self, dt):
-        if time.time() - self.last_cmd_time > 0.5:
-            self.v = 0
-            self.w = 0
-
-        self.x += self.v * math.cos(self.theta) * dt
-        self.y += self.v * math.sin(self.theta) * dt
-        self.theta += self.w * dt
+    def reset(self):
+        self.x = 0.0
+        self.y = 0.0
+        self.angle = -math.pi / 2
+        self.speed = 0.0
 
     def get_state(self):
         return {
             "x": self.x,
             "y": self.y,
-            "theta": self.theta,
-            "v": self.v,
-            "w": self.w
+            "angle": self.angle,
+            "speed": self.speed,
+            "acceleration": self.acceleration,
+            "maxSpeed": self.maxSpeed,
+            "friction": self.friction,
+            "rotationSpeed": self.rotationSpeed,
         }
+
+
+car = CarModel()
