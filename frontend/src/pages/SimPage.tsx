@@ -134,6 +134,15 @@ const SimPage = () => {
         // 3. 绘制小车 (此时原点就是车身中心)
         drawCarBody(ctx)
 
+        const {x, y, angle} = gameState.current;
+        ctx.strokeStyle = 'rgba(0,0,0,0.1)';
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + Math.cos(angle - Math.PI / 6) * 100, y + Math.sin(angle - Math.PI / 6) * 100);
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + Math.cos(angle + Math.PI / 6) * 100, y + Math.sin(angle + Math.PI / 6) * 100);
+        ctx.stroke();
+
         // 恢复绘图状态
         ctx.restore()
     }
