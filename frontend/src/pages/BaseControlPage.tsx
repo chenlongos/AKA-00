@@ -1,14 +1,10 @@
 import {useEffect, useState} from "react";
 import {sendAction} from "../api/socket.ts";
+import ControlButton from "../components/ControlButton.tsx";
 
 const BaseControlPage = () => {
     const [ip, setIp] = useState("获取中...");
     const [status, setStatus] = useState("准备就绪");
-    const [isUp, setIsUp] = useState(false);
-    const [isDown, setIsDown] = useState(false);
-    const [isLeft, setIsLeft] = useState(false);
-    const [isRight, setIsRight] = useState(false);
-    const [isStop, setIsStop] = useState(false);
     const [isSimulator, setIsSimulator] = useState(false);
 
     useEffect(() => {
@@ -44,21 +40,6 @@ const BaseControlPage = () => {
     useEffect(() => {
         let animationFrameId: number
         const renderLoop = () => {
-            if (isUp) {
-                send('up')
-            }
-            if (isDown) {
-                send('down')
-            }
-            if (isLeft) {
-                send('left')
-            }
-            if (isRight) {
-                send('right')
-            }
-            if (isStop) {
-                send('stop')
-            }
             animationFrameId = window.requestAnimationFrame(renderLoop)
         }
 
@@ -68,7 +49,7 @@ const BaseControlPage = () => {
             window.cancelAnimationFrame(animationFrameId)
         }
 
-    }, [isDown, isLeft, isRight, isStop, isUp, send])
+    }, [send])
 
     const redirect = () => {
         setStatus("获取 IP...");
@@ -87,196 +68,149 @@ const BaseControlPage = () => {
     };
 
     return (
-        <div style={{
-            fontFamily: "sans-serif",
-            textAlign: "center",
-            background: "#f0f0f0",
-            minHeight: "100vh",
-            padding: "20px"
-        }}>
-            <h2>AKA-00机器人控制</h2>
-            <h3>{ip}</h3>
+        <div
+            style={{
+                fontFamily: "system-ui, sans-serif",
+                background: "#0f172a",
+                color: "white",
+                minHeight: "100vh",
+                padding: "10px",
+                textAlign: "center",
+                overflow: "hidden",
+            }}
+        >
+            <h2>AKA-00 控制台</h2>
+            <div style={{opacity: 0.6}}>{ip}</div>
 
-            <div style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(3, 100px)",
-                gridGap: "15px",
-                justifyContent: "center",
-                marginTop: "50px"
-            }}>
-                <div style={{gridColumn: 2}}>
-                    <button style={{
-                        width: "90px",
-                        height: "90px",
-                        border: "none",
-                        borderRadius: "15px",
-                        background: "#2196F3",
-                        color: "white",
+            {/* 模式状态 */}
+            <div
+                style={{
+                    marginTop: "15px",
+                    padding: "8px 15px",
+                    background: "#1e293b",
+                    borderRadius: "12px",
+                    display: "inline-block",
+                    fontSize: "14px",
+                }}
+            >
+                模式：
+                <span
+                    style={{
+                        marginLeft: "8px",
+                        color: isSimulator ? "#22c55e" : "#3b82f6",
                         fontWeight: "bold",
-                        fontSize: "16px",
-                        boxShadow: "0 4px #1976D2",
-                        cursor: "pointer"
                     }}
-                            onMouseDown={() => setIsUp(true)}
-                            onTouchStart={(e) => {
-                                e.preventDefault()
-                                setIsUp(true)
-                            }}
-                            onMouseUp={() => setIsStop(true)}
-                            onMouseLeave={() => setIsStop(true)}
-                            onTouchEnd={() => setIsStop(true)}
-                    >前进
-                    </button>
-                </div>
-                <div style={{gridRow: 2, gridColumn: 1}}>
-                    <button style={{
-                        width: "90px",
-                        height: "90px",
-                        border: "none",
-                        borderRadius: "15px",
-                        background: "#2196F3",
-                        color: "white",
-                        fontWeight: "bold",
-                        fontSize: "16px",
-                        boxShadow: "0 4px #1976D2",
-                        cursor: "pointer"
-                    }} onMouseDown={() => setIsLeft(true)}
-                            onTouchStart={(e) => {
-                                e.preventDefault();
-                                setIsLeft(true);
-                            }}
-                            onMouseUp={() => setIsStop(true)}
-                            onTouchEnd={() => setIsStop(true)}
-                    >左转
-                    </button>
-                </div>
-                <div style={{gridRow: 2, gridColumn: 2}}>
-                    <button style={{
-                        background: "#f44336",
-                        boxShadow: "0 4px #d32f2f",
-                        width: "90px",
-                        height: "90px",
-                        borderRadius: "15px",
-                        color: "#fff",
-                        fontWeight: "bold",
-                        fontSize: "16px",
-                        border: "none"
-                    }} onMouseDown={() => send('stop')}
-                            onTouchStart={(e) => {
-                                e.preventDefault();
-                                send('stop');
-                            }}
-                            onMouseUp={() => send('stop')}
-                            onTouchEnd={() => send('stop')}>
+                >
+          {isSimulator ? "模拟" : "实车"}
+        </span>
+            </div>
+
+            {/* 方向区 */}
+            <div
+                style={{
+                    display: "flex",
+                    gap: "20px",
+                    justifyItems: "center",
+                    flexDirection: "column",
+                    alignItems: "center"
+                }}
+            >
+                <div/>
+                <ControlButton
+                    onPressStart={() => send("up")}
+                    onPressEnd={() => send("stop")}
+                >
+                    前进
+                </ControlButton>
+                <div style={{display: 'flex', gap: "20px"}}>
+                    <ControlButton
+                        onPressStart={() => send("left")}
+                        onPressEnd={() => send("stop")}
+                    >
+                        左转
+                    </ControlButton>
+                    <ControlButton
+                        variant="danger"
+                        onPressStart={() => send("stop")}
+                    >
                         停止
-                    </button>
+                    </ControlButton>
+                    <ControlButton
+                        onPressStart={() => send("right")}
+                        onPressEnd={() => send("stop")}
+                    >
+                        右转
+                    </ControlButton>
                 </div>
-                <div style={{gridRow: 2, gridColumn: 3}}>
-                    <button style={{
-                        width: "90px",
-                        height: "90px",
-                        border: "none",
-                        borderRadius: "15px",
-                        background: "#2196F3",
-                        color: "white",
-                        fontWeight: "bold",
-                        fontSize: "16px",
-                        boxShadow: "0 4px #1976D2",
-                        cursor: "pointer"
-                    }} onMouseDown={() => setIsRight(true)}
-                            onTouchStart={(e) => {
-                                e.preventDefault();
-                                setIsRight(true);
-                            }}
-                            onMouseUp={() => setIsStop(true)}
-                            onTouchEnd={() => setIsStop(true)}>右转
-                    </button>
+
+                <ControlButton
+                    onPressStart={() => send("down")}
+                    onPressEnd={() => send("stop")}
+                >
+                    后退
+                </ControlButton>
+                <div/>
+            </div>
+
+            {/* 功能按钮 */}
+            <div
+                style={{
+                    display: "flex",
+                    justifyContent: "center",
+                    gap: "20px",
+                    flexWrap: "wrap",
+                }}
+            >
+                <ControlButton
+                    variant="success"
+                    size="wide"
+                    onClick={() => send("grab")}
+                >
+                    抓取
+                </ControlButton>
+
+                <ControlButton
+                    variant="secondary"
+                    size="wide"
+                    onClick={() => send("release")}
+                >
+                    释放
+                </ControlButton>
+            </div>
+
+            <div
+                style={{
+                    display: "flex",
+                    justifyContent: "center",
+                    gap: "20px",
+                    flexWrap: "wrap",
+                }}
+            >
+                {/* 跳转 */}
+                <div style={{marginTop: "40px"}}>
+                    <ControlButton
+                        size="wide"
+                        variant="secondary"
+                        onClick={() => redirect()}
+                    >
+                        进入试验平台
+                    </ControlButton>
                 </div>
-                <div style={{gridRow: 3, gridColumn: 2}}>
-                    <button style={{
-                        width: "90px",
-                        height: "90px",
-                        border: "none",
-                        borderRadius: "15px",
-                        background: "#2196F3",
-                        color: "white",
-                        fontWeight: "bold",
-                        fontSize: "16px",
-                        boxShadow: "0 4px #1976D2",
-                        cursor: "pointer"
-                    }} onMouseDown={() => setIsDown(true)}
-                            onTouchStart={(e) => {
-                                e.preventDefault();
-                                setIsDown(true);
-                            }}
-                            onMouseUp={() => setIsStop(true)}
-                            onTouchEnd={() => setIsStop(true)}>后退
-                    </button>
+
+                {/* 切换 */}
+                <div style={{marginTop: "40px"}}>
+                    <ControlButton
+                        size="wide"
+                        variant="secondary"
+                        onClick={() => setIsSimulator(!isSimulator)}
+                    >
+                        切换模式
+                    </ControlButton>
                 </div>
             </div>
 
-            <div style={{marginTop: "40px", display: "flex", justifyContent: "center", gap: "20px"}}>
-                <button style={{
-                    background: "#ff9800",
-                    boxShadow: "0 4px #ef6c00",
-                    width: "120px",
-                    height: "90px",
-                    borderRadius: "15px",
-                    color: "#fff",
-                    fontWeight: "bold",
-                    fontSize: "16px",
-                    border: "none"
-                }} onClick={() => send("grab")}>
-                    抓取 (Grab)
-                </button>
-                <button style={{
-                    background: "#4CAF50",
-                    boxShadow: "0 4px #388E3C",
-                    width: "120px",
-                    height: "90px",
-                    borderRadius: "15px",
-                    color: "#fff",
-                    fontWeight: "bold",
-                    fontSize: "16px",
-                    border: "none"
-                }} onClick={() => send("release")}>
-                    释放 (Release)
-                </button>
-            </div>
-
-            <div style={{marginTop: "20px", color: "#666"}}>{status}</div>
-
-            <div style={{display: 'flex', flexDirection: 'row', justifyContent: 'space-around'}}>
-                <div style={{marginTop: "20px"}}>
-                    <button style={{
-                        background: "#9C27B0",
-                        boxShadow: "0 4px #7B1FA2",
-                        width: "150px",
-                        height: "100px",
-                        fontSize: "14px",
-                        border: "none",
-                        borderRadius: "15px",
-                        color: "#fff"
-                    }} onClick={redirect}>
-                        点击进入实训平台
-                    </button>
-                </div>
-                <div style={{marginTop: "20px"}}>
-                    <button style={{
-                        background: "#9C27B0",
-                        boxShadow: "0 4px #7B1FA2",
-                        width: "150px",
-                        height: "100px",
-                        fontSize: "14px",
-                        border: "none",
-                        borderRadius: "15px",
-                        color: "#fff"
-                    }} onClick={() => {
-                        setIsSimulator(!isSimulator);
-                    }}>
-                        {isSimulator ? '模拟遥控器' : '小车遥控器'}
-                    </button>
-                </div>
+            <div style={{marginTop: "20px", opacity: 0.5, fontSize: "13px"}}>
+                {status}
             </div>
         </div>
     );
