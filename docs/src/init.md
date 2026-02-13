@@ -114,7 +114,7 @@ app::sysinit:/etc/init.d/appinit start
 ```
 
 ## 3.6 网络配置
-修改 /var/run/wpa_supplicant 文件
+修改 /etc/wpa_supplicant.conf 文件
 ```shell
 ctrl_interface=/var/run/wpa_supplicant
 ap_scan=1
