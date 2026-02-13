@@ -17,6 +17,9 @@ const MAP_H = 600;
 const INITIAL_LOCAL_W = MAP_W / 2;
 const INITIAL_LOCAL_H = MAP_H / 2;
 
+const FPS = 20
+const frameInterval = 1000 / FPS
+
 const SimPage = () => {
     const canvasRef = useRef<HTMLCanvasElement | null>(null)
     const fpvRef = useRef<HTMLCanvasElement | null>(null);     // 第一人称视角
@@ -280,15 +283,24 @@ const SimPage = () => {
         window.addEventListener('keydown', handleKeyDown)
         window.addEventListener('keyup', handleKeyUp)
 
+        let lastTime = 0;
+
         // 2. 核心渲染循环
-        const renderLoop = () => {
+        const renderLoop = (currentTime: number) => {
+            animationFrameId = window.requestAnimationFrame(renderLoop)
+
+            const delta = currentTime - lastTime
+
+            if (delta < frameInterval) return
+
+            lastTime = currentTime - (delta % frameInterval)
+
             updatePhysics()
             drawTopDown(ctxTop)
             drawFirstPerson(ctxFpv)
-            animationFrameId = window.requestAnimationFrame(renderLoop)
         }
 
-        renderLoop()
+        animationFrameId = window.requestAnimationFrame(renderLoop)
 
         // 清理函数
         return () => {

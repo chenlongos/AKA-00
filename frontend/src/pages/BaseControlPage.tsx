@@ -2,6 +2,9 @@ import {useEffect, useRef, useState} from "react";
 import {sendAction} from "../api/socket.ts";
 import ControlButton from "../components/ControlButton.tsx";
 
+const FPS = 20
+const frameInterval = 1000 / FPS
+
 const BaseControlPage = () => {
     const [ip, setIp] = useState("获取中...");
     const [status, setStatus] = useState("准备就绪");
@@ -57,15 +60,23 @@ const BaseControlPage = () => {
     useEffect(() => {
         if (!isSimulator) return; // 只在模拟器模式运行
         let animationFrameId: number
-        const renderLoop = () => {
+        let lastTime = 0;
+        const renderLoop = (currentTime: number) => {
+            animationFrameId = window.requestAnimationFrame(renderLoop)
             const action = currentActionRef.current;
+            const delta = currentTime - lastTime
+
+            if (delta < frameInterval) return
+
+            lastTime = currentTime - (delta % frameInterval)
+
             if (action !== null) {
                 sendAction(action); // 每帧发送当前动作
             }
             animationFrameId = requestAnimationFrame(renderLoop);
         };
 
-        renderLoop()
+        animationFrameId = requestAnimationFrame(renderLoop);
 
         return () => {
             window.cancelAnimationFrame(animationFrameId)

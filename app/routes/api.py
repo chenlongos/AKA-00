@@ -5,13 +5,24 @@ import time
 
 from flask import Blueprint, request, jsonify
 
+from arm import STS3215, grab, release, arm_init
+from motor import Motor, forward, backward, turn_left, turn_right, sleep, brake
+
+left_motor = Motor(4, 0, 1)
+right_motor = Motor(4, 2, 3)
+
+servo = STS3215("/dev/ttyS2", baudrate=115200)
+arm_init(servo)
+
 api_bp = Blueprint("api", __name__)
+
 
 @api_bp.route("/ip")
 def ip():
     return jsonify({
         "ip": get_ip()
     })
+
 
 @api_bp.route('/control', methods=['GET'])
 def control():
@@ -22,26 +33,26 @@ def control():
     speed = speed * 240 // 50
     # --- 运动逻辑 ---
     if action == 'up':
-        print('up')
-        # forward(left_motor, right_motor, speed)
+        # print('up')
+        forward(left_motor, right_motor, speed)
     elif action == 'down':
-        print('down')
-        # backward(left_motor, right_motor, speed)
+        # print('down')
+        backward(left_motor, right_motor, speed)
     elif action == 'left':
-        print('left')
-        # turn_left(left_motor, right_motor, speed)
+        # print('left')
+        turn_left(left_motor, right_motor, speed)
     elif action == 'right':
-        print('right')
-        # turn_right(left_motor, right_motor, speed)
+        # print('right')
+        turn_right(left_motor, right_motor, speed)
     elif action == 'stop':
-        print('stop')
-        # brake(left_motor, right_motor)
+        # print('stop')
+        brake(left_motor, right_motor)
     elif action == 'grab':
-        print('grab')
-        # grab(servo)
+        # print('grab')
+        grab(servo)
     elif action == 'release':
-        print('release')
-        # release(servo)
+        # print('release')
+        release(servo)
 
     if milliseconds > 0 and action in ['up', 'down', 'left', 'right']:
         time.sleep(milliseconds / 1000.0)
@@ -50,6 +61,7 @@ def control():
         return jsonify({"status": "success", "message": f"{action} for {milliseconds}s done"})
 
     return jsonify({"status": "success", "action": action})
+
 
 def get_ip(ifname="wlan0"):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
