@@ -73,7 +73,6 @@ const BaseControlPage = () => {
             if (action !== null) {
                 sendAction(action); // 每帧发送当前动作
             }
-            animationFrameId = requestAnimationFrame(renderLoop);
         };
 
         animationFrameId = requestAnimationFrame(renderLoop);
