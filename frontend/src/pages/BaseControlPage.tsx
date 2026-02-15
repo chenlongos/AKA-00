@@ -1,8 +1,17 @@
-import {useEffect, useState} from "react";
+import {useEffect, useRef, useState} from "react";
+import {sendAction} from "../api/socket.ts";
+import ControlButton from "../components/ControlButton.tsx";
+
+const FPS = 20
+const frameInterval = 1000 / FPS
 
 const BaseControlPage = () => {
     const [ip, setIp] = useState("获取中...");
     const [status, setStatus] = useState("准备就绪");
+    const [isSimulator, setIsSimulator] = useState(false);
+
+    // 当前正在执行的动作（用于模拟器每帧发送）
+    const currentActionRef = useRef<string | null>(null);
 
     useEffect(() => {
         const getIp = () => {
@@ -14,8 +23,7 @@ const BaseControlPage = () => {
                     setIp("IP: " + data.ip);
                     setStatus("准备就绪");
                 })
-                .catch((err) => {
-                    console.error(err);
+                .catch(() => {
                     setStatus("获取 IP 失败");
                 });
         };
@@ -25,11 +33,55 @@ const BaseControlPage = () => {
 
     const send = (action: string) => {
         setStatus("执行: " + action);
-        fetch(`/api/control?action=${action}&speed=50&time=0`)
-            .then((res) => res.json())
-            .then((data) => console.log(data))
-            .catch((err) => setStatus("错误: " + err));
+        if (!isSimulator) {
+            console.log("http send " + action);
+            fetch(`/api/control?action=${action}&speed=50&time=0`)
+                .then((res) => res.json())
+                .then((data) => console.log(data))
+                .catch((err) => setStatus("错误: " + err));
+        }
     };
+
+    // ==== 按钮事件处理 ====
+    const handlePressStart = (action: string) => {
+        currentActionRef.current = action;
+        if (!isSimulator) {
+            send(action); // 实车立即发
+        }
+    };
+
+    const handlePressEnd = () => {
+        currentActionRef.current = null;
+        if (!isSimulator) {
+            send("stop"); // 实车发 stop
+        }
+    };
+
+    useEffect(() => {
+        if (!isSimulator) return; // 只在模拟器模式运行
+        let animationFrameId: number
+        let lastTime = 0;
+        const renderLoop = (currentTime: number) => {
+            animationFrameId = window.requestAnimationFrame(renderLoop)
+            const action = currentActionRef.current;
+            const delta = currentTime - lastTime
+
+            if (delta < frameInterval) return
+
+            lastTime = currentTime - (delta % frameInterval)
+
+            if (action !== null) {
+                sendAction(action); // 每帧发送当前动作
+            }
+        };
+
+        animationFrameId = requestAnimationFrame(renderLoop);
+
+        return () => {
+            window.cancelAnimationFrame(animationFrameId)
+        }
+
+    }, [isSimulator])
 
     const redirect = () => {
         setStatus("获取 IP...");
@@ -46,145 +98,152 @@ const BaseControlPage = () => {
                 alert("无法获取IP，请稍后重试");
             });
     };
+
     return (
-        <div style={{
-            fontFamily: "sans-serif",
-            textAlign: "center",
-            background: "#f0f0f0",
-            minHeight: "100vh",
-            padding: "20px"
-        }}>
-            <h2>AKA-00机器人控制</h2>
-            <h3>{ip}</h3>
+        <div
+            style={{
+                fontFamily: "system-ui, sans-serif",
+                background: "#0f172a",
+                color: "white",
+                minHeight: "100vh",
+                padding: "10px",
+                textAlign: "center",
+                overflow: "hidden",
+            }}
+        >
+            <h2>AKA-00 控制台</h2>
+            <div style={{opacity: 0.6}}>{ip}</div>
 
-            <div style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(3, 100px)",
-                gridGap: "15px",
-                justifyContent: "center",
-                marginTop: "50px"
-            }}>
-                <div style={{gridColumn: 2}}>
-                    <button style={{
-                        width: "90px",
-                        height: "90px",
-                        border: "none",
-                        borderRadius: "15px",
-                        background: "#2196F3",
-                        color: "white",
-                        fontWeight: "bold",
-                        fontSize: "16px",
-                        boxShadow: "0 4px #1976D2",
-                        cursor: "pointer"
-                    }} onClick={() => send("up")}>前进
-                    </button>
-                </div>
-                <div style={{gridRow: 2, gridColumn: 1}}>
-                    <button style={{
-                        width: "90px",
-                        height: "90px",
-                        border: "none",
-                        borderRadius: "15px",
-                        background: "#2196F3",
-                        color: "white",
-                        fontWeight: "bold",
-                        fontSize: "16px",
-                        boxShadow: "0 4px #1976D2",
-                        cursor: "pointer"
-                    }} onClick={() => send("left")}>左转
-                    </button>
-                </div>
-                <div style={{gridRow: 2, gridColumn: 2}}>
-                    <button style={{
-                        background: "#f44336",
-                        boxShadow: "0 4px #d32f2f",
-                        width: "90px",
-                        height: "90px",
-                        borderRadius: "15px",
-                        color: "#fff",
-                        fontWeight: "bold",
-                        fontSize: "16px",
-                        border: "none"
-                    }} onClick={() => send("stop")}>
-                        停止
-                    </button>
-                </div>
-                <div style={{gridRow: 2, gridColumn: 3}}>
-                    <button style={{
-                        width: "90px",
-                        height: "90px",
-                        border: "none",
-                        borderRadius: "15px",
-                        background: "#2196F3",
-                        color: "white",
-                        fontWeight: "bold",
-                        fontSize: "16px",
-                        boxShadow: "0 4px #1976D2",
-                        cursor: "pointer"
-                    }} onClick={() => send("right")}>右转
-                    </button>
-                </div>
-                <div style={{gridRow: 3, gridColumn: 2}}>
-                    <button style={{
-                        width: "90px",
-                        height: "90px",
-                        border: "none",
-                        borderRadius: "15px",
-                        background: "#2196F3",
-                        color: "white",
-                        fontWeight: "bold",
-                        fontSize: "16px",
-                        boxShadow: "0 4px #1976D2",
-                        cursor: "pointer"
-                    }} onClick={() => send("down")}>后退
-                    </button>
-                </div>
-            </div>
-
-            <div style={{marginTop: "40px", display: "flex", justifyContent: "center", gap: "20px"}}>
-                <button style={{
-                    background: "#ff9800",
-                    boxShadow: "0 4px #ef6c00",
-                    width: "120px",
-                    height: "90px",
-                    borderRadius: "15px",
-                    color: "#fff",
-                    fontWeight: "bold",
-                    fontSize: "16px",
-                    border: "none"
-                }} onClick={() => send("grab")}>
-                    抓取 (Grab)
-                </button>
-                <button style={{
-                    background: "#4CAF50",
-                    boxShadow: "0 4px #388E3C",
-                    width: "120px",
-                    height: "90px",
-                    borderRadius: "15px",
-                    color: "#fff",
-                    fontWeight: "bold",
-                    fontSize: "16px",
-                    border: "none"
-                }} onClick={() => send("release")}>
-                    释放 (Release)
-                </button>
-            </div>
-
-            <div style={{marginTop: "20px", color: "#666"}}>{status}</div>
-
-            <div style={{marginTop: "20px"}}>
-                <button style={{
-                    background: "#9C27B0",
-                    boxShadow: "0 4px #7B1FA2",
-                    width: "150px",
-                    height: "100px",
+            {/* 模式状态 */}
+            <div
+                style={{
+                    marginTop: "15px",
+                    padding: "8px 15px",
+                    background: "#1e293b",
+                    borderRadius: "12px",
+                    display: "inline-block",
                     fontSize: "14px",
-                    border: "none",
-                    borderRadius: "15px",
-                    color: "#fff"
-                }} onClick={redirect}>
-                    点击进入实训平台
-                </button>
+                }}
+            >
+                模式：
+                <span
+                    style={{
+                        marginLeft: "8px",
+                        color: isSimulator ? "#22c55e" : "#3b82f6",
+                        fontWeight: "bold",
+                    }}
+                >
+          {isSimulator ? "模拟" : "实车"}
+        </span>
+            </div>
+
+            {/* 方向区 */}
+            <div
+                style={{
+                    display: "flex",
+                    gap: "20px",
+                    justifyItems: "center",
+                    flexDirection: "column",
+                    alignItems: "center"
+                }}
+            >
+                <div/>
+                <ControlButton
+                    onPressStart={() => handlePressStart("up")}
+                    onPressEnd={() => handlePressEnd()}
+                >
+                    前进
+                </ControlButton>
+                <div style={{display: 'flex', gap: "20px"}}>
+                    <ControlButton
+                        onPressStart={() => handlePressStart("left")}
+                        onPressEnd={() => handlePressEnd()}
+                    >
+                        左转
+                    </ControlButton>
+                    <ControlButton
+                        variant="danger"
+                        onPressStart={() => handlePressStart("stop")}
+                        onPressEnd={() => handlePressEnd()}
+                    >
+                        停止
+                    </ControlButton>
+                    <ControlButton
+                        onPressStart={() => handlePressStart("right")}
+                        onPressEnd={() => handlePressEnd()}
+                    >
+                        右转
+                    </ControlButton>
+                </div>
+
+                <ControlButton
+                    onPressStart={() => handlePressStart("down")}
+                    onPressEnd={() => handlePressEnd()}
+                >
+                    后退
+                </ControlButton>
+                <div/>
+            </div>
+
+            {/* 功能按钮 */}
+            <div
+                style={{
+                    display: "flex",
+                    justifyContent: "center",
+                    gap: "20px",
+                    flexWrap: "wrap",
+                }}
+            >
+                <ControlButton
+                    variant="success"
+                    size="wide"
+                    onClick={() => send("grab")}
+                >
+                    抓取
+                </ControlButton>
+
+                <ControlButton
+                    variant="secondary"
+                    size="wide"
+                    onClick={() => send("release")}
+                >
+                    释放
+                </ControlButton>
+            </div>
+
+            <div
+                style={{
+                    display: "flex",
+                    justifyContent: "center",
+                    gap: "20px",
+                    flexWrap: "wrap",
+                }}
+            >
+                {/* 跳转 */}
+                <div style={{marginTop: "40px"}}>
+                    <ControlButton
+                        size="wide"
+                        variant="secondary"
+                        onClick={() => redirect()}
+                    >
+                        进入试验平台
+                    </ControlButton>
+                </div>
+
+                {/* 切换 */}
+                <div style={{marginTop: "40px"}}>
+                    <ControlButton
+                        size="wide"
+                        variant="secondary"
+                        onClick={() => setIsSimulator(!isSimulator)}
+                    >
+                        切换模式
+                    </ControlButton>
+                </div>
+            </div>
+
+            <div style={{marginTop: "20px", opacity: 0.5, fontSize: "13px"}}>
+                {status}
             </div>
         </div>
     );
