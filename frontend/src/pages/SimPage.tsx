@@ -1,5 +1,5 @@
-import {useEffect, useRef} from "react"
-import {getCarState, resetCar, sendAction, socket} from "../api/socket.ts";
+import {useEffect, useRef, useState} from "react"
+import {actInfer, getCarState, resetCar, sendAction, socket} from "../api/socket.ts";
 import type {Car} from "../model/car.ts";
 
 // 定义障碍物 (x, y, w, h, color)
@@ -29,6 +29,9 @@ const SimPage = () => {
         y: 300,          // 初始 Y 坐标
         angle: -Math.PI / 2, // 初始角度 (弧度)，-PI/2 朝上
     })
+    const [actEnabled, setActEnabled] = useState(false)
+    const [actStatus, setActStatus] = useState("ACT: off")
+    const actCommandRef = useRef<string>("stop")
 
     useEffect(() => {
         getCarState()
@@ -37,16 +40,40 @@ const SimPage = () => {
             carState.current.y = car.y + INITIAL_LOCAL_H
             carState.current.angle = car.angle
         });
+        socket.on('act_action', (payload: {action?: number[][][]; error?: string}) => {
+            if (payload?.error) {
+                setActStatus(`ACT: ${payload.error}`)
+                actCommandRef.current = "stop"
+                return
+            }
+            const action = payload?.action
+            if (!action || action.length === 0 || action[0].length === 0) {
+                setActStatus("ACT: empty")
+                actCommandRef.current = "stop"
+                return
+            }
+            const cmd = mapActionToCommand(action[0][0])
+            actCommandRef.current = cmd
+            setActStatus(`ACT: ${cmd}`)
+        })
         return () => {
             socket.off('car_state');
+            socket.off('act_action');
         }
     }, [])
 
     const keys = useRef<Record<string, boolean>>({})
 
-    // --- 物理计算逻辑 ---
     // eslint-disable-next-line react-hooks/exhaustive-deps
     const updatePhysics = () => {
+        if (actEnabled) {
+            sendAction(actCommandRef.current)
+            const state = carState.current
+            if (checkCollision(state.x, state.y)) {
+                sendAction("stop")
+            }
+            return
+        }
         // 前进 / 后退
         if (keys.current['ArrowUp'] || keys.current['KeyW']) {
             sendAction("up")
@@ -77,6 +104,28 @@ const SimPage = () => {
             y > obs.y && y < obs.y + obs.h
         );
     };
+
+    const buildObservation = () => {
+        const {x, y, angle} = carState.current
+        const state = new Array(14).fill(0)
+        state[0] = x
+        state[1] = y
+        state[2] = angle
+        const envState = [x, y, angle, 0, 0, 0]
+        return {observation: {state, environment_state: envState}}
+    }
+
+    const mapActionToCommand = (vec: number[]) => {
+        if (!Array.isArray(vec) || vec.length === 0) return "stop"
+        const v0 = vec[0] ?? 0
+        const v1 = vec[1] ?? 0
+        const magnitude = Math.abs(v0) + Math.abs(v1)
+        if (magnitude < 0.1) return "stop"
+        if (Math.abs(v0) >= Math.abs(v1)) {
+            return v0 >= 0 ? "up" : "down"
+        }
+        return v1 >= 0 ? "right" : "left"
+    }
 
     const drawGrid = (ctx: CanvasRenderingContext2D, w: number, h: number) => {
         ctx.strokeStyle = '#e0e0e0'
@@ -295,6 +344,9 @@ const SimPage = () => {
 
             lastTime = currentTime - (delta % frameInterval)
 
+            if (actEnabled) {
+                actInfer(buildObservation())
+            }
             updatePhysics()
             drawTopDown(ctxTop)
             drawFirstPerson(ctxFpv)
@@ -308,7 +360,7 @@ const SimPage = () => {
             window.removeEventListener('keyup', handleKeyUp)
             window.cancelAnimationFrame(animationFrameId)
         }
-    }, [drawTopDown, drawFirstPerson, updatePhysics])
+    }, [actEnabled, drawTopDown, drawFirstPerson, updatePhysics])
 
     // --- 外部指令模拟 ---
     const sendCommand = (cmd: string) => {
@@ -349,12 +401,16 @@ const SimPage = () => {
                         </div>
                     </div>
 
-                    <div style={{display: 'flex', gap: '10px'}}>
+                    <div style={{display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center'}}>
                         <button onClick={() => sendCommand('ArrowUp')}>指令: 前进</button>
                         <button onClick={() => sendCommand('ArrowLeft')}>指令: 左转</button>
                         <button onClick={() => sendCommand('ArrowRight')}>指令: 右转</button>
                         <button onClick={() => sendCommand('ArrowDown')}>指令: 后退</button>
                         <button onClick={resetCar}>重置 (Reset)</button>
+                        <button onClick={() => setActEnabled(v => !v)}>切换 ACT</button>
+                    </div>
+                    <div style={{marginTop: 8, fontSize: 12, opacity: 0.8}}>
+                        {actStatus}
                     </div>
                 </div>
                 {/* 右侧：第一人称 */}

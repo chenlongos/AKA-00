@@ -14,3 +14,7 @@ export const resetCar = () => {
 export const getCarState = () => {
     socket.emit('get_car_state');
 }
+
+export const actInfer = (payload: Record<string, unknown>) => {
+    socket.emit('act_infer', payload);
+}
