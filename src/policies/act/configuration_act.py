@@ -9,6 +9,13 @@ class ACTConfig:
     # Transformer layers.
     pre_norm: bool = False
     dim_model: int = 512 # 模型维度
+    n_encoder_layers: int = 4
+    n_decoder_layers: int = 4
+    n_vae_encoder_layers: int = 4
+    n_heads: int = 8
+    dim_feedforward: int = 2048
+    dropout: float = 0.1
+    feedforward_activation: str = "relu"
 
     # Vision backbone.
     vision_backbone: str = "resnet18"
