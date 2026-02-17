@@ -1,29 +1,70 @@
 import {useEffect, useRef, useState} from "react"
-import {actInfer, getCarState, resetCar, sendAction, socket} from "../api/socket.ts";
-import type {Car} from "../model/car.ts";
+import {actInfer, getCarState, resetCar, sendAction, socket} from "../api/socket";
+import type {Car} from "../model/car";
+import type {Obstacle} from "../model/obstacle";
+import {isPointInObstacle} from "../model/obstacle";
+import {useObstacleStore} from "../store/obstacleStore";
+import {
+    renderTopDownObstacles,
+    obstaclesToWalls,
+    computeSprites,
+    renderFirstPersonWalls,
+    renderFirstPersonSprites
+} from "../components/obstacle/ObstacleRenderer";
+import {ObstacleManager} from "../components/obstacle/ObstacleManager";
 
-// 定义障碍物 (x, y, w, h, color)
-const OBSTACLES = [
-    {x: 200, y: 150, w: 100, h: 100, color: '#8e44ad'}, // 紫色墙
-    {x: 400, y: 400, w: 50, h: 150, color: '#e67e22'},  // 橙色墙
-    {x: 100, y: 400, w: 150, h: 50, color: '#16a085'},  // 绿色墙
-    {x: 450, y: 100, w: 50, h: 50, color: '#c0392b'},   // 红色柱子
-];
+const MAP_W = 800; 
+const MAP_H = 600; 
 
-// 地图尺寸
-const MAP_W = 800;
-const MAP_H = 600;
-
+// 坐标偏移量：将后端坐标(中心为原点)转换为前端坐标(左上角为原点)
 const INITIAL_LOCAL_W = MAP_W / 2;
 const INITIAL_LOCAL_H = MAP_H / 2;
 
+// 渲染帧率设置
 const FPS = 20
 const frameInterval = 1000 / FPS
 
+// ============================================================
+// SimPage 组件 - 小车模拟器主页面
+// 包含俯视图(上帝视角)和第一人称视角两个画布
+// ============================================================
 const SimPage = () => {
-    const canvasRef = useRef<HTMLCanvasElement | null>(null)
-    const fpvRef = useRef<HTMLCanvasElement | null>(null);     // 第一人称视角
+    // ----------------------------------------
+    // Ref 引用：用于访问 DOM 元素
+    // ----------------------------------------
+    const canvasRef = useRef<HTMLCanvasElement | null>(null)   // 俯视图画布引用
+    const fpvRef = useRef<HTMLCanvasElement | null>(null);     // 第一人称视角画布引用
 
+    // ----------------------------------------
+    // 状态管理：障碍物数据
+    // ----------------------------------------
+    // 使用 zustand store 管理障碍物状态
+    const { obstacles, setObstacles, updateObstacle, removeObstacle, selectObstacle, selectedObstacleId } = useObstacleStore();
+    
+    // 使用 useRef 存储障碍物的实时引用
+    // 目的：解决渲染循环(每帧调用)中访问最新状态的闭包问题
+    // 原理：obstaclesRef.current 始终指向最新的 obstacles 数组
+    const obstaclesRef = useRef(obstacles);
+
+    // 建立 zustand store 和 useRef 之间的同步
+    // 当 obstacles 更新时，obstaclesRef.current 也会同步更新
+    useEffect(() => {
+        obstaclesRef.current = obstacles;
+    }, [obstacles]);
+    
+    // 拖拽状态管理
+    const draggingRef = useRef({
+        isDragging: false,
+        obstacleId: null as string | null
+    });
+    
+    // 障碍物创建状态（用于画布点击创建）
+    const [selectedObstacleType, _setSelectedObstacleType] = useState<'RECT' | 'CIRCLE'>('RECT');
+    const [isCreatingObstacle, _setIsCreatingObstacle] = useState(false);
+
+    // ----------------------------------------
+    // 状态管理：小车状态 (使用 ref 避免频繁重渲染)
+    // ----------------------------------------
     const carState = useRef({
         x: 400,          // 初始 X 坐标
         y: 300,          // 初始 Y 坐标
@@ -33,12 +74,22 @@ const SimPage = () => {
     const [actStatus, setActStatus] = useState("ACT: off")
     const actCommandRef = useRef<string>("stop")
 
+    const handleCreateObstacleInFront = () => {
+        const {x, y, angle} = carState.current;
+        const frontX = x + Math.cos(angle) * 50;
+        const frontY = y + Math.sin(angle) * 50;
+        createObstacle(frontX, frontY);
+    };
+
     useEffect(() => {
         getCarState()
         socket.on('car_state', (car: Car) => {
-            carState.current.x = car.x + INITIAL_LOCAL_W
-            carState.current.y = car.y + INITIAL_LOCAL_H
-            carState.current.angle = car.angle
+            const newState = {
+                x: car.x + INITIAL_LOCAL_W,
+                y: car.y + INITIAL_LOCAL_H,
+                angle: car.angle
+            };
+            carState.current = newState;
         });
         socket.on('act_action', (payload: {action?: number[][][]; error?: string}) => {
             if (payload?.error) {
@@ -87,22 +138,48 @@ const SimPage = () => {
         if (keys.current['ArrowRight'] || keys.current['KeyD']) {
             sendAction("right")
         }
-        const state = carState.current
-        // 简单的边界检测 (碰到墙壁反弹)
+        
+        // 旋转选中的障碍物
+        if (selectedObstacleId) {
+            if (keys.current['KeyQ']) {
+                // 向左旋转（逆时针）
+                const obstacle = obstacles.find(obs => obs.id === selectedObstacleId);
+                if (obstacle && obstacle.type === 'RECT') {
+                    const currentAngle = obstacle.angle || 0;
+                    updateObstacle(selectedObstacleId, { angle: currentAngle - 0.05 });
+                }
+            }
+            if (keys.current['KeyE']) {
+                // 向右旋转（顺时针）
+                const obstacle = obstacles.find(obs => obs.id === selectedObstacleId);
+                if (obstacle && obstacle.type === 'RECT') {
+                    const currentAngle = obstacle.angle || 0;
+                    updateObstacle(selectedObstacleId, { angle: currentAngle + 0.05 });
+                }
+            }
+            if (keys.current['Delete']) {
+                // 删除选中的障碍物
+                removeObstacle(selectedObstacleId);
+                selectObstacle(null);
+            }
+        }
+        
+        const state = carState.current;
         if (checkCollision(state.x, state.y)) {
             sendAction("stop")
         }
     }
 
-    // 检查点是否在任何障碍物内
+    // ============================================================
+    // 碰撞检测函数
+    // 参数：x, y - 要检测的坐标点
+    // 返回：boolean - true 表示发生碰撞，false 表示安全
+    // ============================================================
     const checkCollision = (x: number, y: number) => {
-        // 边界检查
+        // 边界检查：超出地图范围视为碰撞
         if (x < 0 || x > MAP_W || y < 0 || y > MAP_H) return true;
-        // 障碍物检查
-        return OBSTACLES.some(obs =>
-            x > obs.x && x < obs.x + obs.w &&
-            y > obs.y && y < obs.y + obs.h
-        );
+        // 障碍物检查：使用 obstaclesRef.current 获取最新的障碍物数据
+        return obstaclesRef.current.some(obs => isPointInObstacle(x, y, obs));
     };
 
     const buildObservation = () => {
@@ -162,8 +239,11 @@ const SimPage = () => {
         ctx.restore();
     }
 
-    // --- 绘图逻辑 ---
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // ============================================================
+    // 俯视图绘制函数 (上帝视角)
+    // 参数：ctx - Canvas 2D 绘图上下文
+    // 功能：绘制网格、障碍物、小车和方向指示线
+    // ============================================================
     const drawTopDown = (ctx: CanvasRenderingContext2D) => {
         // 清空画布
         ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
@@ -174,13 +254,8 @@ const SimPage = () => {
         // 保存当前绘图状态
         ctx.save()
 
-        // 2. 画障碍物
-        OBSTACLES.forEach(obs => {
-            ctx.fillStyle = obs.color;
-            ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
-            ctx.strokeStyle = '#333';
-            ctx.strokeRect(obs.x, obs.y, obs.w, obs.h);
-        });
+        // 2. 画障碍物：使用提取的渲染函数
+        renderTopDownObstacles(ctx, obstaclesRef.current, selectedObstacleId);
 
         // 3. 绘制小车 (此时原点就是车身中心)
         drawCarBody(ctx)
@@ -198,112 +273,55 @@ const SimPage = () => {
         ctx.restore()
     }
 
-    // 数学公式：射线与线段相交检测
-    const getRaySegmentIntersection = (rx: number, ry: number, rdx: number, rdy: number, wall: {
-        x1: number,
-        y1: number,
-        x2: number,
-        y2: number
-    }) => {
-        const {x1, y1, x2, y2} = wall;
-        const v1x = x1 - rx;
-        const v1y = y1 - ry;
-        const v2x = x2 - x1;
-        const v2y = y2 - y1;
-        const v3x = -rdx; // 射线方向反转
-        const v3y = -rdy;
-
-        const cross = v2x * v3y - v2y * v3x;
-        if (Math.abs(cross) < 0.0001) return null; // 平行
-
-        const t1 = (v2x * v1y - v2y * v1x) / cross; // 射线距离
-        const t2 = (v3x * v1y - v3y * v1x) / cross; // 线段比例 (0~1)
-
-        // t1 > 0 代表射线前方，t2 在 0~1 代表交点在线段上
-        if (t1 > 0 && t2 >= 0 && t2 <= 1) {
-            return t1;
-        }
-        return null;
+    // 检查鼠标点击是否在障碍物内
+    const getObstacleAtPosition = (x: number, y: number) => {
+        return obstaclesRef.current.find(obs => isPointInObstacle(x, y, obs));
+    };
+    
+    // 创建新障碍物（在画布点击时使用）
+    const createObstacle = (x: number, y: number) => {
+        const newObstacle: Obstacle = {
+            id: `obs_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+            type: selectedObstacleType,
+            x,
+            y,
+            w: selectedObstacleType === 'RECT' ? 50 : undefined,
+            h: selectedObstacleType === 'RECT' ? 30 : undefined,
+            r: selectedObstacleType === 'CIRCLE' ? 20 : undefined,
+            color: selectedObstacleType === 'RECT' ? '#8B4513' : '#2E8B57',
+            angle: 0
+        };
+        
+        setObstacles([...obstacles, newObstacle]);
     };
 
-    // 发射单条射线，寻找最近的交点
-    const castRay = (sx: number, sy: number, angle: number) => {
-        const cos = Math.cos(angle);
-        const sin = Math.sin(angle);
-        let minDist = Infinity;
-        let hitColor = null;
-
-        // 将所有障碍物转换为线段进行检测
-        const boundaries = [
-            {x1: 0, y1: 0, x2: MAP_W, y2: 0, color: '#333'}, // 上墙
-            {x1: MAP_W, y1: 0, x2: MAP_W, y2: MAP_H, color: '#333'}, // 右墙
-            {x1: MAP_W, y1: MAP_H, x2: 0, y2: MAP_H, color: '#333'}, // 下墙
-            {x1: 0, y1: MAP_H, x2: 0, y2: 0, color: '#333'}  // 左墙
-        ];
-
-        // 把矩形障碍物拆成4条线段
-        OBSTACLES.forEach(obs => {
-            const c = obs.color;
-            boundaries.push({x1: obs.x, y1: obs.y, x2: obs.x + obs.w, y2: obs.y, color: c});
-            boundaries.push({x1: obs.x + obs.w, y1: obs.y, x2: obs.x + obs.w, y2: obs.y + obs.h, color: c});
-            boundaries.push({x1: obs.x + obs.w, y1: obs.y + obs.h, x2: obs.x, y2: obs.y + obs.h, color: c});
-            boundaries.push({x1: obs.x, y1: obs.y + obs.h, x2: obs.x, y2: obs.y, color: c});
-        });
-
-        // 检测射线与每一条线段的交点
-        boundaries.forEach(wall => {
-            const dist = getRaySegmentIntersection(sx, sy, cos, sin, wall);
-            if (dist !== null && dist < minDist) {
-                minDist = dist;
-                hitColor = wall.color;
-            }
-        });
-
-        return minDist === Infinity ? null : {distance: minDist, color: hitColor};
-    };
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // 帧率控制变量
     const drawFirstPerson = (ctx: CanvasRenderingContext2D) => {
         const w = ctx.canvas.width;
         const h = ctx.canvas.height;
         const {x, y, angle} = carState.current;
 
         // 天空和地面
-        ctx.fillStyle = '#87CEEB'; // 天空蓝
+        ctx.fillStyle = '#87CEEB';
         ctx.fillRect(0, 0, w, h / 2);
-        ctx.fillStyle = '#7f8c8d'; // 地面灰
+        ctx.fillStyle = '#7f8c8d';
         ctx.fillRect(0, h / 2, w, h / 2);
 
-        // 参数
-        const fov = Math.PI / 3; // 60度视野
-        const rayCount = w / 4;  // 射线数量 (为了性能，每4个像素投射一条，然后画宽一点)
+        const fov = Math.PI / 3;
+        const rayCount = w / 4;
         const rayWidth = w / rayCount;
 
-        // 遍历每一条射线
-        for (let i = 0; i < rayCount; i++) {
-            // 当前射线角度 = 车角度 - 半个FOV + 增量
-            const rayAngle = (angle + Math.PI - fov / 2) + (i / rayCount) * fov;
+        // 每帧重新计算墙段（确保障碍物位置更新时能正确渲染）
+        const walls = obstaclesToWalls(obstaclesRef.current);
 
-            // 计算这一条射线碰到了什么，以及距离是多少
-            const hit = castRay(x, y, rayAngle);
+        // 渲染墙体并获取深度缓冲
+        const depthBuffer = renderFirstPersonWalls(ctx, walls, x, y, angle, w, h);
 
-            if (hit) {
-                // 修正鱼眼效应 (核心步骤：如果不乘 cos，墙壁会看起来弯曲)
-                const correctedDist = hit.distance * Math.cos(rayAngle - angle);
+        // 计算精灵数据
+        const sprites = computeSprites(obstaclesRef.current, x, y, angle, fov, w, h);
 
-                // 计算墙在屏幕上的高度 (距离越近，墙越高)
-                const wallHeight = (h * 40) / correctedDist;
-
-                // 绘制墙体垂直线条
-                // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-                // @ts-expect-error
-                ctx.fillStyle = hit.color;
-                // 根据距离加一点阴影 (越远越暗)
-                ctx.globalAlpha = Math.max(0.3, 1 - correctedDist / 600);
-                ctx.fillRect(i * rayWidth, (h - wallHeight) / 2, rayWidth + 1, wallHeight);
-                ctx.globalAlpha = 1.0;
-            }
-        }
+        // 渲染精灵
+        renderFirstPersonSprites(ctx, sprites, depthBuffer, rayWidth, rayCount);
     }
 
 
@@ -331,6 +349,58 @@ const SimPage = () => {
 
         window.addEventListener('keydown', handleKeyDown)
         window.addEventListener('keyup', handleKeyUp)
+        
+        // 2. 监听鼠标事件（用于拖拽障碍物）
+        let handleMouseDown: ((e: MouseEvent) => void) | null = null;
+        let handleMouseMove: ((e: MouseEvent) => void) | null = null;
+        let handleMouseUp: (() => void) | null = null;
+        
+        if (canvas) {
+            handleMouseDown = (e: MouseEvent) => {
+                    const rect = canvas.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    
+                    if (isCreatingObstacle) {
+                        // 创建新障碍物
+                        createObstacle(x, y);
+                    } else {
+                        const clickedObstacle = getObstacleAtPosition(x, y);
+                        if (clickedObstacle) {
+                            selectObstacle(clickedObstacle.id);
+                            draggingRef.current = {
+                                isDragging: true,
+                                obstacleId: clickedObstacle.id
+                            };
+                        } else {
+                            selectObstacle(null);
+                        }
+                    }
+                };
+            
+            handleMouseMove = (e: MouseEvent) => {
+                if (draggingRef.current.isDragging && draggingRef.current.obstacleId) {
+                    const rect = canvas.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    
+                    // 更新障碍物位置
+                    updateObstacle(draggingRef.current.obstacleId, {x, y});
+                }
+            };
+            
+            handleMouseUp = () => {
+                draggingRef.current = {
+                    isDragging: false,
+                    obstacleId: null
+                };
+            };
+            
+            canvas.addEventListener('mousedown', handleMouseDown);
+            canvas.addEventListener('mousemove', handleMouseMove);
+            canvas.addEventListener('mouseup', handleMouseUp);
+            canvas.addEventListener('mouseleave', handleMouseUp);
+        }
 
         let lastTime = 0;
 
@@ -358,17 +428,22 @@ const SimPage = () => {
         return () => {
             window.removeEventListener('keydown', handleKeyDown)
             window.removeEventListener('keyup', handleKeyUp)
+            if (canvas && handleMouseDown && handleMouseMove && handleMouseUp) {
+                canvas.removeEventListener('mousedown', handleMouseDown);
+                canvas.removeEventListener('mousemove', handleMouseMove);
+                canvas.removeEventListener('mouseup', handleMouseUp);
+                canvas.removeEventListener('mouseleave', handleMouseUp);
+            }
             window.cancelAnimationFrame(animationFrameId)
         }
-    }, [actEnabled, drawTopDown, drawFirstPerson, updatePhysics])
+    }, [actEnabled, drawTopDown, drawFirstPerson, updatePhysics, createObstacle, isCreatingObstacle, updateObstacle, handleCreateObstacleInFront])
 
     // --- 外部指令模拟 ---
     const sendCommand = (cmd: string) => {
-        // 模拟指令只需修改 keys ref 的状态即可
         keys.current[cmd] = true
         setTimeout(() => {
             keys.current[cmd] = false
-        }, 200) // 模拟按键按下200毫秒
+        }, 200)
     }
 
     return (
@@ -376,58 +451,88 @@ const SimPage = () => {
             display: 'flex',
             flexDirection: 'column',
             gap: '20px',
-            justifyContent: 'space-around',
-            alignItems: 'center'
+            padding: '20px',
+            height: '100vh',
+            boxSizing: 'border-box',
+            overflow: 'hidden'
         }}>
-            <h2>小车模拟器</h2>
-            <div style={{display: 'flex', flexDirection: 'row', gap: '20px'}}>
-                <div style={{display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px'}}>
-                    {/* 左侧：上帝视角 */}
-                    <div style={{position: 'relative', border: '2px solid #333'}}>
-                        <canvas
-                            ref={canvasRef}
-                            width={800}
-                            height={600}
-                            style={{background: '#f9f9f9', display: 'block'}}
-                        />
-                        <div style={{
-                            position: 'absolute',
-                            top: 10,
-                            left: 10,
-                            background: 'rgba(255,255,255,0.8)',
-                            padding: 5
-                        }}>
-                            使用 WASD 或 方向键 移动
-                        </div>
-                    </div>
+            <h1 style={{textAlign: 'center'}}>小车模拟器</h1>
+            <div style={{
+                display: 'flex',
+                flexDirection: 'row',
+                gap: '20px',
+                flex: 1
+            }}>
+                {/* 左侧：障碍物管理 */}
+                <ObstacleManager 
+                    onCreateInFront={handleCreateObstacleInFront}
+                    isCreatingObstacle={isCreatingObstacle}
+                    onToggleCreating={(creating) => _setIsCreatingObstacle(creating)}
+                    selectedObstacleType={selectedObstacleType}
+                    onObstacleTypeChange={(type) => _setSelectedObstacleType(type)}
+                />
+                
+                
+                {/* 右侧：画布和控制按钮 */}
+                <div style={{
+                    flex: 1,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '20px',
+                    alignItems: 'center'
+                }}>
+                    <div style={{display: 'flex', flexDirection: 'row', gap: '20px'}}>
+                        <div style={{display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px'}}>
+                            {/* 左侧：上帝视角 */}
+                            <div style={{position: 'relative', border: '2px solid #333'}}>
+                                <canvas
+                                    ref={canvasRef}
+                                    width={800}
+                                    height={600}
+                                    style={{background: '#f9f9f9', display: 'block'}}
+                                />
+                                <div style={{
+                                    position: 'absolute',
+                                    top: 10,
+                                    left: 10,
+                                    background: 'rgba(255,255,255,0.8)',
+                                    padding: 5
+                                }}>
+                                    使用 WASD 或 方向键 移动<br/>
+                                    使用 QE 键旋转选中的障碍物<br/>
+                                    选中障碍物后按 Delete 键删除
+                                </div>
+                            </div>
 
-                    <div style={{display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center'}}>
-                        <button onClick={() => sendCommand('ArrowUp')}>指令: 前进</button>
-                        <button onClick={() => sendCommand('ArrowLeft')}>指令: 左转</button>
-                        <button onClick={() => sendCommand('ArrowRight')}>指令: 右转</button>
-                        <button onClick={() => sendCommand('ArrowDown')}>指令: 后退</button>
-                        <button onClick={resetCar}>重置 (Reset)</button>
+                            <div style={{display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center'}}>
+                                <button onClick={() => sendCommand('ArrowUp')}>指令: 前进</button>
+                                <button onClick={() => sendCommand('ArrowLeft')}>指令: 左转</button>
+                                <button onClick={() => sendCommand('ArrowRight')}>指令: 右转</button>
+                                <button onClick={() => sendCommand('ArrowDown')}>指令: 后退</button>
+                                <button onClick={resetCar}>重置 (Reset)</button>
                         <button onClick={() => setActEnabled(v => !v)}>切换 ACT</button>
                     </div>
                     <div style={{marginTop: 8, fontSize: 12, opacity: 0.8}}>
                         {actStatus}
-                    </div>
-                </div>
-                {/* 右侧：第一人称 */}
-                <div style={{position: 'relative'}}>
-                    <div style={{
-                        position: 'absolute',
-                        top: 5,
-                        left: 5,
-                        background: 'rgba(255,255,255,0.7)',
-                        padding: '2px 5px',
-                        fontSize: '12px'
-                    }}>车载摄像头 (Camera)
-                    </div>
-                    <canvas ref={fpvRef} width={320} height={240}
-                            style={{background: '#000', border: '4px solid #333'}}/>
-                    <div style={{marginTop: '10px', fontSize: '14px', color: '#555', width: 320}}>
-                        说明：右侧画面是根据左侧地图实时计算生成的伪3D视角。
+                            </div>
+                        </div>
+                        {/* 右侧：第一人称 */}
+                        <div style={{position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center'}}>
+                            <div style={{
+                                position: 'absolute',
+                                top: 5,
+                                left: 5,
+                                background: 'rgba(255,255,255,0.7)',
+                                padding: '2px 5px',
+                                fontSize: '12px'
+                            }}>车载摄像头 (Camera)
+                            </div>
+                            <canvas ref={fpvRef} width={320} height={240}
+                                    style={{background: '#000', border: '4px solid #333'}}/>
+                            <div style={{marginTop: '10px', fontSize: '14px', color: '#555', width: 320}}>
+                                说明：右侧画面是根据左侧地图实时计算生成的伪3D视角。
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
