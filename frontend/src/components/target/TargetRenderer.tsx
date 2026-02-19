@@ -1,4 +1,4 @@
-import type {Obstacle} from "../../model/obstacle";
+import type {Target} from "../../model/target";
 
 export const MAP_W = 800;
 export const MAP_H = 600;
@@ -24,6 +24,9 @@ export interface SpriteData {
     realDist: number;
     color: string;
     isPicked: boolean;
+    cx: number;
+    cy: number;
+    radius: number;
 }
 
 export const getRaySegmentIntersection = (
@@ -53,7 +56,7 @@ export const getRaySegmentIntersection = (
     return null;
 };
 
-export const obstaclesToWalls = (obstacles: Obstacle[]): WallSegment[] => {
+export const targetsToWalls = (targets: Target[]): WallSegment[] => {
     const walls: WallSegment[] = [
         {x1: 0, y1: 0, x2: MAP_W, y2: 0, color: '#333'},
         {x1: MAP_W, y1: 0, x2: MAP_W, y2: MAP_H, color: '#333'},
@@ -61,27 +64,27 @@ export const obstaclesToWalls = (obstacles: Obstacle[]): WallSegment[] => {
         {x1: 0, y1: MAP_H, x2: 0, y2: 0, color: '#333'}
     ];
 
-    obstacles.forEach(obs => {
-        const c = obs.color;
-        if (obs.type === 'RECT') {
-            const width = obs.w || 0;
-            const height = obs.h || 0;
+    targets.forEach(t => {
+        const c = t.color;
+        if (t.type === 'RECT') {
+            const width = t.w || 0;
+            const height = t.h || 0;
 
             let vertices = [
-                {x: obs.x, y: obs.y},
-                {x: obs.x + width, y: obs.y},
-                {x: obs.x + width, y: obs.y + height},
-                {x: obs.x, y: obs.y + height}
+                {x: t.x, y: t.y},
+                {x: t.x + width, y: t.y},
+                {x: t.x + width, y: t.y + height},
+                {x: t.x, y: t.y + height}
             ];
 
-            if (obs.angle) {
-                const centerX = obs.x + width / 2;
-                const centerY = obs.y + height / 2;
+            if (t.angle) {
+                const centerX = t.x + width / 2;
+                const centerY = t.y + height / 2;
 
                 vertices = vertices.map(vertex => {
                     const dx = vertex.x - centerX;
                     const dy = vertex.y - centerY;
-                    const angle = obs.angle || 0;
+                    const angle = t.angle || 0;
                     const rotatedX = dx * Math.cos(angle) - dy * Math.sin(angle);
                     const rotatedY = dx * Math.sin(angle) + dy * Math.cos(angle);
                     return {
@@ -123,54 +126,54 @@ export const castRay = (
     return minDist === Infinity ? null : {distance: minDist, color: hitColor};
 };
 
-export const renderTopDownObstacles = (
+export const renderTopDownTargets = (
     ctx: CanvasRenderingContext2D,
-    obstacles: Obstacle[],
-    selectedObstacleId: string | null
+    targets: Target[],
+    selectedTargetId: string | null
 ): void => {
-    obstacles.forEach(obs => {
-        ctx.fillStyle = obs.color;
-        if (obs.type === 'RECT') {
-            const width = obs.w || 0;
-            const height = obs.h || 0;
-            const centerX = obs.x + width / 2;
-            const centerY = obs.y + height / 2;
+    targets.forEach(t => {
+        ctx.fillStyle = t.color;
+        if (t.type === 'RECT') {
+            const width = t.w || 0;
+            const height = t.h || 0;
+            const centerX = t.x + width / 2;
+            const centerY = t.y + height / 2;
 
             ctx.save();
 
-            if (obs.angle) {
+            if (t.angle) {
                 ctx.translate(centerX, centerY);
-                ctx.rotate(obs.angle);
+                ctx.rotate(t.angle);
                 ctx.translate(-centerX, -centerY);
             }
 
-            ctx.fillRect(obs.x, obs.y, width, height);
+            ctx.fillRect(t.x, t.y, width, height);
             ctx.strokeStyle = '#333';
-            ctx.strokeRect(obs.x, obs.y, width, height);
+            ctx.strokeRect(t.x, t.y, width, height);
 
-            if (obs.id === selectedObstacleId) {
+            if (t.id === selectedTargetId) {
                 ctx.strokeStyle = '#ff0000';
                 ctx.lineWidth = 2;
                 ctx.setLineDash([5, 5]);
-                ctx.strokeRect(obs.x - 5, obs.y - 5, width + 10, height + 10);
+                ctx.strokeRect(t.x - 5, t.y - 5, width + 10, height + 10);
                 ctx.setLineDash([]);
                 ctx.lineWidth = 1;
             }
 
             ctx.restore();
-        } else if (obs.type === 'CIRCLE') {
+        } else if (t.type === 'CIRCLE') {
             ctx.beginPath();
-            ctx.arc(obs.x, obs.y, obs.r || 0, 0, Math.PI * 2);
+            ctx.arc(t.x, t.y, t.r || 0, 0, Math.PI * 2);
             ctx.fill();
             ctx.strokeStyle = '#333';
             ctx.stroke();
 
-            if (obs.id === selectedObstacleId) {
+            if (t.id === selectedTargetId) {
                 ctx.strokeStyle = '#ff0000';
                 ctx.lineWidth = 2;
                 ctx.setLineDash([5, 5]);
                 ctx.beginPath();
-                ctx.arc(obs.x, obs.y, (obs.r || 0) + 5, 0, Math.PI * 2);
+                ctx.arc(t.x, t.y, (t.r || 0) + 5, 0, Math.PI * 2);
                 ctx.stroke();
                 ctx.setLineDash([]);
                 ctx.lineWidth = 1;
@@ -180,42 +183,61 @@ export const renderTopDownObstacles = (
 };
 
 export const computeSprites = (
-    obstacles: Obstacle[],
-    carX: number,
-    carY: number,
-    carAngle: number,
-    fov: number,
-    w: number,
-    h: number
+  targets: Target[],
+  carX: number,
+  carY: number,
+  carAngle: number,
+  fov: number,
+  w: number,
+  h: number
 ): SpriteData[] => {
-    const balls = obstacles.filter(obs => obs.type === 'CIRCLE');
+  const balls = targets.filter(t => t.type === 'CIRCLE');
+  const halfFov = fov / 2;
+  const tanHalfFov = Math.tan(halfFov);
+  const eyeHeight = 20;
 
-    return balls.map(ball => {
-        const dx = ball.x - carX;
-        const dy = ball.y - carY;
-        const dist = Math.sqrt(dx * dx + dy * dy);
+  return balls.map(ball => {
+    const dx = ball.x - carX, dy = ball.y - carY;
+    const dist = Math.hypot(dx, dy);
+    const radius = ball.r || 15;
 
-        let spriteAngle = Math.atan2(dy, dx) - carAngle;
-        while (spriteAngle > Math.PI) spriteAngle -= Math.PI * 2;
-        while (spriteAngle < -Math.PI) spriteAngle += Math.PI * 2;
+    const cosCar = Math.cos(carAngle);
+    const sinCar = Math.sin(carAngle);
+    const tx = dx * cosCar + dy * sinCar;
+    const ty = -dx * sinCar + dy * cosCar;
 
-        const correctedDist = Math.abs(dist * Math.cos(spriteAngle));
-        const screenX = (w / 2) + (spriteAngle / fov) * w;
-        const spriteSize = (h * 40) / correctedDist * ((ball.r || 15) / 15);
-        const wallHeight = (h * 40) / correctedDist;
-        const wallBottom = h / 2 + wallHeight / 2;
-        const screenY = wallBottom - spriteSize / 2;
+    if (tx <= 0.001) return null;
 
-        return {
-            screenX,
-            screenY,
-            size: spriteSize,
-            dist: correctedDist,
-            realDist: dist,
-            color: ball.color,
-            isPicked: false
-        };
-    }).sort((a, b) => b.realDist - a.realDist);
+    const screenX = w / 2 + (ty / tx) * (w / 2) / tanHalfFov;
+
+    const spriteSize = (h * 2 * radius) / tx;
+
+    const screenY = h / 2 + (eyeHeight - radius) * h / tx;
+
+    return {
+      screenX,
+      screenY,
+      size: spriteSize,
+      dist: tx,
+      realDist: dist,
+      color: ball.color,
+      isPicked: false,
+      cx: ball.x,
+      cy: ball.y,
+      radius
+    };
+  }).filter((sprite): sprite is SpriteData => sprite !== null)
+    .sort((a, b) => b.realDist - a.realDist);
+};
+
+const raySphereHit = (ox: number, oy: number, dx: number, dy: number, cx: number, cy: number, r: number): number | null => {
+    const ocx = ox - cx, ocy = oy - cy;
+    const b = dx * ocx + dy * ocy;
+    const c = ocx * ocx + ocy * ocy - r * r;
+    const d = b * b - c;
+    if (d < 0) return null;
+    const t = -b - Math.sqrt(d);
+    return t > 0.0001 ? t : (-b + Math.sqrt(d) > 0.0001 ? -b + Math.sqrt(d) : null);
 };
 
 export const renderFirstPersonWalls = (
@@ -256,43 +278,36 @@ export const renderFirstPersonSprites = (
     sprites: SpriteData[],
     depthBuffer: number[],
     rayWidth: number,
-    rayCount: number
+    rayCount: number,
+    carX: number,
+    carY: number,
+    carAngle: number,
+    fov: number
 ): void => {
-    sprites.forEach(sprite => {
-        if (sprite.dist < 1 || sprite.realDist > 1000) {
-            return;
-        }
+    const halfFov = fov / 2;
+    sprites.forEach(s => {
+        const left = Math.max(0, Math.floor((s.screenX - s.size / 2) / rayWidth));
+        const right = Math.min(rayCount - 1, Math.ceil((s.screenX + s.size / 2) / rayWidth));
 
-        const leftCol = Math.max(0, Math.floor((sprite.screenX - sprite.size / 2) / rayWidth));
-        const rightCol = Math.min(rayCount - 1, Math.ceil((sprite.screenX + sprite.size / 2) / rayWidth));
+        for (let i = left; i <= right; i++) {
+            const rayAngle = carAngle - halfFov + (i / rayCount) * fov;
+            const dx = Math.cos(rayAngle), dy = Math.sin(rayAngle);
+            const t = raySphereHit(carX, carY, dx, dy, s.cx, s.cy, s.radius);
+            if (!t) continue;
 
-        for (let i = leftCol; i <= rightCol; i++) {
-            if (sprite.dist >= depthBuffer[i]) {
-                continue;
-            }
+            const tProj = t * Math.cos(rayAngle - carAngle);
+            if (tProj >= depthBuffer[i]) continue;
 
-            const colScreenX = i * rayWidth;
-            const relX = (colScreenX + rayWidth / 2 - sprite.screenX) / (sprite.size / 2);
+            const relX = (i * rayWidth + rayWidth / 2 - s.screenX) / (s.size / 2);
+            if (Math.abs(relX) > 1) continue;
 
-            if (Math.abs(relX) > 1) {
-                continue;
-            }
+            const colHeight = Math.sqrt(1 - relX * relX) * s.size;
+            const colTop = s.screenY - colHeight / 2;
 
-            const relY = Math.sqrt(1 - relX * relX);
-            const colHeight = relY * sprite.size;
-            const colTop = sprite.screenY - colHeight / 2;
-
-            ctx.save();
-            ctx.fillStyle = sprite.color;
-            ctx.globalAlpha = 1.0;
-
-            if (sprite.isPicked) {
-                ctx.shadowColor = '#00ff00';
-                ctx.shadowBlur = 15;
-            }
-
-            ctx.fillRect(colScreenX, colTop, rayWidth + 1, colHeight);
-            ctx.restore();
+            ctx.fillStyle = s.color;
+            if (s.isPicked) { ctx.shadowColor = '#0f0'; ctx.shadowBlur = 15; }
+            ctx.fillRect(i * rayWidth, colTop, rayWidth + 1, colHeight);
+            if (s.isPicked) ctx.shadowBlur = 0;
         }
     });
 };
