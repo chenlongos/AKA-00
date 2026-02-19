@@ -197,7 +197,8 @@ export const computeSprites = (
   const eyeHeight = 20;
 
   return balls.map(ball => {
-    const dx = ball.x - carX, dy = ball.y - carY;
+    const dx = ball.x - carX;
+    const dy = ball.y - carY;
     const dist = Math.hypot(dx, dy);
     const radius = ball.r || 15;
 

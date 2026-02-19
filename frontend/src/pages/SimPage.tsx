@@ -26,7 +26,7 @@ const CHUNK_SIZE = 50;
 const INITIAL_LOCAL_W = MAP_W / 2;
 const INITIAL_LOCAL_H = MAP_H / 2;
 
-const FPS = 20
+const FPS = 30
 const frameInterval = 1000 / FPS
 
 type EpisodeStep = {
@@ -104,8 +104,11 @@ const SimPage = () => {
     const [actStatus, setActStatus] = useState("ACT: off")
     const actCommandRef = useRef<string>("stop")
     const lastCommandRef = useRef<string>("stop")
+    const lastSentCommandRef = useRef<string>("stop")
+    const lastSendAtRef = useRef<number>(0)
     const lastInferAtRef = useRef<number>(0)
     const inferFrameRef = useRef<number>(0)
+    const localSpeedRef = useRef<number>(0)
 
     const [collecting, setCollecting] = useState(false)
     const [collectStatus, setCollectStatus] = useState("采集: 未开始")
@@ -195,11 +198,27 @@ const SimPage = () => {
             }
         }
         lastCommandRef.current = cmd
-        sendAction(cmd)
+        const now = performance.now()
+        if (cmd === "stop") {
+            if (lastSentCommandRef.current !== "stop" || now - lastSendAtRef.current >= 300) {
+                sendAction(cmd)
+                lastSentCommandRef.current = cmd
+                lastSendAtRef.current = now
+            }
+        } else {
+            sendAction(cmd)
+            lastSentCommandRef.current = cmd
+            lastSendAtRef.current = now
+        }
+        applyLocalAction(cmd)
         const state = carState.current;
         if (checkCollision(state.x, state.y, MAP_W, MAP_H, targetsRef.current)) {
-            sendAction("stop")
-            lastCommandRef.current = "stop"
+            if (lastSentCommandRef.current !== "stop") {
+                sendAction("stop")
+                lastCommandRef.current = "stop"
+                lastSentCommandRef.current = "stop"
+                lastSendAtRef.current = now
+            }
         }
     }
 
@@ -222,7 +241,7 @@ const SimPage = () => {
         const maxDist = Math.hypot(MAP_W, MAP_H);
         const endX = x + Math.cos(angle) * maxDist;
         const endY = y + Math.sin(angle) * maxDist;
-        const walls = obstaclesToWalls(obstaclesRef.current);
+        const walls = targetsToWalls(targetsRef.current);
         let minDist = maxDist;
         walls.forEach(wall => {
             const hit = intersectRaySegment(x, y, endX, endY, wall.x1, wall.y1, wall.x2, wall.y2);
@@ -245,7 +264,7 @@ const SimPage = () => {
         envState[1] = y
         envState[2] = angle
         envState[3] = 0
-        envState[4] = checkCollision(x, y) ? 1 : 0
+        envState[4] = checkCollision(x, y, MAP_W, MAP_H, targetsRef.current) ? 1 : 0
         envState[5] = getForwardDistance(x, y, angle)
         return {state, envState}
     }
@@ -315,6 +334,45 @@ const SimPage = () => {
             return v0 >= 0 ? "up" : "down"
         }
         return v1 >= 0 ? "right" : "left"
+    }
+
+    const applyLocalAction = (cmd: string) => {
+        const {x, y, angle} = carState.current
+        let nextAngle = angle
+        let speed = localSpeedRef.current
+
+        if (cmd === "up") {
+            if (speed < 5) speed += 0.2
+        }
+        if (cmd === "down") {
+            if (speed > -2.5) speed -= 0.2
+        }
+        if (cmd === "left") {
+            nextAngle -= 0.05
+        }
+        if (cmd === "right") {
+            nextAngle += 0.05
+        }
+
+        speed *= 0.95
+
+        let nextX = x + Math.cos(nextAngle) * speed
+        let nextY = y + Math.sin(nextAngle) * speed
+
+        if (cmd === "stop") {
+            speed = 0
+            nextX = x
+            nextY = y
+        }
+
+        if (checkCollision(nextX, nextY, MAP_W, MAP_H, targetsRef.current)) {
+            speed = 0
+            nextX = x
+            nextY = y
+        }
+
+        localSpeedRef.current = speed
+        carState.current = {x: nextX, y: nextY, angle: nextAngle}
     }
 
     const drawGrid = (ctx: CanvasRenderingContext2D, w: number, h: number) => {
@@ -396,8 +454,17 @@ const SimPage = () => {
         const depthBuffer = renderFirstPersonWalls(ctx, walls, x, y, angle, w, h);
 
         const sprites = computeSprites(targetsRef.current, x, y, angle, fov, w, h);
-
         renderFirstPersonSprites(ctx, sprites, depthBuffer, rayWidth, rayCount, x, y, angle, fov);
+        const hasVisibleSprite = sprites.some(sprite => sprite.screenX + sprite.size > 0 && sprite.screenX - sprite.size < w);
+        const hasVisibleWall = depthBuffer.some(dist => dist < Infinity);
+        if (!hasVisibleSprite && !hasVisibleWall) {
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(0, 0, w, h);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '16px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('视野内无目标', w / 2, h / 2);
+        }
     }
 
 
@@ -415,9 +482,15 @@ const SimPage = () => {
         let animationFrameId: number
 
         const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.code.startsWith("Arrow")) {
+                e.preventDefault()
+            }
             keys.current[e.code] = true
         }
         const handleKeyUp = (e: KeyboardEvent) => {
+            if (e.code.startsWith("Arrow")) {
+                e.preventDefault()
+            }
             keys.current[e.code] = false
         }
 
@@ -598,12 +671,18 @@ const SimPage = () => {
                                 <button onClick={() => sendCommand('ArrowLeft')}>指令: 左转</button>
                                 <button onClick={() => sendCommand('ArrowRight')}>指令: 右转</button>
                                 <button onClick={() => sendCommand('ArrowDown')}>指令: 后退</button>
-                                <button onClick={handleResetSave}>复位保存</button>
-                                <div style={{fontSize: 12, opacity: 0.8}}>进度 {collectedEpisodes}/{targetEpisodes}</div>
+                                <button onClick={() => resetCar()}>复位</button>
+                            </div>
+                        </div>
+                        {/* 右侧：第一人称 */}
+                        <div style={{display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px'}}>
+                            <div style={{display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px'}}>
                                 <button onClick={() => setActEnabled(v => !v)}>切换 ACT</button>
                                 <button onClick={collecting ? stopCollect : startCollect}>
                                     {collecting ? "结束采集" : "开始采集"}
                                 </button>
+                                <button onClick={handleResetSave}>复位保存</button>
+                                <div style={{fontSize: 12, opacity: 0.8}}>进度 {collectedEpisodes}/{targetEpisodes}</div>
                                 <label style={{display: 'flex', alignItems: 'center', gap: '6px', fontSize: 12}}>
                                     目标回合
                                     <input
@@ -619,26 +698,26 @@ const SimPage = () => {
                                         style={{width: 80}}
                                     />
                                 </label>
+                                <div style={{fontSize: 12, opacity: 0.8, textAlign: 'center'}}>
+                                    <div>{actStatus}</div>
+                                    <div>{collectStatus}</div>
+                                </div>
                             </div>
-                            <div style={{marginTop: 8, fontSize: 12, opacity: 0.8, textAlign: 'center'}}>
-                                <div>{actStatus}</div>
-                                <div>{collectStatus}</div>
-                            </div>
-                        </div>
-                        <div style={{position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center'}}>
-                            <div style={{
-                                position: 'absolute',
-                                top: 5,
-                                left: 5,
-                                background: 'rgba(255,255,255,0.7)',
-                                padding: '2px 5px',
-                                fontSize: '12px'
-                            }}>车载摄像头 (Camera)
-                            </div>
-                            <canvas ref={fpvRef} width={320} height={240}
-                                    style={{background: '#000', border: '4px solid #333'}}/>
-                            <div style={{marginTop: '10px', fontSize: '14px', color: '#555', width: 320}}>
-                                说明：右侧画面是根据左侧地图实时计算生成的伪3D视角。
+                            <div style={{position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center'}}>
+                                <div style={{
+                                    position: 'absolute',
+                                    top: 5,
+                                    left: 5,
+                                    background: 'rgba(255,255,255,0.7)',
+                                    padding: '2px 5px',
+                                    fontSize: '12px'
+                                }}>车载摄像头 (Camera)
+                                </div>
+                                <canvas ref={fpvRef} width={320} height={240}
+                                        style={{background: '#000', border: '4px solid #333'}}/>
+                                <div style={{marginTop: '10px', fontSize: '14px', color: '#555', width: 320}}>
+                                    说明：右侧画面是根据左侧地图实时计算生成的伪3D视角。
+                                </div>
                             </div>
                         </div>
                     </div>

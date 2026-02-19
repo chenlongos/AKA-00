@@ -1,9 +1,16 @@
 import {io} from "socket.io-client";
 
-export const socket = io();
+export const socket = io({
+    path: "/socket.io",
+    transports: ["polling"],
+    upgrade: false,
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 500,
+    timeout: 20000
+});
 
 export const sendAction = (action: string) => {
-    console.log("ws send" + action);
     socket.emit('action', action);
 }
 
@@ -20,7 +27,7 @@ export const actInfer = (payload: Record<string, unknown>) => {
 }
 
 export const saveDataset = async (payload: Record<string, unknown>) => {
-    const res = await fetch('/dataset', {
+    const res = await fetch(`/api/dataset`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(payload)
