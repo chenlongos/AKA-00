@@ -18,3 +18,12 @@ export const getCarState = () => {
 export const actInfer = (payload: Record<string, unknown>) => {
     socket.emit('act_infer', payload);
 }
+
+export const saveDataset = async (payload: Record<string, unknown>) => {
+    const res = await fetch('/dataset', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+    })
+    return res.json()
+}

@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from "react"
-import {actInfer, getCarState, resetCar, sendAction, socket} from "../api/socket";
+import {actInfer, getCarState, resetCar, saveDataset, sendAction, socket} from "../api/socket";
 import type {Car} from "../model/car";
 import {checkCollision} from "../model/target";
 import {useTargetStore} from "../store/targetStore";
@@ -18,6 +18,10 @@ import { useTargetDrag } from "../components/target/useTargetDrag";
 
 
 
+const INFER_HZ = 5;
+const inferInterval = 1000 / INFER_HZ;
+const ACTION_DIM = 3;
+const CHUNK_SIZE = 50;
 
 const INITIAL_LOCAL_W = MAP_W / 2;
 const INITIAL_LOCAL_H = MAP_H / 2;
@@ -25,6 +29,39 @@ const INITIAL_LOCAL_H = MAP_H / 2;
 const FPS = 20
 const frameInterval = 1000 / FPS
 
+type EpisodeStep = {
+    state: number[];
+    envState: number[];
+    action: number[];
+    image?: string;
+};
+
+const intersectRaySegment = (
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    x3: number,
+    y3: number,
+    x4: number,
+    y4: number
+) => {
+    const denom = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1);
+    if (denom === 0) return null;
+    const ua = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / denom;
+    const ub = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / denom;
+    if (ua >= 0 && ub >= 0 && ub <= 1) {
+        const ix = x1 + ua * (x2 - x1);
+        const iy = y1 + ua * (y2 - y1);
+        return {x: ix, y: iy};
+    }
+    return null;
+};
+
+// ============================================================
+// SimPage 组件 - 小车模拟器主页面
+// 包含俯视图(上帝视角)和第一人称视角两个画布
+// ============================================================
 const SimPage = () => {
     const canvasRef = useRef<HTMLCanvasElement | null>(null)
     const fpvRef = useRef<HTMLCanvasElement | null>(null);
@@ -66,6 +103,16 @@ const SimPage = () => {
     const [actEnabled, setActEnabled] = useState(false)
     const [actStatus, setActStatus] = useState("ACT: off")
     const actCommandRef = useRef<string>("stop")
+    const lastCommandRef = useRef<string>("stop")
+    const lastInferAtRef = useRef<number>(0)
+    const inferFrameRef = useRef<number>(0)
+
+    const [collecting, setCollecting] = useState(false)
+    const [collectStatus, setCollectStatus] = useState("采集: 未开始")
+    const [targetEpisodes, setTargetEpisodes] = useState(50)
+    const [collectedEpisodes, setCollectedEpisodes] = useState(0)
+    const episodesRef = useRef<{steps: EpisodeStep[]}[]>([])
+    const currentEpisodeRef = useRef<EpisodeStep[]>([])
 
     const handleCreateTargetInFront = () => {
         const {x, y, angle} = carState.current;
@@ -110,65 +157,152 @@ const SimPage = () => {
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
     const updatePhysics = () => {
+        let cmd = "stop"
         if (actEnabled) {
-            sendAction(actCommandRef.current)
-            const state = carState.current
-            if (checkCollision(state.x, state.y, MAP_W, MAP_H, targetsRef.current)) {
-                sendAction("stop")
+            cmd = actCommandRef.current
+        } else {
+            if (keys.current['ArrowUp'] || keys.current['KeyW']) {
+                cmd = "up"
             }
-            return
-        }
-        if (keys.current['ArrowUp'] || keys.current['KeyW']) {
-            sendAction("up")
-        }
-        if (keys.current['ArrowDown'] || keys.current['KeyS']) {
-            sendAction("down")
-        }
-        if (keys.current['ArrowLeft'] || keys.current['KeyA']) {
-            sendAction("left")
-        }
-        if (keys.current['ArrowRight'] || keys.current['KeyD']) {
-            sendAction("right")
-        }
-
-        if (selectedTargetId) {
-            if (keys.current['KeyQ']) {
-                const target = targets.find(t => t.id === selectedTargetId);
-                if (target && target.type === 'RECT') {
-                    const currentAngle = target.angle || 0;
-                    updateTarget(selectedTargetId, { angle: currentAngle - 0.05 });
+            if (keys.current['ArrowDown'] || keys.current['KeyS']) {
+                cmd = "down"
+            }
+            if (keys.current['ArrowLeft'] || keys.current['KeyA']) {
+                cmd = "left"
+            }
+            if (keys.current['ArrowRight'] || keys.current['KeyD']) {
+                cmd = "right"
+            }
+            if (selectedTargetId) {
+                if (keys.current['KeyQ']) {
+                    const target = targets.find(t => t.id === selectedTargetId);
+                    if (target && target.type === 'RECT') {
+                        const currentAngle = target.angle || 0;
+                        updateTarget(selectedTargetId, { angle: currentAngle - 0.05 });
+                    }
+                }
+                if (keys.current['KeyE']) {
+                    const target = targets.find(t => t.id === selectedTargetId);
+                    if (target && target.type === 'RECT') {
+                        const currentAngle = target.angle || 0;
+                        updateTarget(selectedTargetId, { angle: currentAngle + 0.05 });
+                    }
+                }
+                if (keys.current['Delete']) {
+                    removeTarget(selectedTargetId);
+                    selectTarget(null);
                 }
             }
-            if (keys.current['KeyE']) {
-                const target = targets.find(t => t.id === selectedTargetId);
-                if (target && target.type === 'RECT') {
-                    const currentAngle = target.angle || 0;
-                    updateTarget(selectedTargetId, { angle: currentAngle + 0.05 });
-                }
-            }
-            if (keys.current['Delete']) {
-                removeTarget(selectedTargetId);
-                selectTarget(null);
-            }
         }
-
+        lastCommandRef.current = cmd
+        sendAction(cmd)
         const state = carState.current;
         if (checkCollision(state.x, state.y, MAP_W, MAP_H, targetsRef.current)) {
             sendAction("stop")
+            lastCommandRef.current = "stop"
         }
     }
 
+    const commandToActionVec = (cmd: string) => {
+        switch (cmd) {
+            case "up":
+                return [1, 0, 0]
+            case "down":
+                return [-1, 0, 0]
+            case "left":
+                return [0, -1, 0]
+            case "right":
+                return [0, 1, 0]
+            default:
+                return [0, 0, 0]
+        }
+    }
 
+    const getForwardDistance = (x: number, y: number, angle: number) => {
+        const maxDist = Math.hypot(MAP_W, MAP_H);
+        const endX = x + Math.cos(angle) * maxDist;
+        const endY = y + Math.sin(angle) * maxDist;
+        const walls = obstaclesToWalls(obstaclesRef.current);
+        let minDist = maxDist;
+        walls.forEach(wall => {
+            const hit = intersectRaySegment(x, y, endX, endY, wall.x1, wall.y1, wall.x2, wall.y2);
+            if (hit) {
+                const dist = Math.hypot(hit.x - x, hit.y - y);
+                if (dist < minDist) minDist = dist;
+            }
+        });
+        return minDist;
+    }
 
-
-    const buildObservation = () => {
+    const getObservationVectors = () => {
         const {x, y, angle} = carState.current
         const state = new Array(14).fill(0)
         state[0] = x
         state[1] = y
         state[2] = angle
-        const envState = [x, y, angle, 0, 0, 0]
-        return {observation: {state, environment_state: envState}}
+        const envState = new Array(6).fill(0)
+        envState[0] = x
+        envState[1] = y
+        envState[2] = angle
+        envState[3] = 0
+        envState[4] = checkCollision(x, y) ? 1 : 0
+        envState[5] = getForwardDistance(x, y, angle)
+        return {state, envState}
+    }
+
+    const buildInferencePayload = () => {
+        const {state, envState} = getObservationVectors()
+        const frameId = inferFrameRef.current
+        inferFrameRef.current += 1
+        return {
+            observation: {state, environment_state: envState},
+            meta: {frame_id: frameId, index: frameId}
+        }
+    }
+
+    const packDataset = (episodes: {steps: EpisodeStep[]}[]) => {
+        const states: number[][][] = []
+        const env_states: number[][][] = []
+        const actions: number[][][] = []
+        const action_is_pad: number[][] = []
+        const images: string[][][] = []
+        let hasImages = false
+        episodes.forEach(ep => {
+            const steps = ep.steps
+            for (let i = 0; i < steps.length; i += CHUNK_SIZE) {
+                const chunkSteps = steps.slice(i, i + CHUNK_SIZE)
+                const stateChunk: number[][] = []
+                const envChunk: number[][] = []
+                const actionChunk: number[][] = []
+                const padChunk: number[] = []
+                const imageChunk: string[][] = []
+                chunkSteps.forEach(step => {
+                    stateChunk.push(step.state)
+                    envChunk.push(step.envState)
+                    actionChunk.push(step.action)
+                    padChunk.push(0)
+                    const image = step.image ?? ""
+                    if (image) hasImages = true
+                    imageChunk.push([image])
+                })
+                for (let pad = chunkSteps.length; pad < CHUNK_SIZE; pad += 1) {
+                    stateChunk.push(new Array(14).fill(0))
+                    envChunk.push(new Array(6).fill(0))
+                    actionChunk.push(new Array(ACTION_DIM).fill(0))
+                    padChunk.push(1)
+                    imageChunk.push([""])
+                }
+                states.push(stateChunk)
+                env_states.push(envChunk)
+                actions.push(actionChunk)
+                action_is_pad.push(padChunk)
+                images.push(imageChunk)
+            }
+        })
+        if (hasImages) {
+            return {states, env_states, actions, action_is_pad, images}
+        }
+        return {states, env_states, actions, action_is_pad}
     }
 
     const mapActionToCommand = (vec: number[]) => {
@@ -304,11 +438,21 @@ const SimPage = () => {
             lastTime = currentTime - (delta % frameInterval)
 
             if (actEnabled) {
-                actInfer(buildObservation())
+                const elapsed = currentTime - lastInferAtRef.current
+                if (elapsed >= inferInterval) {
+                    lastInferAtRef.current = currentTime
+                    actInfer(buildInferencePayload())
+                }
             }
             updatePhysics()
             drawTopDown(ctxTop)
             drawFirstPerson(ctxFpv)
+            if (collecting) {
+                const {state, envState} = getObservationVectors()
+                const action = commandToActionVec(lastCommandRef.current)
+                const image = fpvRef.current?.toDataURL('image/png')
+                currentEpisodeRef.current.push({state, envState, action, image})
+            }
         }
 
         animationFrameId = window.requestAnimationFrame(renderLoop)
@@ -326,6 +470,64 @@ const SimPage = () => {
         setTimeout(() => {
             keys.current[cmd] = false
         }, 200)
+    }
+
+    const startCollect = () => {
+        episodesRef.current = []
+        currentEpisodeRef.current = []
+        setCollectedEpisodes(0)
+        setCollecting(true)
+        setCollectStatus("采集: 进行中")
+    }
+
+    const stopCollect = async () => {
+        if (currentEpisodeRef.current.length > 0) {
+            episodesRef.current.push({steps: currentEpisodeRef.current})
+            currentEpisodeRef.current = []
+        }
+        const episodes = episodesRef.current
+        if (episodes.length === 0) {
+            setCollecting(false)
+            setCollectStatus("采集: 无数据")
+            return
+        }
+        setCollectStatus("采集: 保存中")
+        try {
+            const payload = packDataset(episodes)
+            const res = await saveDataset(payload)
+            if (res && typeof res.path === "string") {
+                setCollectStatus(`采集: 已保存 ${res.path}`)
+            } else {
+                setCollectStatus("采集: 已保存")
+            }
+        } catch {
+            setCollectStatus("采集: 保存失败")
+        }
+        setCollecting(false)
+    }
+
+    const handleResetSave = () => {
+        if (collecting) {
+            if (currentEpisodeRef.current.length > 0) {
+                episodesRef.current.push({steps: currentEpisodeRef.current})
+                currentEpisodeRef.current = []
+            } else {
+                const {state, envState} = getObservationVectors()
+                const action = commandToActionVec(lastCommandRef.current)
+                const image = fpvRef.current?.toDataURL('image/png')
+                currentEpisodeRef.current.push({state, envState, action, image})
+                episodesRef.current.push({steps: currentEpisodeRef.current})
+                currentEpisodeRef.current = []
+            }
+            const count = episodesRef.current.length
+            setCollectedEpisodes(count)
+            if (count >= targetEpisodes) {
+                setCollectStatus("采集: 已达目标")
+            } else {
+                setCollectStatus(`采集: 已记录 ${count}/${targetEpisodes}`)
+            }
+        }
+        resetCar()
     }
 
     return (
@@ -391,16 +593,36 @@ const SimPage = () => {
                                 </div>
                             </div>
 
-                            <div style={{display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center'}}>
+                            <div style={{display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center'}}>
                                 <button onClick={() => sendCommand('ArrowUp')}>指令: 前进</button>
                                 <button onClick={() => sendCommand('ArrowLeft')}>指令: 左转</button>
                                 <button onClick={() => sendCommand('ArrowRight')}>指令: 右转</button>
                                 <button onClick={() => sendCommand('ArrowDown')}>指令: 后退</button>
-                                <button onClick={resetCar}>重置 (Reset)</button>
+                                <button onClick={handleResetSave}>复位保存</button>
+                                <div style={{fontSize: 12, opacity: 0.8}}>进度 {collectedEpisodes}/{targetEpisodes}</div>
                                 <button onClick={() => setActEnabled(v => !v)}>切换 ACT</button>
+                                <button onClick={collecting ? stopCollect : startCollect}>
+                                    {collecting ? "结束采集" : "开始采集"}
+                                </button>
+                                <label style={{display: 'flex', alignItems: 'center', gap: '6px', fontSize: 12}}>
+                                    目标回合
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        value={targetEpisodes}
+                                        onChange={(e) => {
+                                            const next = Number(e.target.value)
+                                            if (!Number.isNaN(next) && next > 0) {
+                                                setTargetEpisodes(next)
+                                            }
+                                        }}
+                                        style={{width: 80}}
+                                    />
+                                </label>
                             </div>
-                    <div style={{marginTop: 8, fontSize: 12, opacity: 0.8}}>
-                        {actStatus}
+                            <div style={{marginTop: 8, fontSize: 12, opacity: 0.8, textAlign: 'center'}}>
+                                <div>{actStatus}</div>
+                                <div>{collectStatus}</div>
                             </div>
                         </div>
                         <div style={{position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center'}}>
