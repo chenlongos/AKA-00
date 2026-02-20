@@ -1,4 +1,3 @@
-import { useState, useEffect } from 'react';
 import ImportPreviewPanel from './ImportPreviewPanel';
 
 interface ModalImportDialogProps {
@@ -7,18 +6,7 @@ interface ModalImportDialogProps {
 }
 
 const ModalImportDialog: React.FC<ModalImportDialogProps> = ({ isOpen, onClose }) => {
-    const [isVisible, setIsVisible] = useState(isOpen);
-
-    useEffect(() => {
-        if (isOpen) {
-            setIsVisible(true);
-        } else {
-            const timer = setTimeout(() => setIsVisible(false), 300);
-            return () => clearTimeout(timer);
-        }
-    }, [isOpen]);
-
-    if (!isVisible && !isOpen) {
+    if (!isOpen) {
         return null;
     }
 

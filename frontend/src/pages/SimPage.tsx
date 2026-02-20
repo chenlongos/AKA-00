@@ -1,4 +1,4 @@
-import {useEffect, useRef, useState} from "react"
+import {useCallback, useEffect, useRef, useState} from "react"
 import {actInfer, getCarState, resetCar, saveDataset, sendAction, socket} from "../api/socket";
 import type {Car} from "../model/car";
 import {checkCollision} from "../model/target";
@@ -15,8 +15,6 @@ import {
 import {TargetManager} from "../components/target/TargetManager";
 import { useTargetCreation } from "../components/target/useTargetCreation";
 import { useTargetDrag } from "../components/target/useTargetDrag";
-
-
 
 const INFER_HZ = 5;
 const inferInterval = 1000 / INFER_HZ;
@@ -74,8 +72,6 @@ const SimPage = () => {
         targetsRef.current = targets;
     }, [targets]);
 
-
-
     const {
         selectedTargetType,
         setSelectedTargetType,
@@ -92,8 +88,6 @@ const SimPage = () => {
         isCreatingTarget,
         createTarget
     });
-
-
 
     const carState = useRef({
         x: 400,
@@ -123,6 +117,18 @@ const SimPage = () => {
         const frontY = y + Math.sin(angle) * 50;
         createTarget(frontX, frontY);
     };
+
+    const mapActionToCommand = (vec: number[]) => {
+        if (!Array.isArray(vec) || vec.length === 0) return "stop"
+        const v0 = vec[0] ?? 0
+        const v1 = vec[1] ?? 0
+        const magnitude = Math.abs(v0) + Math.abs(v1)
+        if (magnitude < 0.1) return "stop"
+        if (Math.abs(v0) >= Math.abs(v1)) {
+            return v0 >= 0 ? "up" : "down"
+        }
+        return v1 >= 0 ? "right" : "left"
+    }
 
     useEffect(() => {
         getCarState()
@@ -158,8 +164,46 @@ const SimPage = () => {
 
     const keys = useRef<Record<string, boolean>>({})
 
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    const updatePhysics = () => {
+    const applyLocalAction = useCallback((cmd: string) => {
+        const {x, y, angle} = carState.current
+        let nextAngle = angle
+        let speed = localSpeedRef.current
+
+        if (cmd === "up") {
+            if (speed < 5) speed += 0.2
+        }
+        if (cmd === "down") {
+            if (speed > -2.5) speed -= 0.2
+        }
+        if (cmd === "left") {
+            nextAngle -= 0.05
+        }
+        if (cmd === "right") {
+            nextAngle += 0.05
+        }
+
+        speed *= 0.95
+
+        let nextX = x + Math.cos(nextAngle) * speed
+        let nextY = y + Math.sin(nextAngle) * speed
+
+        if (cmd === "stop") {
+            speed = 0
+            nextX = x
+            nextY = y
+        }
+
+        if (checkCollision(nextX, nextY, MAP_W, MAP_H, targetsRef.current)) {
+            speed = 0
+            nextX = x
+            nextY = y
+        }
+
+        localSpeedRef.current = speed
+        carState.current = {x: nextX, y: nextY, angle: nextAngle}
+    }, []);
+
+    const updatePhysics = useCallback(() => {
         let cmd = "stop"
         if (actEnabled) {
             cmd = actCommandRef.current
@@ -220,9 +264,9 @@ const SimPage = () => {
                 lastSendAtRef.current = now
             }
         }
-    }
+    }, [actEnabled, applyLocalAction, removeTarget, selectTarget, selectedTargetId, targets, updateTarget])
 
-    const commandToActionVec = (cmd: string) => {
+    const commandToActionVec = useCallback((cmd: string) => {
         switch (cmd) {
             case "up":
                 return [1, 0, 0]
@@ -235,9 +279,9 @@ const SimPage = () => {
             default:
                 return [0, 0, 0]
         }
-    }
+    }, [])
 
-    const getForwardDistance = (x: number, y: number, angle: number) => {
+    const getForwardDistance = useCallback((x: number, y: number, angle: number) => {
         const maxDist = Math.hypot(MAP_W, MAP_H);
         const endX = x + Math.cos(angle) * maxDist;
         const endY = y + Math.sin(angle) * maxDist;
@@ -251,9 +295,9 @@ const SimPage = () => {
             }
         });
         return minDist;
-    }
+    }, [])
 
-    const getObservationVectors = () => {
+    const getObservationVectors = useCallback(() => {
         const {x, y, angle} = carState.current
         const state = new Array(14).fill(0)
         state[0] = x
@@ -267,9 +311,9 @@ const SimPage = () => {
         envState[4] = checkCollision(x, y, MAP_W, MAP_H, targetsRef.current) ? 1 : 0
         envState[5] = getForwardDistance(x, y, angle)
         return {state, envState}
-    }
+    }, [getForwardDistance])
 
-    const buildInferencePayload = () => {
+    const buildInferencePayload = useCallback(() => {
         const {state, envState} = getObservationVectors()
         const frameId = inferFrameRef.current
         inferFrameRef.current += 1
@@ -277,7 +321,7 @@ const SimPage = () => {
             observation: {state, environment_state: envState},
             meta: {frame_id: frameId, index: frameId}
         }
-    }
+    }, [getObservationVectors])
 
     const packDataset = (episodes: {steps: EpisodeStep[]}[]) => {
         const states: number[][][] = []
@@ -324,58 +368,7 @@ const SimPage = () => {
         return {states, env_states, actions, action_is_pad}
     }
 
-    const mapActionToCommand = (vec: number[]) => {
-        if (!Array.isArray(vec) || vec.length === 0) return "stop"
-        const v0 = vec[0] ?? 0
-        const v1 = vec[1] ?? 0
-        const magnitude = Math.abs(v0) + Math.abs(v1)
-        if (magnitude < 0.1) return "stop"
-        if (Math.abs(v0) >= Math.abs(v1)) {
-            return v0 >= 0 ? "up" : "down"
-        }
-        return v1 >= 0 ? "right" : "left"
-    }
-
-    const applyLocalAction = (cmd: string) => {
-        const {x, y, angle} = carState.current
-        let nextAngle = angle
-        let speed = localSpeedRef.current
-
-        if (cmd === "up") {
-            if (speed < 5) speed += 0.2
-        }
-        if (cmd === "down") {
-            if (speed > -2.5) speed -= 0.2
-        }
-        if (cmd === "left") {
-            nextAngle -= 0.05
-        }
-        if (cmd === "right") {
-            nextAngle += 0.05
-        }
-
-        speed *= 0.95
-
-        let nextX = x + Math.cos(nextAngle) * speed
-        let nextY = y + Math.sin(nextAngle) * speed
-
-        if (cmd === "stop") {
-            speed = 0
-            nextX = x
-            nextY = y
-        }
-
-        if (checkCollision(nextX, nextY, MAP_W, MAP_H, targetsRef.current)) {
-            speed = 0
-            nextX = x
-            nextY = y
-        }
-
-        localSpeedRef.current = speed
-        carState.current = {x: nextX, y: nextY, angle: nextAngle}
-    }
-
-    const drawGrid = (ctx: CanvasRenderingContext2D, w: number, h: number) => {
+    const drawGrid = useCallback((ctx: CanvasRenderingContext2D, w: number, h: number) => {
         ctx.strokeStyle = '#e0e0e0'
         ctx.lineWidth = 1
         const gridSize = 50
@@ -390,9 +383,9 @@ const SimPage = () => {
             ctx.lineTo(w, y)
         }
         ctx.stroke()
-    }
+    }, [])
 
-    const drawCarBody = (ctx: CanvasRenderingContext2D) => {
+    const drawCarBody = useCallback((ctx: CanvasRenderingContext2D) => {
         const {x, y, angle} = carState.current;
         ctx.save();
         ctx.translate(x, y);
@@ -407,15 +400,14 @@ const SimPage = () => {
         ctx.fillStyle = '#2c3e50'
         ctx.fillRect(5, -8, 10, 16)
         ctx.restore();
-    }
+    }, [])
 
-    const drawTopDown = (ctx: CanvasRenderingContext2D) => {
+    const drawTopDown = useCallback((ctx: CanvasRenderingContext2D) => {
         ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
 
         drawGrid(ctx, ctx.canvas.width, ctx.canvas.height)
 
         ctx.save()
-
         renderTopDownTargets(ctx, targetsRef.current, selectedTargetId);
 
         drawCarBody(ctx)
@@ -430,12 +422,9 @@ const SimPage = () => {
         ctx.stroke();
 
         ctx.restore()
-    }
+    }, [drawCarBody, drawGrid, selectedTargetId])
 
-
-
-
-    const drawFirstPerson = (ctx: CanvasRenderingContext2D) => {
+    const drawFirstPerson = useCallback((ctx: CanvasRenderingContext2D) => {
         const w = ctx.canvas.width;
         const h = ctx.canvas.height;
         const {x, y, angle} = carState.current;
@@ -465,7 +454,7 @@ const SimPage = () => {
             ctx.textAlign = 'center';
             ctx.fillText('视野内无目标', w / 2, h / 2);
         }
-    }
+    }, [])
 
 
     useEffect(() => {
@@ -496,8 +485,6 @@ const SimPage = () => {
 
         window.addEventListener('keydown', handleKeyDown)
         window.addEventListener('keyup', handleKeyUp)
-
-
 
         let lastTime = 0;
 
@@ -536,7 +523,7 @@ const SimPage = () => {
 
             window.cancelAnimationFrame(animationFrameId)
         }
-    }, [actEnabled, drawTopDown, drawFirstPerson, updatePhysics, createTarget, updateTarget, handleCreateTargetInFront])
+    }, [actEnabled, buildInferencePayload, collecting, commandToActionVec, drawFirstPerson, drawTopDown, getObservationVectors, updatePhysics])
 
     const sendCommand = (cmd: string) => {
         keys.current[cmd] = true
@@ -635,8 +622,6 @@ const SimPage = () => {
                         onTargetTypeChange={setSelectedTargetType}
                     />
                 </div>
-
-
                 <div style={{
                     flex: 1,
                     display: 'flex',

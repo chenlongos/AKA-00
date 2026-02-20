@@ -22,7 +22,8 @@ const SimGuard = () => {
 function App() {
     return (
         <Routes>
-            <Route path="/" element={<BaseControlPage/>}/>
+            <Route path="/" element={<SimGuard/>}/>
+            <Route path="/control" element={<BaseControlPage/>}/>
             <Route path="/sim" element={<SimGuard/>}/>
         </Routes>
     )

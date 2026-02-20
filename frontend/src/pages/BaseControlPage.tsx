@@ -14,31 +14,52 @@ const BaseControlPage = () => {
     const currentActionRef = useRef<string | null>(null);
 
     useEffect(() => {
-        const getIp = () => {
+        const parseJsonSafe = async (res: Response) => {
+            const text = await res.text();
+            if (!text) return null;
+            try {
+                return JSON.parse(text);
+            } catch {
+                return null;
+            }
+        };
+
+        const getIp = async () => {
             setStatus("获取 IP...");
-            fetch("/api/ip")
-                .then((res) => res.json())
-                .then((data) => {
-                    console.log("device ip:", data.ip);
-                    setIp("IP: " + data.ip);
-                    setStatus("准备就绪");
-                })
-                .catch(() => {
-                    setStatus("获取 IP 失败");
-                });
+            try {
+                const res = await fetch("/api/ip");
+                if (!res.ok) throw new Error("请求失败");
+                const data = await parseJsonSafe(res);
+                if (!data?.ip) throw new Error("无IP数据");
+                console.log("device ip:", data.ip);
+                setIp("IP: " + data.ip);
+                setStatus("准备就绪");
+            } catch {
+                setStatus("获取 IP 失败");
+            }
         };
 
         getIp();
     }, []);
 
-    const send = (action: string) => {
+    const send = async (action: string) => {
         setStatus("执行: " + action);
         if (!isSimulator) {
             console.log("http send " + action);
-            fetch(`/api/control?action=${action}&speed=50&time=0`)
-                .then((res) => res.json())
-                .then((data) => console.log(data))
-                .catch((err) => setStatus("错误: " + err));
+            try {
+                const res = await fetch(`/api/control?action=${action}&speed=50&time=0`);
+                if (!res.ok) throw new Error("请求失败");
+                const text = await res.text();
+                if (text) {
+                    try {
+                        console.log(JSON.parse(text));
+                    } catch {
+                        console.log(text);
+                    }
+                }
+            } catch (err) {
+                setStatus("错误: " + err);
+            }
         }
     };
 
@@ -83,20 +104,23 @@ const BaseControlPage = () => {
 
     }, [isSimulator])
 
-    const redirect = () => {
+    const redirect = async () => {
         setStatus("获取 IP...");
-        fetch("/api/ip")
-            .then((res) => res.json())
-            .then((data) => {
-                const targetUrl = "https://ai.maodouketang.cn/";
-                const fullUrl = `${targetUrl}?ip=${encodeURIComponent(data.ip)}`;
-                window.location.replace(fullUrl);
-            })
-            .catch((err) => {
-                console.error("跳转失败:", err);
-                setStatus("跳转失败");
-                alert("无法获取IP，请稍后重试");
-            });
+        try {
+            const res = await fetch("/api/ip");
+            if (!res.ok) throw new Error("请求失败");
+            const text = await res.text();
+            if (!text) throw new Error("空响应");
+            const data = JSON.parse(text);
+            if (!data?.ip) throw new Error("无IP数据");
+            const targetUrl = "https://ai.maodouketang.cn/";
+            const fullUrl = `${targetUrl}?ip=${encodeURIComponent(data.ip)}`;
+            window.location.replace(fullUrl);
+        } catch (err) {
+            console.error("跳转失败:", err);
+            setStatus("跳转失败");
+            alert("无法获取IP，请稍后重试");
+        }
     };
 
     return (
