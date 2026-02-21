@@ -156,7 +156,7 @@ def save_dataset():
         OBS_STATE: torch.tensor(states, dtype=torch.float32),
         OBS_ENV_STATE: torch.tensor(env_states, dtype=torch.float32),
         ACTION: torch.tensor(actions, dtype=torch.float32),
-        "action_is_pad": torch.tensor(action_is_pad, dtype=torch.float32),
+        "action_is_pad": torch.tensor(action_is_pad, dtype=torch.bool),
     }
     if rewards is not None:
         dataset[REWARD] = torch.tensor(rewards, dtype=torch.float32)
@@ -203,19 +203,23 @@ def save_dataset():
                         try:
                             raw = base64.b64decode(b64)
                             saved_name = f"chunk_{chunk_index:05d}_step_{step_index:02d}_cam_{cam_index}.png"
-                            with open(os.path.join(image_dir, saved_name), "wb") as f:
+                            saved_path = os.path.join(image_dir, saved_name)
+                            with open(saved_path, "wb") as f:
                                 f.write(raw)
                             image_count += 1
                         except Exception:
                             saved_name = ""
-                    step_paths.append(saved_name)
+                    if saved_name:
+                        step_paths.append(os.path.relpath(saved_path, save_dir))
+                    else:
+                        step_paths.append("")
                 chunk_paths.append(step_paths)
             image_paths.append(chunk_paths)
         dataset[OBS_IMAGES] = image_paths
         if image_count > 0:
             if "meta" not in dataset:
                 dataset["meta"] = {}
-            dataset["meta"]["image_dir"] = image_dir
+            dataset["meta"]["image_dir"] = os.path.relpath(image_dir, save_dir)
             dataset["meta"]["image_count"] = image_count
     path = os.path.join(save_dir, f"act_dataset_{timestamp}.pt")
     torch.save(dataset, path)
