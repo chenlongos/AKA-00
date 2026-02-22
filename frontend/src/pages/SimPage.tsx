@@ -108,8 +108,10 @@ const SimPage = () => {
     const [collectStatus, setCollectStatus] = useState("采集: 未开始")
     const [targetEpisodes, setTargetEpisodes] = useState(50)
     const [collectedEpisodes, setCollectedEpisodes] = useState(0)
+    const [currentStepCount, setCurrentStepCount] = useState(0)
     const episodesRef = useRef<{steps: EpisodeStep[]}[]>([])
     const currentEpisodeRef = useRef<EpisodeStep[]>([])
+    const stepTickRef = useRef(0)
 
     const handleCreateTargetInFront = () => {
         const {x, y, angle} = carState.current;
@@ -471,12 +473,26 @@ const SimPage = () => {
         let animationFrameId: number
 
         const handleKeyDown = (e: KeyboardEvent) => {
+            const active = document.activeElement as HTMLElement | null
+            if (active) {
+                const tag = active.tagName
+                if (active.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+                    return
+                }
+            }
             if (e.code.startsWith("Arrow")) {
                 e.preventDefault()
             }
             keys.current[e.code] = true
         }
         const handleKeyUp = (e: KeyboardEvent) => {
+            const active = document.activeElement as HTMLElement | null
+            if (active) {
+                const tag = active.tagName
+                if (active.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+                    return
+                }
+            }
             if (e.code.startsWith("Arrow")) {
                 e.preventDefault()
             }
@@ -512,6 +528,10 @@ const SimPage = () => {
                 const action = commandToActionVec(lastCommandRef.current)
                 const image = fpvRef.current?.toDataURL('image/png')
                 currentEpisodeRef.current.push({state, envState, action, image})
+                stepTickRef.current += 1
+                if (stepTickRef.current % 10 === 0) {
+                    setCurrentStepCount(currentEpisodeRef.current.length)
+                }
             }
         }
 
@@ -536,6 +556,8 @@ const SimPage = () => {
         episodesRef.current = []
         currentEpisodeRef.current = []
         setCollectedEpisodes(0)
+        setCurrentStepCount(0)
+        stepTickRef.current = 0
         setCollecting(true)
         setCollectStatus("采集: 进行中")
     }
@@ -545,6 +567,8 @@ const SimPage = () => {
             episodesRef.current.push({steps: currentEpisodeRef.current})
             currentEpisodeRef.current = []
         }
+        setCollectedEpisodes(episodesRef.current.length)
+        setCurrentStepCount(0)
         const episodes = episodesRef.current
         if (episodes.length === 0) {
             setCollecting(false)
@@ -568,6 +592,13 @@ const SimPage = () => {
 
     const handleResetSave = () => {
         if (collecting) {
+            if (episodesRef.current.length >= targetEpisodes) {
+                setCollectStatus("采集: 已达目标")
+                setCollecting(false)
+                setCurrentStepCount(0)
+                resetCar()
+                return
+            }
             if (currentEpisodeRef.current.length > 0) {
                 episodesRef.current.push({steps: currentEpisodeRef.current})
                 currentEpisodeRef.current = []
@@ -581,8 +612,10 @@ const SimPage = () => {
             }
             const count = episodesRef.current.length
             setCollectedEpisodes(count)
+            setCurrentStepCount(0)
             if (count >= targetEpisodes) {
                 setCollectStatus("采集: 已达目标")
+                setCollecting(false)
             } else {
                 setCollectStatus(`采集: 已记录 ${count}/${targetEpisodes}`)
             }
@@ -605,105 +638,119 @@ const SimPage = () => {
                 display: 'flex',
                 flexDirection: 'row',
                 gap: '20px',
-                flex: 1
+                flex: 1,
+                alignItems: 'stretch'
             }}>
                 <div style={{
-                    flex: '0 0 20%',
-                    minWidth: '250px',
+                    flex: '0 0 260px',
                     display: 'flex',
-                    flexDirection: 'column',
-                    gap: '20px'
+                    flexDirection: 'column'
                 }}>
-                    <TargetManager
-                        onCreateInFront={handleCreateTargetInFront}
-                        isCreatingTarget={isCreatingTarget}
-                        onToggleCreating={setIsCreatingTarget}
-                        selectedTargetType={selectedTargetType}
-                        onTargetTypeChange={setSelectedTargetType}
-                    />
+                    <div style={{border: '2px solid #333', borderRadius: 8, padding: '12px 16px 12px 12px', background: '#f9f9f9', height: '100%', overflowY: 'auto', boxSizing: 'border-box'}}>
+                        <TargetManager
+                            onCreateInFront={handleCreateTargetInFront}
+                            isCreatingTarget={isCreatingTarget}
+                            onToggleCreating={setIsCreatingTarget}
+                            selectedTargetType={selectedTargetType}
+                            onTargetTypeChange={setSelectedTargetType}
+                        />
+                    </div>
                 </div>
                 <div style={{
                     flex: 1,
                     display: 'flex',
-                    flexDirection: 'column',
-                    gap: '20px',
-                    alignItems: 'center'
+                    flexDirection: 'column'
                 }}>
-                    <div style={{display: 'flex', flexDirection: 'row', gap: '20px'}}>
-                        <div style={{display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px'}}>
-                            <div style={{position: 'relative', border: '2px solid #333'}}>
-                                <canvas
-                                    ref={canvasRef}
-                                    width={800}
-                                    height={600}
-                                    style={{background: '#f9f9f9', display: 'block'}}
-                                />
-                                <div style={{
-                                    position: 'absolute',
-                                    top: 10,
-                                    left: 10,
-                                    background: 'rgba(255,255,255,0.8)',
-                                    padding: 5
-                                }}>
-                                    使用 WASD 或 方向键 移动<br/>
-                                    使用 QE 键旋转选中的目标物<br/>
-                                    选中目标物后按 Delete 键删除
-                                </div>
-                            </div>
-
-                            <div style={{display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center'}}>
-                                <button onClick={() => sendCommand('ArrowUp')}>指令: 前进</button>
-                                <button onClick={() => sendCommand('ArrowLeft')}>指令: 左转</button>
-                                <button onClick={() => sendCommand('ArrowRight')}>指令: 右转</button>
-                                <button onClick={() => sendCommand('ArrowDown')}>指令: 后退</button>
-                                <button onClick={() => resetCar()}>复位</button>
+                    <div style={{border: '2px solid #333', borderRadius: 8, background: '#f9f9f9', padding: 12, height: '100%', display: 'flex', flexDirection: 'column', gap: 12}}>
+                        <div style={{fontWeight: 600}}>俯视地图</div>
+                        <div style={{position: 'relative', alignSelf: 'center'}}>
+                            <canvas
+                                ref={canvasRef}
+                                width={800}
+                                height={600}
+                                style={{background: '#ffffff', display: 'block', borderRadius: 4}}
+                            />
+                            <div style={{
+                                position: 'absolute',
+                                top: 8,
+                                left: 8,
+                                background: 'rgba(255,255,255,0.85)',
+                                padding: 6,
+                                borderRadius: 4,
+                                fontSize: 12
+                            }}>
+                                使用 WASD 或 方向键 移动<br/>
+                                使用 QE 键旋转选中的目标物<br/>
+                                选中目标物后按 Delete 键删除
                             </div>
                         </div>
-                        {/* 右侧：第一人称 */}
-                        <div style={{display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px'}}>
-                            <div style={{display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px'}}>
-                                <button onClick={() => setActEnabled(v => !v)}>切换 ACT</button>
-                                <button onClick={collecting ? stopCollect : startCollect}>
-                                    {collecting ? "结束采集" : "开始采集"}
-                                </button>
-                                <button onClick={handleResetSave}>复位保存</button>
-                                <div style={{fontSize: 12, opacity: 0.8}}>进度 {collectedEpisodes}/{targetEpisodes}</div>
-                                <label style={{display: 'flex', alignItems: 'center', gap: '6px', fontSize: 12}}>
-                                    目标回合
-                                    <input
-                                        type="number"
-                                        min={1}
-                                        value={targetEpisodes}
-                                        onChange={(e) => {
-                                            const next = Number(e.target.value)
-                                            if (!Number.isNaN(next) && next > 0) {
-                                                setTargetEpisodes(next)
-                                            }
-                                        }}
-                                        style={{width: 80}}
-                                    />
-                                </label>
-                                <div style={{fontSize: 12, opacity: 0.8, textAlign: 'center'}}>
-                                    <div>{actStatus}</div>
-                                    <div>{collectStatus}</div>
-                                </div>
-                            </div>
-                            <div style={{position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center'}}>
-                                <div style={{
-                                    position: 'absolute',
-                                    top: 5,
-                                    left: 5,
-                                    background: 'rgba(255,255,255,0.7)',
-                                    padding: '2px 5px',
-                                    fontSize: '12px'
-                                }}>车载摄像头 (Camera)
-                                </div>
-                                <canvas ref={fpvRef} width={320} height={240}
-                                        style={{background: '#000', border: '4px solid #333'}}/>
-                                <div style={{marginTop: '10px', fontSize: '14px', color: '#555', width: 320}}>
-                                    说明：右侧画面是根据左侧地图实时计算生成的伪3D视角。
-                                </div>
-                            </div>
+                        <div style={{display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center'}}>
+                            <button onClick={() => sendCommand('ArrowUp')}>指令: 前进</button>
+                            <button onClick={() => sendCommand('ArrowLeft')}>指令: 左转</button>
+                            <button onClick={() => sendCommand('ArrowRight')}>指令: 右转</button>
+                            <button onClick={() => sendCommand('ArrowDown')}>指令: 后退</button>
+                            <button onClick={() => resetCar()}>复位</button>
+                        </div>
+                    </div>
+                </div>
+                <div style={{
+                    flex: '0 0 360px',
+                    display: 'flex',
+                    flexDirection: 'column'
+                }}>
+                    <div style={{border: '2px solid #333', borderRadius: 8, padding: '12px', background: '#f9f9f9', height: '100%', display: 'flex', flexDirection: 'column', gap: 12, color: '#333'}}>
+                        <div style={{fontWeight: 600}}>车载摄像头</div>
+                        <canvas ref={fpvRef} width={320} height={240}
+                                style={{background: '#000', border: '2px solid #333', borderRadius: 4, alignSelf: 'center'}}/>
+                        <div style={{fontSize: 12, color: '#555'}}>
+                            说明：右侧画面是根据左侧地图实时计算生成的伪3D视角。
+                        </div>
+                        <div style={{height: 1, background: '#ddd'}}/>
+                        <div style={{fontWeight: 600}}>ACT 推理</div>
+                        <button
+                            onClick={() => setActEnabled(v => {
+                                const next = !v
+                                setActStatus(`ACT: ${next ? "on" : "off"}`)
+                                return next
+                            })}
+                        >
+                            切换 ACT
+                        </button>
+                        <div style={{fontSize: 12, opacity: 0.9}}>{actStatus}</div>
+                        <div style={{height: 1, background: '#ddd'}}/>
+                        <div style={{fontWeight: 600}}>采集 / 训练</div>
+                        <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap'}}>
+                            <button onClick={startCollect}>开始采集</button>
+                            <button onClick={stopCollect}>结束采集</button>
+                            <button onClick={handleResetSave}>复位保存</button>
+                        </div>
+                        <div style={{fontSize: 12, opacity: 0.9}}>
+                            已完成回合 {collectedEpisodes}/{targetEpisodes}
+                        </div>
+                        <div style={{fontSize: 12, opacity: 0.9}}>
+                            当前回合步数 {currentStepCount}
+                        </div>
+                        <label style={{display: 'flex', alignItems: 'center', gap: '6px', fontSize: 12}}>
+                            目标回合
+                            <input
+                                type="number"
+                                min={1}
+                                value={targetEpisodes}
+                                disabled={collecting}
+                                onChange={(e) => {
+                                    const next = Number(e.target.value)
+                                    if (!Number.isNaN(next) && next > 0) {
+                                        setTargetEpisodes(next)
+                                    }
+                                }}
+                                style={{width: 80}}
+                            />
+                        </label>
+                        <div style={{fontSize: 12, opacity: 0.9}}>
+                            {collectStatus}
+                        </div>
+                        <div style={{fontSize: 12, opacity: 0.9}}>
+                            流程：开始采集 → 操作小车 → 复位保存 → 自动保存一条数据 → 调整场景 → 结束采集
                         </div>
                     </div>
                 </div>
