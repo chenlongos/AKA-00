@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useRef, useState} from "react"
-import {actInfer, getCarState, resetCar, saveDataset, sendAction, socket} from "../api/socket";
+import {getCarState, resetCar, saveDataset, sendAction, socket} from "../api/socket";
 import type {Car} from "../model/car";
 import {checkCollision} from "../model/target";
 import {useTargetStore} from "../store/targetStore";
@@ -96,6 +96,19 @@ const SimPage = () => {
     })
     const [actEnabled, setActEnabled] = useState(false)
     const [actStatus, setActStatus] = useState("ACT: off")
+    const [models, setModels] = useState<{id: string; path: string; created_at?: string; updated_at?: string}[]>([])
+    const [selectedModelId, setSelectedModelId] = useState("")
+    const [inferRunning, setInferRunning] = useState(false)
+    const [trainInfo, setTrainInfo] = useState<{
+        status?: string;
+        epoch?: number;
+        num_epochs?: number;
+        avg_loss?: number;
+        progress?: number;
+        model_id?: string;
+        error?: string;
+        updated_at?: string;
+    } | null>(null)
     const actCommandRef = useRef<string>("stop")
     const lastCommandRef = useRef<string>("stop")
     const lastSentCommandRef = useRef<string>("stop")
@@ -103,6 +116,7 @@ const SimPage = () => {
     const lastInferAtRef = useRef<number>(0)
     const inferFrameRef = useRef<number>(0)
     const localSpeedRef = useRef<number>(0)
+    const inferBusyRef = useRef(false)
 
     const [collecting, setCollecting] = useState(false)
     const [collectStatus, setCollectStatus] = useState("采集: 未开始")
@@ -120,18 +134,6 @@ const SimPage = () => {
         createTarget(frontX, frontY);
     };
 
-    const mapActionToCommand = (vec: number[]) => {
-        if (!Array.isArray(vec) || vec.length === 0) return "stop"
-        const v0 = vec[0] ?? 0
-        const v1 = vec[1] ?? 0
-        const magnitude = Math.abs(v0) + Math.abs(v1)
-        if (magnitude < 0.1) return "stop"
-        if (Math.abs(v0) >= Math.abs(v1)) {
-            return v0 >= 0 ? "up" : "down"
-        }
-        return v1 >= 0 ? "right" : "left"
-    }
-
     useEffect(() => {
         getCarState()
         socket.on('car_state', (car: Car) => {
@@ -142,27 +144,88 @@ const SimPage = () => {
             };
             carState.current = newState;
         });
-        socket.on('act_action', (payload: {action?: number[][][]; error?: string}) => {
-            if (payload?.error) {
-                setActStatus(`ACT: ${payload.error}`)
-                actCommandRef.current = "stop"
-                return
-            }
-            const action = payload?.action
-            if (!action || action.length === 0 || action[0].length === 0) {
-                setActStatus("ACT: empty")
-                actCommandRef.current = "stop"
-                return
-            }
-            const cmd = mapActionToCommand(action[0][0])
-            actCommandRef.current = cmd
-            setActStatus(`ACT: ${cmd}`)
-        })
         return () => {
             socket.off('car_state');
-            socket.off('act_action');
         }
     }, [])
+
+    const fetchModels = useCallback(async () => {
+        try {
+            const res = await fetch(`/api/models`)
+            const data = await res.json()
+            if (Array.isArray(data?.models)) {
+                setModels(data.models)
+                setSelectedModelId(prev => prev || (data.models[0]?.id ?? ""))
+            } else {
+                setModels([])
+            }
+        } catch {
+            setModels([])
+        }
+    }, [])
+
+    useEffect(() => {
+        fetchModels()
+    }, [fetchModels])
+
+    useEffect(() => {
+        const poll = async () => {
+            try {
+                const res = await fetch(`/api/train/status`)
+                const data = await res.json()
+                setTrainInfo(data)
+            } catch {
+                setTrainInfo({status: "error", error: "status fetch failed"})
+            }
+        }
+        poll()
+        const timer = window.setInterval(poll, 1000)
+        return () => {
+            window.clearInterval(timer)
+        }
+    }, [])
+
+    const startInference = useCallback(async (modelId: string) => {
+        if (!modelId) {
+            setActStatus("ACT: 未选择模型")
+            setInferRunning(false)
+            return
+        }
+        try {
+            const res = await fetch(`/api/infer/start`, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({model_id: modelId})
+            })
+            const data = await res.json()
+            if (!res.ok) {
+                throw new Error(data?.message || "start failed")
+            }
+            setInferRunning(true)
+            setActStatus(`ACT: running (${data?.model_id || modelId})`)
+        } catch (err) {
+            const message = err instanceof Error ? err.message : "start failed"
+            setInferRunning(false)
+            setActStatus(`ACT: ${message}`)
+        }
+    }, [])
+
+    const stopInference = useCallback(async () => {
+        if (!inferRunning) return
+        try {
+            await fetch(`/api/infer/stop`, {method: "POST"})
+        } finally {
+            setInferRunning(false)
+        }
+    }, [inferRunning])
+
+    useEffect(() => {
+        if (actEnabled) {
+            startInference(selectedModelId)
+        } else {
+            stopInference()
+        }
+    }, [actEnabled, selectedModelId, startInference, stopInference])
 
     const keys = useRef<Record<string, boolean>>({})
 
@@ -245,16 +308,18 @@ const SimPage = () => {
         }
         lastCommandRef.current = cmd
         const now = performance.now()
-        if (cmd === "stop") {
-            if (lastSentCommandRef.current !== "stop" || now - lastSendAtRef.current >= 300) {
+        if (!actEnabled) {
+            if (cmd === "stop") {
+                if (lastSentCommandRef.current !== "stop" || now - lastSendAtRef.current >= 300) {
+                    sendAction(cmd)
+                    lastSentCommandRef.current = cmd
+                    lastSendAtRef.current = now
+                }
+            } else {
                 sendAction(cmd)
                 lastSentCommandRef.current = cmd
                 lastSendAtRef.current = now
             }
-        } else {
-            sendAction(cmd)
-            lastSentCommandRef.current = cmd
-            lastSendAtRef.current = now
         }
         applyLocalAction(cmd)
         const state = carState.current;
@@ -314,16 +379,6 @@ const SimPage = () => {
         envState[5] = getForwardDistance(x, y, angle)
         return {state, envState}
     }, [getForwardDistance])
-
-    const buildInferencePayload = useCallback(() => {
-        const {state, envState} = getObservationVectors()
-        const frameId = inferFrameRef.current
-        inferFrameRef.current += 1
-        return {
-            observation: {state, environment_state: envState},
-            meta: {frame_id: frameId, index: frameId}
-        }
-    }, [getObservationVectors])
 
     const packDataset = (episodes: {steps: EpisodeStep[]}[]) => {
         const states: number[][][] = []
@@ -513,11 +568,34 @@ const SimPage = () => {
 
             lastTime = currentTime - (delta % frameInterval)
 
-            if (actEnabled) {
+            if (actEnabled && inferRunning) {
                 const elapsed = currentTime - lastInferAtRef.current
-                if (elapsed >= inferInterval) {
+                if (elapsed >= inferInterval && !inferBusyRef.current) {
+                    inferBusyRef.current = true
                     lastInferAtRef.current = currentTime
-                    actInfer(buildInferencePayload())
+                    fetch(`/api/infer/step`, {method: "POST"})
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data?.status === "ok") {
+                                const cmd = data.action || "stop"
+                                actCommandRef.current = cmd
+                                setActStatus(`ACT: ${cmd}`)
+                                inferFrameRef.current += 1
+                                return
+                            }
+                            if (data?.message) {
+                                setActStatus(`ACT: ${data.message}`)
+                                actCommandRef.current = "stop"
+                            }
+                        })
+                        .catch(err => {
+                            const message = err instanceof Error ? err.message : "infer failed"
+                            setActStatus(`ACT: ${message}`)
+                            actCommandRef.current = "stop"
+                        })
+                        .finally(() => {
+                            inferBusyRef.current = false
+                        })
                 }
             }
             updatePhysics()
@@ -543,7 +621,7 @@ const SimPage = () => {
 
             window.cancelAnimationFrame(animationFrameId)
         }
-    }, [actEnabled, buildInferencePayload, collecting, commandToActionVec, drawFirstPerson, drawTopDown, getObservationVectors, updatePhysics])
+    }, [actEnabled, inferRunning, collecting, commandToActionVec, drawFirstPerson, drawTopDown, getObservationVectors, updatePhysics])
 
     const sendCommand = (cmd: string) => {
         keys.current[cmd] = true
@@ -627,13 +705,13 @@ const SimPage = () => {
         <div style={{
             display: 'flex',
             flexDirection: 'column',
-            gap: '20px',
-            padding: '20px',
+            gap: '12px',
+            padding: '12px 16px',
             height: '100vh',
             boxSizing: 'border-box',
             overflow: 'hidden'
         }}>
-            <h1 style={{textAlign: 'center'}}>小车模拟器</h1>
+            <h1 style={{textAlign: 'center', margin: 0}}>小车模拟器</h1>
             <div style={{
                 display: 'flex',
                 flexDirection: 'row',
@@ -644,9 +722,10 @@ const SimPage = () => {
                 <div style={{
                     flex: '0 0 260px',
                     display: 'flex',
-                    flexDirection: 'column'
+                    flexDirection: 'column',
+                    height: '100%'
                 }}>
-                    <div style={{border: '2px solid #333', borderRadius: 8, padding: '12px 16px 12px 12px', background: '#f9f9f9', height: '100%', overflowY: 'auto', boxSizing: 'border-box'}}>
+                    <div style={{border: '2px solid #333', borderRadius: 8, padding: '12px 16px 12px 12px', background: '#f9f9f9', overflowY: 'auto', boxSizing: 'border-box', height: '100%'}}>
                         <TargetManager
                             onCreateInFront={handleCreateTargetInFront}
                             isCreatingTarget={isCreatingTarget}
@@ -659,9 +738,10 @@ const SimPage = () => {
                 <div style={{
                     flex: 1,
                     display: 'flex',
-                    flexDirection: 'column'
+                    flexDirection: 'column',
+                    height: '100%'
                 }}>
-                    <div style={{border: '2px solid #333', borderRadius: 8, background: '#f9f9f9', padding: 12, height: '100%', display: 'flex', flexDirection: 'column', gap: 12}}>
+                    <div style={{border: '2px solid #333', borderRadius: 8, background: '#f9f9f9', padding: 12, display: 'flex', flexDirection: 'column', gap: 12, height: '100%'}}>
                         <div style={{fontWeight: 600}}>俯视地图</div>
                         <div style={{position: 'relative', alignSelf: 'center'}}>
                             <canvas
@@ -696,9 +776,10 @@ const SimPage = () => {
                 <div style={{
                     flex: '0 0 360px',
                     display: 'flex',
-                    flexDirection: 'column'
+                    flexDirection: 'column',
+                    height: '100%'
                 }}>
-                    <div style={{border: '2px solid #333', borderRadius: 8, padding: '12px', background: '#f9f9f9', height: '100%', display: 'flex', flexDirection: 'column', gap: 12, color: '#333'}}>
+                    <div style={{border: '2px solid #333', borderRadius: 8, padding: '10px', background: '#f9f9f9', display: 'flex', flexDirection: 'column', gap: 8, color: '#333', height: '100%', overflowY: 'auto', minHeight: 0}}>
                         <div style={{fontWeight: 600}}>车载摄像头</div>
                         <canvas ref={fpvRef} width={320} height={240}
                                 style={{background: '#000', border: '2px solid #333', borderRadius: 4, alignSelf: 'center'}}/>
@@ -707,6 +788,19 @@ const SimPage = () => {
                         </div>
                         <div style={{height: 1, background: '#ddd'}}/>
                         <div style={{fontWeight: 600}}>ACT 推理</div>
+                        <div style={{display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap'}}>
+                            <select
+                                value={selectedModelId}
+                                onChange={(e) => setSelectedModelId(e.target.value)}
+                                style={{flex: 1, minWidth: 140}}
+                            >
+                                <option value="">未选择模型</option>
+                                {models.map(model => (
+                                    <option key={model.id} value={model.id}>{model.id}</option>
+                                ))}
+                            </select>
+                            <button onClick={fetchModels}>刷新</button>
+                        </div>
                         <button
                             onClick={() => setActEnabled(v => {
                                 const next = !v
@@ -724,13 +818,13 @@ const SimPage = () => {
                             <button onClick={stopCollect}>结束采集</button>
                             <button onClick={handleResetSave}>复位保存</button>
                         </div>
-                        <div style={{fontSize: 12, opacity: 0.9}}>
+                        <div style={{fontSize: 11, opacity: 0.9, lineHeight: 1.2}}>
                             已完成回合 {collectedEpisodes}/{targetEpisodes}
                         </div>
-                        <div style={{fontSize: 12, opacity: 0.9}}>
+                        <div style={{fontSize: 11, opacity: 0.9, lineHeight: 1.2}}>
                             当前回合步数 {currentStepCount}
                         </div>
-                        <label style={{display: 'flex', alignItems: 'center', gap: '6px', fontSize: 12}}>
+                        <label style={{display: 'flex', alignItems: 'center', gap: '6px', fontSize: 11}}>
                             目标回合
                             <input
                                 type="number"
@@ -746,10 +840,19 @@ const SimPage = () => {
                                 style={{width: 80}}
                             />
                         </label>
-                        <div style={{fontSize: 12, opacity: 0.9}}>
+                        <div style={{fontSize: 11, opacity: 0.9, lineHeight: 1.2}}>
                             {collectStatus}
                         </div>
-                        <div style={{fontSize: 12, opacity: 0.9}}>
+                        <div style={{fontSize: 11, opacity: 0.9, lineHeight: 1.2}}>
+                            训练状态 {trainInfo?.status || "unknown"}
+                        </div>
+                        <div style={{fontSize: 11, opacity: 0.9, lineHeight: 1.2}}>
+                            训练进度 {trainInfo?.epoch ?? 0}/{trainInfo?.num_epochs ?? 0}
+                        </div>
+                        <div style={{fontSize: 11, opacity: 0.9, lineHeight: 1.2}}>
+                            平均损失 {typeof trainInfo?.avg_loss === "number" ? trainInfo.avg_loss.toFixed(4) : "-"}
+                        </div>
+                        <div style={{fontSize: 11, opacity: 0.9, lineHeight: 1.2}}>
                             流程：开始采集 → 操作小车 → 复位保存 → 自动保存一条数据 → 调整场景 → 结束采集
                         </div>
                     </div>
