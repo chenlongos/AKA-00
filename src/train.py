@@ -2,6 +2,7 @@ import os
 import json
 import time
 from datetime import datetime
+from typing import Callable
 import torch
 from torch.utils.data import DataLoader, Dataset
 
@@ -50,6 +51,7 @@ def train_act(
     kl_weight: float = 1.0,
     grad_clip_norm: float | None = 1.0,
     save_dir: str | None = None,
+    progress_callback: Callable[[int, int, float], None] | None = None,
 ):
     """
     训练 ACT 策略（最小可用版本）
@@ -145,6 +147,8 @@ def train_act(
 
         avg_loss = epoch_loss / len(dataloader)
         epoch_losses.append(avg_loss)
+        if progress_callback is not None:
+            progress_callback(epoch + 1, num_epochs, float(avg_loss))
         print(f"[Epoch {epoch+1}] avg loss = {avg_loss:.6f}")
 
     if len(epoch_losses) >= 2:
@@ -168,6 +172,79 @@ def train_act(
         print(f"✅ ACT training finished, saved to {save_path}")
     else:
         print("✅ ACT training finished")
+
+
+def build_config(state_dim: int, env_state_dim: int, action_dim: int, chunk_size: int, use_vae: bool):
+    return ACTConfig(
+        chunk_size=chunk_size,
+        n_action_steps=chunk_size,
+        n_obs_steps=1,
+        use_vae=use_vae,
+        input_features={
+            OBS_STATE: PolicyFeature(type=FeatureType.STATE, shape=(state_dim,)),
+            OBS_ENV_STATE: PolicyFeature(type=FeatureType.ENV, shape=(env_state_dim,)),
+        },
+        output_features={
+            ACTION: PolicyFeature(type=FeatureType.ACTION, shape=(action_dim,)),
+        },
+    )
+
+
+def train_from_dataset(
+    dataset_path: str,
+    output_dir: str,
+    num_epochs: int = 50,
+    batch_size: int = 64,
+    lr: float = 3e-4,
+    device: str | None = None,
+    use_vae: bool = False,
+    kl_weight: float = 1.0,
+    grad_clip_norm: float | None = 1.0,
+    progress_callback: Callable[[int, int, float], None] | None = None,
+):
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    train_dataset = load_dataset_from_local(dataset_path)
+    if train_dataset is None:
+        raise ValueError("dataset not found")
+    state_dim = int(train_dataset.states.shape[-1])
+    env_state_dim = int(train_dataset.env_states.shape[-1])
+    action_dim = int(train_dataset.actions.shape[-1])
+    chunk_size = int(train_dataset.actions.shape[-2])
+    config = build_config(state_dim, env_state_dim, action_dim, chunk_size, use_vae)
+    model = ACT(config)
+    train_loader = DataLoader(
+        dataset=train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=0,
+        pin_memory=torch.cuda.is_available(),
+    )
+    train_act(
+        model=model,
+        dataloader=train_loader,
+        num_epochs=num_epochs,
+        lr=lr,
+        device=device,
+        use_vae=use_vae,
+        kl_weight=kl_weight,
+        grad_clip_norm=grad_clip_norm,
+        save_dir=output_dir,
+        progress_callback=progress_callback,
+    )
+    checkpoint_path = os.path.join(output_dir, "act_checkpoint.pt")
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    checkpoint.update(
+        {
+            "state_dim": state_dim,
+            "env_state_dim": env_state_dim,
+            "action_dim": action_dim,
+            "chunk_size": chunk_size,
+            "use_vae": use_vae,
+        }
+    )
+    torch.save(checkpoint, checkpoint_path)
+    return {"checkpoint_path": checkpoint_path}
 
 
 def run_inference(model: ACT, batch: dict, device: str):

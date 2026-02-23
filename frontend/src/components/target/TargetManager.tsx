@@ -86,23 +86,32 @@ export const TargetManager: React.FC<TargetManagerProps> = ({
 
     return (
         <div style={{
-            minWidth: '250px',
-            border: '2px solid #333',
-            borderRadius: '8px',
-            padding: '15px',
-            background: '#f9f9f9',
-            overflowY: 'auto',
-            minHeight: '570px'
+            width: '100%',
+            padding: 0,
+            background: 'transparent',
+            color: '#1f2937',
+            display: 'flex',
+            flexDirection: 'column',
+            height: '100%'
         }}>
-            <h3 style={{marginTop: 0, marginBottom: '15px'}}>目标物管理</h3>
+            <h3 style={{
+                marginTop: 0,
+                marginBottom: '10px',
+                color: '#111827',
+                fontSize: '14px',
+                fontWeight: 600,
+                background: '#eef2f7',
+                padding: '6px 8px',
+                borderRadius: 6
+            }}>目标物管理</h3>
 
-            <div style={{marginTop: '15px'}}>
-                <h4 style={{marginTop: 0, marginBottom: '10px', fontSize: '14px'}}>已有目标物列表</h4>
-                <div style={{display: 'flex', gap: '8px', marginBottom: '10px'}}>
+            <div style={{marginTop: '10px', display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minHeight: 0}}>
+                <h4 style={{marginTop: 0, marginBottom: '8px', fontSize: '13px', color: '#374151'}}>已有目标物列表</h4>
+                <div style={{display: 'flex', gap: '8px', marginBottom: '8px', flexWrap: 'wrap'}}>
                     <button
                         onClick={() => handleExportTargets()}
                         style={{
-                            padding: '5px 10px',
+                            padding: '4px 8px',
                             fontSize: '12px',
                             backgroundColor: '#4ecdc4',
                             color: 'white',
@@ -119,7 +128,7 @@ export const TargetManager: React.FC<TargetManagerProps> = ({
                     <button
                         onClick={() => setShowImportDialog(true)}
                         style={{
-                            padding: '5px 10px',
+                            padding: '4px 8px',
                             fontSize: '12px',
                             backgroundColor: '#3498db',
                             color: 'white',
@@ -136,12 +145,13 @@ export const TargetManager: React.FC<TargetManagerProps> = ({
 
                 </div>
                 <div style={{
-                    border: '1px solid rgb(221, 221, 221)',
+                    border: '1px solid #e5e7eb',
                     borderRadius: '4px',
-                    padding: '8px',
-                    maxHeight: '300px',
+                    padding: '6px',
+                    flex: 1,
+                    minHeight: 0,
                     overflowY: 'auto',
-                    background: 'rgb(255, 255, 255)'
+                    background: '#f8fafc'
                 }}>
                     {editingTarget ? (
                         <TargetEditForm
@@ -170,7 +180,7 @@ export const TargetManager: React.FC<TargetManagerProps> = ({
                                 ))}
                             </div>
                         ) : (
-                            <div style={{textAlign: 'center', color: '#999', padding: '15px', fontSize: '13px'}}>
+                            <div style={{textAlign: 'center', color: '#6b7280', padding: '15px', fontSize: '13px'}}>
                                 暂无目标物数据
                             </div>
                         )
@@ -178,13 +188,15 @@ export const TargetManager: React.FC<TargetManagerProps> = ({
                 </div>
             </div>
 
-            <TargetCreator
-                selectedTargetType={selectedTargetType}
-                setSelectedTargetType={setSelectedTargetType}
-                isCreatingTarget={isCreatingTarget}
-                onToggleCreating={onToggleCreating}
-                onCreateAtCamera={handleCreateTargetAtCamera}
-            />
+            <div style={{marginTop: '8px'}}>
+                <TargetCreator
+                    selectedTargetType={selectedTargetType}
+                    setSelectedTargetType={setSelectedTargetType}
+                    isCreatingTarget={isCreatingTarget}
+                    onToggleCreating={onToggleCreating}
+                    onCreateAtCamera={handleCreateTargetAtCamera}
+                />
+            </div>
 
             <ModalImportDialog
                 isOpen={showImportDialog}
@@ -391,10 +403,10 @@ const TargetItem: React.FC<TargetItemProps> = ({
     return (
         <div
             style={{
-                border: `1px solid ${isSelected ? '#4ecdc4' : 'rgb(221, 221, 221)'}`,
+                border: `1px solid ${isSelected ? '#4ecdc4' : '#e5e7eb'}`,
                 borderRadius: '4px',
                 padding: '5px',
-                background: isSelected ? 'rgba(78, 205, 196, 0.1)' : 'rgb(255, 255, 255)',
+                background: isSelected ? 'rgba(78, 205, 196, 0.1)' : '#ffffff',
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
                 minHeight: '70px',
@@ -413,20 +425,20 @@ const TargetItem: React.FC<TargetItemProps> = ({
         >
             <div style={{display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '1px'}}>
                 <div style={{width: '12px', height: '12px', backgroundColor: target.color, borderRadius: '2px', border: '1px solid #ddd'}} />
-                <span style={{fontSize: '10px', color: '#666', fontWeight: '500'}}>
+                <span style={{fontSize: '10px', color: '#374151', fontWeight: '600'}}>
                     {target.type === 'RECT' ? '矩形' : '圆形'}
                 </span>
             </div>
 
-            <div style={{fontSize: '9px', color: '#999', marginBottom: '1px', whiteSpace: 'normal', wordBreak: 'break-all', lineHeight: '1.1'}}>
+            <div style={{fontSize: '9px', color: '#6b7280', marginBottom: '1px', whiteSpace: 'normal', wordBreak: 'break-all', lineHeight: '1.1'}}>
                 ID: {target.id}
             </div>
 
-            <div style={{fontSize: '9px', color: '#666', marginBottom: '1px', lineHeight: '1.1'}}>
+            <div style={{fontSize: '9px', color: '#4b5563', marginBottom: '1px', lineHeight: '1.1'}}>
                 位置: ({Math.floor(target.x)}, {Math.floor(target.y)})
             </div>
 
-            <div style={{fontSize: '9px', color: '#666', marginBottom: '1px', lineHeight: '1.1'}}>
+            <div style={{fontSize: '9px', color: '#4b5563', marginBottom: '1px', lineHeight: '1.1'}}>
                 {target.type === 'RECT' ? `尺寸: ${target.w}x${target.h}` : `半径: ${target.r}`}
             </div>
 
@@ -493,38 +505,38 @@ const TargetCreator: React.FC<TargetCreatorProps> = ({
 }) => {
     return (
         <div style={{
-            marginTop: '20px',
-            padding: '15px',
-            border: '2px solid #333',
-            borderRadius: '8px',
-            background: '#f9f9f9',
+            marginTop: '8px',
+            padding: '8px',
+            border: '1px solid #ddd',
+            borderRadius: '6px',
+            background: '#ffffff',
             width: '100%',
-            maxWidth: '280px'
+            boxSizing: 'border-box'
         }}>
-            <h3 style={{marginTop: 0, fontSize: '16px', textAlign: 'center'}}>创建目标物</h3>
+            <h3 style={{marginTop: 0, marginBottom: 8, fontSize: '14px', textAlign: 'center'}}>创建目标物</h3>
             <div style={{
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '10px',
+                gap: '8px',
                 alignItems: 'center'
             }}>
                 <div>
-                    <label style={{marginRight: '10px'}}>选择类型:</label>
+                    <label style={{marginRight: '8px', fontSize: 12}}>类型:</label>
                     <select
                         value={selectedTargetType}
                         onChange={(e) => setSelectedTargetType(e.target.value as TargetType)}
-                        style={{padding: '5px', marginRight: '10px'}}
+                        style={{padding: '4px 6px', marginRight: '6px', fontSize: 12}}
                     >
                         <option value="RECT">矩形</option>
                         <option value="CIRCLE">圆形</option>
                     </select>
                 </div>
-                <div style={{display: 'flex', gap: '10px'}}>
+                <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center'}}>
                     <button
                         onClick={() => onToggleCreating?.(!isCreatingTarget)}
                         style={{
-                            padding: '6px 12px',
-                            fontSize: '14px',
+                            padding: '4px 8px',
+                            fontSize: '12px',
                             backgroundColor: isCreatingTarget ? '#ff6b6b' : '#4ecdc4',
                             color: 'white',
                             border: 'none',
@@ -537,8 +549,8 @@ const TargetCreator: React.FC<TargetCreatorProps> = ({
                     <button
                         onClick={onCreateAtCamera}
                         style={{
-                            padding: '6px 12px',
-                            fontSize: '14px',
+                            padding: '4px 8px',
+                            fontSize: '12px',
                             backgroundColor: '#45b7d1',
                             color: 'white',
                             border: 'none',
@@ -546,10 +558,10 @@ const TargetCreator: React.FC<TargetCreatorProps> = ({
                             cursor: 'pointer'
                         }}
                     >
-                        在摄像头下创建
+                        在车前创建
                     </button>
                 </div>
-                <div style={{fontSize: '12px', color: '#555', textAlign: 'center'}}>
+                <div style={{fontSize: '11px', color: '#374151', textAlign: 'center'}}>
                     状态: {isCreatingTarget ? '就绪 - 点击画布创建' : '未激活'}
                 </div>
             </div>
