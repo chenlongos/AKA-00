@@ -5,8 +5,7 @@ import SimPage from "./pages/SimPage.tsx";
 function App() {
     return (
         <Routes>
-            <Route path="/" element={<SimPage/>}/>
-            <Route path="/control" element={<BaseControlPage/>}/>
+            <Route path="/" element={<BaseControlPage/>}/>
             <Route path="/sim" element={<SimPage/>}/>
         </Routes>
     )
