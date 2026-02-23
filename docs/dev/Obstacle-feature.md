@@ -37,7 +37,35 @@ export interface Target {
 
 ### 3.1 碰撞检测
 
-球体目标物的碰撞检测使用距离公式实现：
+【更新】当前实现包含矩形与圆形两类目标物的碰撞检测，并支持矩形旋转角度判定。
+
+矩形（RECT）目标物的碰撞检测分两种情况：
+- 无旋转角度时，判断点是否落在矩形的 x/y 范围内
+- 有旋转角度时，把点坐标旋转回矩形本地坐标，再判断是否落在宽高范围内
+
+```typescript
+if (target.type === 'RECT') {
+    const width = target.w || 0;
+    const height = target.h || 0;
+
+    if (!target.angle) {
+        return x > target.x && x < target.x + width &&
+               y > target.y && y < target.y + height;
+    }
+
+    const centerX = target.x + width / 2;
+    const centerY = target.y + height / 2;
+
+    const dx = x - centerX;
+    const dy = y - centerY;
+    const rotatedX = dx * Math.cos(-target.angle) - dy * Math.sin(-target.angle);
+    const rotatedY = dx * Math.sin(-target.angle) + dy * Math.cos(-target.angle);
+
+    return Math.abs(rotatedX) < width / 2 && Math.abs(rotatedY) < height / 2;
+}
+```
+
+圆形（CIRCLE）目标物的碰撞检测使用距离公式实现：
 
 ```typescript
 else if (t.type === 'CIRCLE') {
@@ -47,6 +75,8 @@ else if (t.type === 'CIRCLE') {
     return distance < (t.r || 0);
 }
 ```
+
+【更新】整体碰撞检测还包含地图边界判断：如果小车超出地图边界，直接视为碰撞。
 
 ### 3.2 绘制实现
 
