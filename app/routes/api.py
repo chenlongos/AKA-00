@@ -21,7 +21,13 @@ from src.train import train_from_dataset, build_config
 from src.policies.act.modeling_act import ACT
 from ..extensions import socketio
 
-if os.name == "nt" or sys.platform == "darwin":
+# 根据AKA_MODE环境变量决定使用硬件还是模拟
+# 默认使用模拟模式（避免硬件错误）
+aka_mode = os.getenv('AKA_MODE', 'simulation').lower()
+use_hardware = aka_mode == 'hardware'
+
+if not use_hardware:
+    # 模拟模式 - 使用空实现
     class STS3215:
         def __init__(self, *_, **__):
             pass
@@ -57,6 +63,7 @@ if os.name == "nt" or sys.platform == "darwin":
     def brake(*_, **__):
         return None
 else:
+    # 硬件模式 - 导入真实硬件驱动
     from arm import STS3215, grab, release, arm_init
     from motor import Motor, forward, backward, turn_left, turn_right, sleep, brake
 

@@ -27,6 +27,8 @@ export interface SpriteData {
     cx: number;
     cy: number;
     radius: number;
+    height: number; // 高度（圆柱体为实际高度，球体为0）
+    type: 'CIRCLE' | 'CYLINDER'; // 目标物类型
 }
 
 export const getRaySegmentIntersection = (
@@ -99,6 +101,7 @@ export const targetsToWalls = (targets: Target[]): WallSegment[] => {
             walls.push({x1: vertices[2].x, y1: vertices[2].y, x2: vertices[3].x, y2: vertices[3].y, color: c});
             walls.push({x1: vertices[3].x, y1: vertices[3].y, x2: vertices[0].x, y2: vertices[0].y, color: c});
         }
+        // 圆柱体不再生成墙段，将作为精灵渲染
     });
 
     return walls;
@@ -161,11 +164,27 @@ export const renderTopDownTargets = (
             }
 
             ctx.restore();
-        } else if (t.type === 'CIRCLE') {
+        } else if (t.type === 'CIRCLE' || t.type === 'CYLINDER') {
             ctx.beginPath();
             ctx.arc(t.x, t.y, t.r || 0, 0, Math.PI * 2);
             ctx.fill();
-            ctx.strokeStyle = '#333';
+            
+            // 为圆柱体添加特殊标记以区分球体
+            if (t.type === 'CYLINDER') {
+                ctx.strokeStyle = '#0000FF'; // 蓝色边框区分
+                ctx.lineWidth = 2;
+                // 添加十字标记
+                ctx.beginPath();
+                ctx.moveTo(t.x - (t.r || 0), t.y);
+                ctx.lineTo(t.x + (t.r || 0), t.y);
+                ctx.moveTo(t.x, t.y - (t.r || 0));
+                ctx.lineTo(t.x, t.y + (t.r || 0));
+                ctx.stroke();
+                ctx.lineWidth = 1;
+            } else {
+                ctx.strokeStyle = '#333';
+            }
+            
             ctx.stroke();
 
             if (t.id === selectedTargetId) {
@@ -191,7 +210,7 @@ export const computeSprites = (
   w: number,
   h: number
 ): SpriteData[] => {
-  const balls = targets.filter(t => t.type === 'CIRCLE');
+  const balls = targets.filter(t => t.type === 'CIRCLE' || t.type === 'CYLINDER');
   const halfFov = fov / 2;
   const tanHalfFov = Math.tan(halfFov);
   const eyeHeight = 20;
@@ -201,6 +220,7 @@ export const computeSprites = (
     const dy = ball.y - carY;
     const dist = Math.hypot(dx, dy);
     const radius = ball.r || 15;
+    const height = ball.type === 'CYLINDER' ? (ball.h || 40) : 0;
 
     const cosCar = Math.cos(carAngle);
     const sinCar = Math.sin(carAngle);
@@ -213,7 +233,8 @@ export const computeSprites = (
 
     const spriteSize = (h * 2 * radius) / tx;
 
-    const screenY = h / 2 + (eyeHeight - radius) * h / tx;
+    // 圆柱体需要调整屏幕Y位置，因为有一定高度
+    const screenY = h / 2 + (eyeHeight - (ball.type === 'CYLINDER' ? height / 2 : radius)) * h / tx;
 
     return {
       screenX,
@@ -225,7 +246,9 @@ export const computeSprites = (
       isPicked: false,
       cx: ball.x,
       cy: ball.y,
-      radius
+      radius,
+      height: ball.type === 'CYLINDER' ? height : 0,
+      type: ball.type
     };
   }).filter((sprite): sprite is SpriteData => sprite !== null)
     .sort((a, b) => b.realDist - a.realDist);
@@ -283,7 +306,8 @@ export const renderFirstPersonSprites = (
     carX: number,
     carY: number,
     carAngle: number,
-    fov: number
+    fov: number,
+    h: number
 ): void => {
     const halfFov = fov / 2;
     sprites.forEach(s => {
@@ -302,7 +326,17 @@ export const renderFirstPersonSprites = (
             const relX = (i * rayWidth + rayWidth / 2 - s.screenX) / (s.size / 2);
             if (Math.abs(relX) > 1) continue;
 
-            const colHeight = Math.sqrt(1 - relX * relX) * s.size;
+            let colHeight: number;
+            if (s.type === 'CYLINDER') {
+                // 圆柱体：渲染为矩形（长方形）
+                // 使用固定高度，不随水平位置变化
+                const cylinderHeight = s.height * h / s.dist; // 将实际高度转换为屏幕高度
+                colHeight = cylinderHeight; // 固定高度，形成矩形
+            } else {
+                // 球体：原有的球形曲面
+                colHeight = Math.sqrt(1 - relX * relX) * s.size;
+            }
+            
             const colTop = s.screenY - colHeight / 2;
 
             ctx.fillStyle = s.color;

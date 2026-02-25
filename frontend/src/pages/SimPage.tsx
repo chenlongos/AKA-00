@@ -500,7 +500,7 @@ const SimPage = () => {
         const depthBuffer = renderFirstPersonWalls(ctx, walls, x, y, angle, w, h);
 
         const sprites = computeSprites(targetsRef.current, x, y, angle, fov, w, h);
-        renderFirstPersonSprites(ctx, sprites, depthBuffer, rayWidth, rayCount, x, y, angle, fov);
+        renderFirstPersonSprites(ctx, sprites, depthBuffer, rayWidth, rayCount, x, y, angle, fov, h);
         const hasVisibleSprite = sprites.some(sprite => sprite.screenX + sprite.size > 0 && sprite.screenX - sprite.size < w);
         const hasVisibleWall = depthBuffer.some(dist => dist < Infinity);
         if (!hasVisibleSprite && !hasVisibleWall) {

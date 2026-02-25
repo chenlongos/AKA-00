@@ -67,8 +67,8 @@ export const useTargetStore = create<TargetStore>()(
                         return false;
                     }
 
-                    if (t.type !== 'RECT' && t.type !== 'CIRCLE') {
-                        console.warn('跳过无效目标物：type必须为RECT或CIRCLE', t);
+                    if (t.type !== 'RECT' && t.type !== 'CIRCLE' && t.type !== 'CYLINDER') {
+                        console.warn('跳过无效目标物：type必须为RECT、CIRCLE或CYLINDER', t);
                         return false;
                     }
 
@@ -87,6 +87,21 @@ export const useTargetStore = create<TargetStore>()(
                         if (t.r !== undefined && typeof t.r !== 'number') {
                             console.warn('跳过无效目标物：r必须是数字', t);
                             return false;
+                        }
+                    }
+                    
+                    if (t.type === 'CYLINDER') {
+                        if (t.r !== undefined && typeof t.r !== 'number') {
+                            console.warn('跳过无效目标物：r必须是数字', t);
+                            return false;
+                        }
+                        if (t.h !== undefined && typeof t.h !== 'number') {
+                            console.warn('跳过无效目标物：h必须是数字', t);
+                            return false;
+                        }
+                        // 圆柱体不应有宽度属性
+                        if (t.w !== undefined) {
+                            console.warn('警告：圆柱体不应有宽度属性，已忽略', t);
                         }
                     }
 

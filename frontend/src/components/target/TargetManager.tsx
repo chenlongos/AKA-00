@@ -310,7 +310,7 @@ const TargetEditForm: React.FC<TargetEditFormProps> = ({
                         </div>
                     </>
                 )}
-                {editingTarget.type === 'CIRCLE' && (
+                {(editingTarget.type === 'CIRCLE' || editingTarget.type === 'CYLINDER') && (
                     <div>
                         <label style={{fontSize: '12px', marginRight: '5px'}}>半径: </label>
                         <input
@@ -326,7 +326,23 @@ const TargetEditForm: React.FC<TargetEditFormProps> = ({
                         )}
                     </div>
                 )}
-                {editingTarget.type === 'RECT' && (
+                {editingTarget.type === 'CYLINDER' && (
+                    <div>
+                        <label style={{fontSize: '12px', marginRight: '5px'}}>高度: </label>
+                        <input
+                            type="number"
+                            value={editForm.h}
+                            onChange={(e) => handleNumberChange('h', e.target.value)}
+                            style={{fontSize: '12px', padding: '3px 5px', width: '60px'}}
+                        />
+                        {fieldErrors['h'] && (
+                            <div style={{fontSize: '10px', color: '#e74c3c', marginTop: '2px'}}>
+                                {fieldErrors['h']}
+                            </div>
+                        )}
+                    </div>
+                )}
+                {(editingTarget.type === 'RECT' || editingTarget.type === 'CYLINDER') && (
                     <div>
                         <label style={{fontSize: '12px', marginRight: '5px'}}>旋转角度: </label>
                         <input
@@ -426,7 +442,7 @@ const TargetItem: React.FC<TargetItemProps> = ({
             <div style={{display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '1px'}}>
                 <div style={{width: '12px', height: '12px', backgroundColor: target.color, borderRadius: '2px', border: '1px solid #ddd'}} />
                 <span style={{fontSize: '10px', color: '#374151', fontWeight: '600'}}>
-                    {target.type === 'RECT' ? '矩形' : '圆形'}
+                    {target.type === 'RECT' ? '矩形' : target.type === 'CYLINDER' ? '圆柱体' : '圆形'}
                 </span>
             </div>
 
@@ -439,7 +455,9 @@ const TargetItem: React.FC<TargetItemProps> = ({
             </div>
 
             <div style={{fontSize: '9px', color: '#4b5563', marginBottom: '1px', lineHeight: '1.1'}}>
-                {target.type === 'RECT' ? `尺寸: ${target.w}x${target.h}` : `半径: ${target.r}`}
+                {target.type === 'RECT' ? `尺寸: ${target.w}x${target.h}` : 
+                 target.type === 'CYLINDER' ? `半径: ${target.r}, 高: ${target.h}` : 
+                 `半径: ${target.r}`}
             </div>
 
             <div style={{display: 'flex', justifyContent: 'flex-end', gap: '4px', marginTop: '2px'}}>
@@ -529,6 +547,7 @@ const TargetCreator: React.FC<TargetCreatorProps> = ({
                     >
                         <option value="RECT">矩形</option>
                         <option value="CIRCLE">圆形</option>
+                        <option value="CYLINDER">圆柱体</option>
                     </select>
                 </div>
                 <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center'}}>

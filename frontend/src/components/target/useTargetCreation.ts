@@ -21,7 +21,7 @@ export const useTargetCreation = (): UseTargetCreationReturn => {
             type,
             x,
             y,
-            color: type === 'RECT' ? '#8B4513' : '#2E8B57',
+            color: type === 'RECT' ? '#8B4513' : type === 'CYLINDER' ? '#FF6347' : '#2E8B57',
             angle: 0
         } as Omit<Target, 'id'>;
 
@@ -31,10 +31,16 @@ export const useTargetCreation = (): UseTargetCreationReturn => {
                 w: 50,
                 h: 30
             });
-        } else {
+        } else if (type === 'CIRCLE') {
             addTarget({
                 ...baseTarget,
                 r: 20
+            });
+        } else if (type === 'CYLINDER') {
+            addTarget({
+                ...baseTarget,
+                r: 20,
+                h: 40  // 圆柱体高度
             });
         }
     }, [selectedTargetType, addTarget]);
