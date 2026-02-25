@@ -1,6 +1,7 @@
 import math
 import os
 import base64
+import sys
 import threading
 from pathlib import Path
 try:
@@ -20,7 +21,7 @@ from src.train import train_from_dataset, build_config
 from src.policies.act.modeling_act import ACT
 from ..extensions import socketio
 
-if os.name == "nt":
+if os.name == "nt" or sys.platform == "darwin":
     class STS3215:
         def __init__(self, *_, **__):
             pass
