@@ -109,6 +109,7 @@ const SimPage = () => {
         error?: string;
         updated_at?: string;
     } | null>(null)
+    const [trainStartStatus, setTrainStartStatus] = useState("")
     const actCommandRef = useRef<string>("stop")
     const lastCommandRef = useRef<string>("stop")
     const lastSentCommandRef = useRef<string>("stop")
@@ -195,6 +196,25 @@ const SimPage = () => {
         const timer = window.setInterval(poll, 1000)
         return () => {
             window.clearInterval(timer)
+        }
+    }, [])
+
+    const startTrain = useCallback(async () => {
+        setTrainStartStatus("训练: 启动中")
+        try {
+            const res = await fetch(`/api/train/start`, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({})
+            })
+            const data = await res.json()
+            if (!res.ok) {
+                throw new Error(data?.message || "start failed")
+            }
+            setTrainStartStatus("训练: 已启动")
+        } catch (err) {
+            const message = err instanceof Error ? err.message : "start failed"
+            setTrainStartStatus(`训练: ${message}`)
         }
     }, [])
 
@@ -836,6 +856,7 @@ const SimPage = () => {
                             <button onClick={startCollect}>开始采集</button>
                             <button onClick={stopCollect}>结束采集</button>
                             <button onClick={handleResetSave}>复位保存</button>
+                            <button onClick={startTrain}>开始训练</button>
                         </div>
                         <div style={{fontSize: 11, opacity: 0.9, lineHeight: 1.2}}>
                             已完成回合 {collectedEpisodes}/{targetEpisodes}
@@ -871,6 +892,11 @@ const SimPage = () => {
                         <div style={{fontSize: 11, opacity: 0.9, lineHeight: 1.2}}>
                             平均损失 {typeof trainInfo?.avg_loss === "number" ? trainInfo.avg_loss.toFixed(4) : "-"}
                         </div>
+                        {trainStartStatus ? (
+                            <div style={{fontSize: 11, opacity: 0.9, lineHeight: 1.2}}>
+                                {trainStartStatus}
+                            </div>
+                        ) : null}
                         <div style={{fontSize: 11, opacity: 0.9, lineHeight: 1.2}}>
                             流程：开始采集 → 操作小车 → 复位保存 → 自动保存一条数据 → 调整场景 → 结束采集
                         </div>
