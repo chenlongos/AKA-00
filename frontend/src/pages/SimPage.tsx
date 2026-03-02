@@ -414,8 +414,8 @@ const SimPage = () => {
     }, [getForwardDistance])
 
     const packDataset = (episodes: {steps: EpisodeStep[]}[]) => {
-        const states: number[][][] = []
-        const env_states: number[][][] = []
+        const states: number[][] = []
+        const env_states: number[][] = []
         const actions: number[][][] = []
         const action_is_pad: number[][] = []
         const images: string[][][] = []
@@ -424,14 +424,12 @@ const SimPage = () => {
             const steps = ep.steps
             for (let i = 0; i < steps.length; i += CHUNK_SIZE) {
                 const chunkSteps = steps.slice(i, i + CHUNK_SIZE)
-                const stateChunk: number[][] = []
-                const envChunk: number[][] = []
+                const stateChunk = chunkSteps[0]?.state ?? new Array(14).fill(0)
+                const envChunk = chunkSteps[0]?.envState ?? new Array(6).fill(0)
                 const actionChunk: number[][] = []
                 const padChunk: number[] = []
                 const imageChunk: string[][] = []
                 chunkSteps.forEach(step => {
-                    stateChunk.push(step.state)
-                    envChunk.push(step.envState)
                     actionChunk.push(step.action)
                     padChunk.push(0)
                     const image = step.image ?? ""
@@ -439,8 +437,6 @@ const SimPage = () => {
                     imageChunk.push([image])
                 })
                 for (let pad = chunkSteps.length; pad < CHUNK_SIZE; pad += 1) {
-                    stateChunk.push(new Array(14).fill(0))
-                    envChunk.push(new Array(6).fill(0))
                     actionChunk.push(new Array(ACTION_DIM).fill(0))
                     padChunk.push(1)
                     imageChunk.push([""])
