@@ -18,13 +18,16 @@ import { useTargetDrag } from "../components/target/useTargetDrag";
 
 const INFER_HZ = 5;
 const inferInterval = 1000 / INFER_HZ;
-const ACTION_DIM = 3;
-const CHUNK_SIZE = 50;
+const ACTION_DIM = 5;
+const CHUNK_SIZE = 10;
+const MIN_STEPS_PER_EPISODE = 15;
+const STOP_RECORD_STRIDE = 5;
+const DEFAULT_TARGET_EPISODES = 8;
 
 const INITIAL_LOCAL_W = MAP_W / 2;
 const INITIAL_LOCAL_H = MAP_H / 2;
 
-const FPS = 30
+const FPS = 20
 const frameInterval = 1000 / FPS
 
 type EpisodeStep = {
@@ -97,7 +100,9 @@ const SimPage = () => {
     const [actEnabled, setActEnabled] = useState(false)
     const [actStatus, setActStatus] = useState("ACT: off")
     const [models, setModels] = useState<{id: string; path: string; created_at?: string; updated_at?: string}[]>([])
+    const [datasets, setDatasets] = useState<{id: string; path: string; size_bytes?: number; created_at?: string; updated_at?: string}[]>([])
     const [selectedModelId, setSelectedModelId] = useState("")
+    const [selectedDatasetPath, setSelectedDatasetPath] = useState("")
     const [inferRunning, setInferRunning] = useState(false)
     const [trainInfo, setTrainInfo] = useState<{
         status?: string;
@@ -121,12 +126,13 @@ const SimPage = () => {
 
     const [collecting, setCollecting] = useState(false)
     const [collectStatus, setCollectStatus] = useState("采集: 未开始")
-    const [targetEpisodes, setTargetEpisodes] = useState(50)
+    const [targetEpisodes, setTargetEpisodes] = useState(DEFAULT_TARGET_EPISODES)
     const [collectedEpisodes, setCollectedEpisodes] = useState(0)
     const [currentStepCount, setCurrentStepCount] = useState(0)
     const episodesRef = useRef<{steps: EpisodeStep[]}[]>([])
     const currentEpisodeRef = useRef<EpisodeStep[]>([])
     const stepTickRef = useRef(0)
+    const stopSampleTickRef = useRef(0)
 
     const applyLocalReset = useCallback(() => {
         localSpeedRef.current = 0
@@ -138,6 +144,7 @@ const SimPage = () => {
         actCommandRef.current = "stop"
         lastCommandRef.current = "stop"
         lastSentCommandRef.current = "stop"
+        stopSampleTickRef.current = 0
         keys.current = {}
     }, [])
 
@@ -169,18 +176,48 @@ const SimPage = () => {
             const data = await res.json()
             if (Array.isArray(data?.models)) {
                 setModels(data.models)
-                setSelectedModelId(prev => prev || (data.models[0]?.id ?? ""))
+                setSelectedModelId(prev => {
+                    if (prev && data.models.some((model: {id: string}) => model.id === prev)) {
+                        return prev
+                    }
+                    return data.models[0]?.id ?? ""
+                })
             } else {
                 setModels([])
+                setSelectedModelId("")
             }
         } catch {
             setModels([])
+            setSelectedModelId("")
+        }
+    }, [])
+
+    const fetchDatasets = useCallback(async () => {
+        try {
+            const res = await fetch(`/api/datasets`)
+            const data = await res.json()
+            if (Array.isArray(data?.datasets)) {
+                setDatasets(data.datasets)
+                setSelectedDatasetPath(prev => {
+                    if (prev && data.datasets.some((dataset: {path: string}) => dataset.path === prev)) {
+                        return prev
+                    }
+                    return data.datasets[0]?.path ?? ""
+                })
+            } else {
+                setDatasets([])
+                setSelectedDatasetPath("")
+            }
+        } catch {
+            setDatasets([])
+            setSelectedDatasetPath("")
         }
     }, [])
 
     useEffect(() => {
         fetchModels()
-    }, [fetchModels])
+        fetchDatasets()
+    }, [fetchModels, fetchDatasets])
 
     useEffect(() => {
         const poll = async () => {
@@ -200,23 +237,27 @@ const SimPage = () => {
     }, [])
 
     const startTrain = useCallback(async () => {
+        if (!selectedDatasetPath) {
+            setTrainStartStatus("训练: 未选择数据集")
+            return
+        }
         setTrainStartStatus("训练: 启动中")
         try {
             const res = await fetch(`/api/train/start`, {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({})
+                body: JSON.stringify({dataset_path: selectedDatasetPath})
             })
             const data = await res.json()
             if (!res.ok) {
                 throw new Error(data?.message || "start failed")
             }
-            setTrainStartStatus("训练: 已启动")
+            setTrainStartStatus(`训练: 已启动 (${selectedDatasetPath.split(/[\\/]/).pop() || "dataset"})`)
         } catch (err) {
             const message = err instanceof Error ? err.message : "start failed"
             setTrainStartStatus(`训练: ${message}`)
         }
-    }, [])
+    }, [selectedDatasetPath])
 
     const startInference = useCallback(async (modelId: string) => {
         if (!modelId) {
@@ -240,6 +281,7 @@ const SimPage = () => {
             const message = err instanceof Error ? err.message : "start failed"
             setInferRunning(false)
             setActStatus(`ACT: ${message}`)
+            setActEnabled(false)
         }
     }, [])
 
@@ -251,6 +293,45 @@ const SimPage = () => {
             setInferRunning(false)
         }
     }, [inferRunning])
+
+    const deleteSelectedDataset = useCallback(async () => {
+        if (!selectedDatasetPath) return
+        const datasetId = selectedDatasetPath.split(/[\\/]/).pop() || ""
+        if (!datasetId) return
+        try {
+            const res = await fetch(`/api/datasets/${encodeURIComponent(datasetId)}`, {method: "DELETE"})
+            const data = await res.json()
+            if (!res.ok) {
+                throw new Error(data?.message || "delete failed")
+            }
+            setTrainStartStatus(`数据集: 已删除 ${datasetId}`)
+            await fetchDatasets()
+        } catch (err) {
+            const message = err instanceof Error ? err.message : "delete failed"
+            setTrainStartStatus(`数据集: ${message}`)
+        }
+    }, [fetchDatasets, selectedDatasetPath])
+
+    const deleteSelectedModel = useCallback(async () => {
+        if (!selectedModelId) return
+        try {
+            const res = await fetch(`/api/models/${encodeURIComponent(selectedModelId)}`, {method: "DELETE"})
+            const data = await res.json()
+            if (!res.ok) {
+                throw new Error(data?.message || "delete failed")
+            }
+            if (inferRunning) {
+                setInferRunning(false)
+                setActEnabled(false)
+                setActStatus("ACT: off")
+            }
+            await fetchModels()
+            setTrainStartStatus(`模型: 已删除 ${selectedModelId}`)
+        } catch (err) {
+            const message = err instanceof Error ? err.message : "delete failed"
+            setTrainStartStatus(`模型: ${message}`)
+        }
+    }, [fetchModels, inferRunning, selectedModelId])
 
     useEffect(() => {
         if (actEnabled) {
@@ -369,15 +450,15 @@ const SimPage = () => {
     const commandToActionVec = useCallback((cmd: string) => {
         switch (cmd) {
             case "up":
-                return [1, 0, 0]
+                return [1, 0, 0, 0, 0]
             case "down":
-                return [-1, 0, 0]
+                return [0, 1, 0, 0, 0]
             case "left":
-                return [0, -1, 0]
+                return [0, 0, 1, 0, 0]
             case "right":
-                return [0, 1, 0]
+                return [0, 0, 0, 1, 0]
             default:
-                return [0, 0, 0]
+                return [0, 0, 0, 0, 1]
         }
     }, [])
 
@@ -397,21 +478,41 @@ const SimPage = () => {
         return minDist;
     }, [])
 
+    const getBallDistance = useCallback((x: number, y: number) => {
+        const circleTargets = targetsRef.current.filter(target => target.type === 'CIRCLE')
+        if (circleTargets.length === 0) {
+            return Math.hypot(MAP_W, MAP_H)
+        }
+        let minDist = Number.POSITIVE_INFINITY
+        circleTargets.forEach(target => {
+            const radius = target.r || 0
+            const centerDist = Math.hypot(target.x - x, target.y - y)
+            const surfaceDist = Math.max(0, centerDist - radius)
+            if (surfaceDist < minDist) minDist = surfaceDist
+        })
+        return minDist
+    }, [])
+
     const getObservationVectors = useCallback(() => {
         const {x, y, angle} = carState.current
+        const speed = localSpeedRef.current
+        const ballDistance = getBallDistance(x, y)
         const state = new Array(14).fill(0)
         state[0] = x
         state[1] = y
         state[2] = angle
-        const envState = new Array(6).fill(0)
+        state[3] = speed
+        state[4] = ballDistance
+        const envState = new Array(7).fill(0)
         envState[0] = x
         envState[1] = y
         envState[2] = angle
-        envState[3] = 0
+        envState[3] = speed
         envState[4] = checkCollision(x, y, MAP_W, MAP_H, targetsRef.current) ? 1 : 0
         envState[5] = getForwardDistance(x, y, angle)
+        envState[6] = ballDistance
         return {state, envState}
-    }, [getForwardDistance])
+    }, [getBallDistance, getForwardDistance])
 
     const packDataset = (episodes: {steps: EpisodeStep[]}[]) => {
         const states: number[][] = []
@@ -425,7 +526,7 @@ const SimPage = () => {
             for (let i = 0; i < steps.length; i += CHUNK_SIZE) {
                 const chunkSteps = steps.slice(i, i + CHUNK_SIZE)
                 const stateChunk = chunkSteps[0]?.state ?? new Array(14).fill(0)
-                const envChunk = chunkSteps[0]?.envState ?? new Array(6).fill(0)
+                const envChunk = chunkSteps[0]?.envState ?? new Array(7).fill(0)
                 const actionChunk: number[][] = []
                 const padChunk: number[] = []
                 const imageChunk: string[][] = []
@@ -602,25 +703,34 @@ const SimPage = () => {
                 if (elapsed >= inferInterval && !inferBusyRef.current) {
                     inferBusyRef.current = true
                     lastInferAtRef.current = currentTime
-                    fetch(`/api/infer/step`, {method: "POST"})
+                    const {state, envState} = getObservationVectors()
+                    fetch(`/api/infer/step`, {
+                        method: "POST",
+                        headers: {"Content-Type": "application/json"},
+                        body: JSON.stringify({state, env_state: envState})
+                    })
                         .then(res => res.json())
                         .then(data => {
                             if (data?.status === "ok") {
                                 const cmd = data.action || "stop"
                                 actCommandRef.current = cmd
-                                setActStatus(`ACT: ${cmd}`)
+                                setActStatus(`ACT: 运行中 | 动作 ${cmd}`)
                                 inferFrameRef.current += 1
                                 return
                             }
                             if (data?.message) {
                                 setActStatus(`ACT: ${data.message}`)
                                 actCommandRef.current = "stop"
+                                setInferRunning(false)
+                                setActEnabled(false)
                             }
                         })
                         .catch(err => {
                             const message = err instanceof Error ? err.message : "infer failed"
                             setActStatus(`ACT: ${message}`)
                             actCommandRef.current = "stop"
+                            setInferRunning(false)
+                            setActEnabled(false)
                         })
                         .finally(() => {
                             inferBusyRef.current = false
@@ -631,13 +741,23 @@ const SimPage = () => {
             drawTopDown(ctxTop)
             drawFirstPerson(ctxFpv)
             if (collecting) {
-                const {state, envState} = getObservationVectors()
-                const action = commandToActionVec(lastCommandRef.current)
-                const image = fpvRef.current?.toDataURL('image/png')
-                currentEpisodeRef.current.push({state, envState, action, image})
-                stepTickRef.current += 1
-                if (stepTickRef.current % 10 === 0) {
-                    setCurrentStepCount(currentEpisodeRef.current.length)
+                const cmd = lastCommandRef.current
+                let shouldRecord = true
+                if (cmd === "stop") {
+                    stopSampleTickRef.current += 1
+                    shouldRecord = stopSampleTickRef.current % STOP_RECORD_STRIDE === 1
+                } else {
+                    stopSampleTickRef.current = 0
+                }
+                if (shouldRecord) {
+                    const {state, envState} = getObservationVectors()
+                    const action = commandToActionVec(cmd)
+                    const image = fpvRef.current?.toDataURL('image/png')
+                    currentEpisodeRef.current.push({state, envState, action, image})
+                    stepTickRef.current += 1
+                    if (stepTickRef.current % 10 === 0) {
+                        setCurrentStepCount(currentEpisodeRef.current.length)
+                    }
                 }
             }
         }
@@ -665,14 +785,19 @@ const SimPage = () => {
         setCollectedEpisodes(0)
         setCurrentStepCount(0)
         stepTickRef.current = 0
+        stopSampleTickRef.current = 0
         setCollecting(true)
-        setCollectStatus("采集: 进行中")
+        setCollectStatus(`采集: 进行中（每轮至少${MIN_STEPS_PER_EPISODE}条）`)
     }
 
     const stopCollect = async () => {
-        if (currentEpisodeRef.current.length > 0) {
-            episodesRef.current.push({steps: currentEpisodeRef.current})
+        const currentLen = currentEpisodeRef.current.length
+        if (currentLen >= MIN_STEPS_PER_EPISODE) {
+            episodesRef.current.push({steps: currentEpisodeRef.current.slice()})
             currentEpisodeRef.current = []
+        } else if (currentLen > 0) {
+            currentEpisodeRef.current = []
+            setCollectStatus(`采集: 最后一轮不足${MIN_STEPS_PER_EPISODE}条，已忽略`)
         }
         setCollectedEpisodes(episodesRef.current.length)
         setCurrentStepCount(0)
@@ -688,8 +813,11 @@ const SimPage = () => {
             const res = await saveDataset(payload)
             if (res && typeof res.path === "string") {
                 setCollectStatus(`采集: 已保存 ${res.path}`)
+                setSelectedDatasetPath(res.path)
+                fetchDatasets()
             } else {
                 setCollectStatus("采集: 已保存")
+                fetchDatasets()
             }
         } catch {
             setCollectStatus("采集: 保存失败")
@@ -707,17 +835,13 @@ const SimPage = () => {
                 resetCar()
                 return
             }
-            if (currentEpisodeRef.current.length > 0) {
-                episodesRef.current.push({steps: currentEpisodeRef.current})
-                currentEpisodeRef.current = []
-            } else {
-                const {state, envState} = getObservationVectors()
-                const action = commandToActionVec(lastCommandRef.current)
-                const image = fpvRef.current?.toDataURL('image/png')
-                currentEpisodeRef.current.push({state, envState, action, image})
-                episodesRef.current.push({steps: currentEpisodeRef.current})
-                currentEpisodeRef.current = []
+            const currentLen = currentEpisodeRef.current.length
+            if (currentLen < MIN_STEPS_PER_EPISODE) {
+                setCollectStatus(`采集: 当前回合至少${MIN_STEPS_PER_EPISODE}条`)
+                return
             }
+            episodesRef.current.push({steps: currentEpisodeRef.current.slice()})
+            currentEpisodeRef.current = []
             const count = episodesRef.current.length
             setCollectedEpisodes(count)
             setCurrentStepCount(0)
@@ -835,6 +959,7 @@ const SimPage = () => {
                                 ))}
                             </select>
                             <button onClick={fetchModels}>刷新</button>
+                            <button onClick={deleteSelectedModel} disabled={!selectedModelId}>删除模型</button>
                         </div>
                         <button
                             onClick={() => setActEnabled(v => {
@@ -854,6 +979,20 @@ const SimPage = () => {
                             <button onClick={handleResetSave}>复位保存</button>
                             <button onClick={startTrain}>开始训练</button>
                         </div>
+                        <div style={{display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap'}}>
+                            <select
+                                value={selectedDatasetPath}
+                                onChange={(e) => setSelectedDatasetPath(e.target.value)}
+                                style={{flex: 1, minWidth: 220}}
+                            >
+                                <option value="">未选择数据集</option>
+                                {datasets.map(dataset => (
+                                    <option key={dataset.id} value={dataset.path}>{dataset.id}</option>
+                                ))}
+                            </select>
+                            <button onClick={fetchDatasets}>刷新</button>
+                            <button onClick={deleteSelectedDataset} disabled={!selectedDatasetPath}>删除数据集</button>
+                        </div>
                         <div style={{fontSize: 11, opacity: 0.9, lineHeight: 1.2}}>
                             已完成回合 {collectedEpisodes}/{targetEpisodes}
                         </div>
@@ -861,7 +1000,7 @@ const SimPage = () => {
                             当前回合步数 {currentStepCount}
                         </div>
                         <label style={{display: 'flex', alignItems: 'center', gap: '6px', fontSize: 11}}>
-                            目标回合
+                            目标回合（建议8）
                             <input
                                 type="number"
                                 min={1}
@@ -894,7 +1033,7 @@ const SimPage = () => {
                             </div>
                         ) : null}
                         <div style={{fontSize: 11, opacity: 0.9, lineHeight: 1.2}}>
-                            流程：开始采集 → 操作小车 → 复位保存 → 自动保存一条数据 → 调整场景 → 结束采集
+                            流程：开始采集 → 每轮至少采集15条 → 复位保存 → 累计约8轮后结束采集
                         </div>
                     </div>
                 </div>

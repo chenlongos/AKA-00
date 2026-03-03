@@ -106,7 +106,7 @@ export const useTargetStore = create<TargetStore>()(
             exportTargets: () => get().targets,
         }),
         {
-            name: 'target-storage-v4',
+            name: 'target-storage-v5',
         }
     )
 );

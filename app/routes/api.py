@@ -3,6 +3,7 @@ import os
 import base64
 import sys
 import threading
+import shutil
 from pathlib import Path
 try:
     import fcntl
@@ -223,7 +224,7 @@ def save_dataset():
         dataset["meta"] = meta
     save_dir = os.getenv("ACT_DATASET_DIR", os.path.join("output", "datasets"))
     os.makedirs(save_dir, exist_ok=True)
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    timestamp = f"{time.strftime('%Y%m%d_%H%M%S')}_{int((time.time() % 1) * 1000):03d}"
     image_dir = None
     image_count = 0
     image_paths = None
@@ -266,6 +267,10 @@ def save_dataset():
             dataset["meta"]["image_dir"] = os.path.relpath(image_dir, save_dir)
             dataset["meta"]["image_count"] = image_count
     path = os.path.join(save_dir, f"act_dataset_{timestamp}.pt")
+    suffix = 1
+    while os.path.exists(path):
+        path = os.path.join(save_dir, f"act_dataset_{timestamp}_{suffix}.pt")
+        suffix += 1
     torch.save(dataset, path)
     return jsonify({"status": "success", "path": path})
 
@@ -278,6 +283,27 @@ def _latest_dataset_path():
         return None
     candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return str(candidates[0])
+
+
+def _list_datasets():
+    if not DATASET_DIR.exists():
+        return []
+    datasets = []
+    for dataset_path in DATASET_DIR.glob("*.pt"):
+        if not dataset_path.is_file():
+            continue
+        stat = dataset_path.stat()
+        datasets.append(
+            {
+                "id": dataset_path.name,
+                "path": str(dataset_path),
+                "size_bytes": int(stat.st_size),
+                "created_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_ctime)),
+                "updated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime)),
+            }
+        )
+    datasets.sort(key=lambda d: d["updated_at"], reverse=True)
+    return datasets
 
 
 def _list_models():
@@ -403,8 +429,11 @@ def _run_training(run_id: str, dataset_path: str, options: dict):
 @api_bp.route("/train/start", methods=["POST"])
 def train_start():
     data = request.get_json(silent=True) or {}
-    dataset_path = data.get("dataset_path") or _latest_dataset_path()
-    if not dataset_path or not os.path.exists(dataset_path):
+    dataset_path_raw = data.get("dataset_path") or _latest_dataset_path()
+    if not dataset_path_raw:
+        return jsonify({"status": "error", "message": "dataset not found"}), 400
+    dataset_path = str(Path(dataset_path_raw).expanduser().resolve())
+    if not os.path.exists(dataset_path):
         return jsonify({"status": "error", "message": "dataset not found"}), 400
     with train_lock:
         if train_state["status"] == "running":
@@ -453,9 +482,99 @@ def train_status():
         return jsonify(dict(train_state))
 
 
+@api_bp.route("/datasets")
+def datasets():
+    return jsonify({"datasets": _list_datasets()})
+
+
+@api_bp.route("/datasets/<dataset_id>", methods=["DELETE"])
+def delete_dataset(dataset_id: str):
+    if "/" in dataset_id or "\\" in dataset_id:
+        return jsonify({"status": "error", "message": "invalid dataset id"}), 400
+    dataset_path = (DATASET_DIR / dataset_id).resolve()
+    dataset_root = DATASET_DIR.resolve()
+    try:
+        dataset_path.relative_to(dataset_root)
+    except ValueError:
+        return jsonify({"status": "error", "message": "invalid dataset id"}), 400
+    if dataset_path.suffix != ".pt":
+        return jsonify({"status": "error", "message": "invalid dataset file"}), 400
+    if not dataset_path.exists():
+        return jsonify({"status": "error", "message": "dataset not found"}), 404
+    with train_lock:
+        if train_state["status"] in {"starting", "running"} and train_state.get("dataset_path") == str(dataset_path):
+            return jsonify({"status": "error", "message": "dataset is in active training"}), 400
+    image_dir_from_meta = None
+    try:
+        dataset_obj = torch.load(str(dataset_path), map_location="cpu")
+        meta = dataset_obj.get("meta")
+        if isinstance(meta, dict):
+            image_dir = meta.get("image_dir")
+            if isinstance(image_dir, str) and image_dir:
+                image_dir_from_meta = (dataset_root / image_dir).resolve()
+    except Exception:
+        image_dir_from_meta = None
+    os.remove(dataset_path)
+    removed_image_dir = False
+    if image_dir_from_meta is not None:
+        try:
+            image_dir_from_meta.relative_to(dataset_root)
+            if image_dir_from_meta.exists() and image_dir_from_meta.is_dir():
+                shutil.rmtree(image_dir_from_meta)
+                removed_image_dir = True
+        except Exception:
+            pass
+    if not removed_image_dir:
+        stem = dataset_path.stem
+        if stem.startswith("act_dataset_"):
+            ts = stem.replace("act_dataset_", "", 1)
+            fallback_image_dir = dataset_root / f"images_{ts}"
+            if fallback_image_dir.exists() and fallback_image_dir.is_dir():
+                shutil.rmtree(fallback_image_dir)
+                removed_image_dir = True
+    return jsonify(
+        {
+            "status": "deleted",
+            "dataset_id": dataset_id,
+            "removed_image_dir": removed_image_dir,
+        }
+    )
+
+
 @api_bp.route("/models")
 def models():
     return jsonify({"models": _list_models()})
+
+
+@api_bp.route("/models/<model_id>", methods=["DELETE"])
+def delete_model(model_id: str):
+    if "/" in model_id or "\\" in model_id:
+        return jsonify({"status": "error", "message": "invalid model id"}), 400
+    model_dir = (MODEL_DIR / model_id).resolve()
+    model_root = MODEL_DIR.resolve()
+    try:
+        model_dir.relative_to(model_root)
+    except ValueError:
+        return jsonify({"status": "error", "message": "invalid model id"}), 400
+    if not model_dir.exists() or not model_dir.is_dir():
+        return jsonify({"status": "error", "message": "model not found"}), 404
+    with infer_lock:
+        if infer_state["status"] == "running" and infer_state.get("model_id") == model_id:
+            infer_state.update(
+                {
+                    "status": "idle",
+                    "model_id": None,
+                    "checkpoint_path": None,
+                    "device": None,
+                    "model": None,
+                    "state_dim": 0,
+                    "env_state_dim": 0,
+                    "action_dim": 0,
+                    "chunk_size": 0,
+                }
+            )
+    shutil.rmtree(model_dir)
+    return jsonify({"status": "deleted", "model_id": model_id})
 
 
 @api_bp.route("/infer/start", methods=["POST"])
@@ -468,17 +587,20 @@ def infer_start():
     if not model_path or not os.path.exists(model_path):
         return jsonify({"status": "error", "message": "model not found"}), 400
     device = data.get("device") or ("cuda" if torch.cuda.is_available() else "cpu")
-    checkpoint = torch.load(model_path, map_location=device)
-    state_dim = int(checkpoint["state_dim"])
-    env_state_dim = int(checkpoint["env_state_dim"])
-    action_dim = int(checkpoint["action_dim"])
-    chunk_size = int(checkpoint["chunk_size"])
-    use_vae = bool(checkpoint.get("use_vae", False))
-    config = build_config(state_dim, env_state_dim, action_dim, chunk_size, use_vae)
-    model = ACT(config)
-    model.load_state_dict(checkpoint["model_state_dict"])
-    model.to(device)
-    model.eval()
+    try:
+        checkpoint = torch.load(model_path, map_location=device)
+        state_dim = int(checkpoint["state_dim"])
+        env_state_dim = int(checkpoint["env_state_dim"])
+        action_dim = int(checkpoint["action_dim"])
+        chunk_size = int(checkpoint["chunk_size"])
+        use_vae = bool(checkpoint.get("use_vae", False))
+        config = build_config(state_dim, env_state_dim, action_dim, chunk_size, use_vae)
+        model = ACT(config)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        model.to(device)
+        model.eval()
+    except Exception as exc:
+        return jsonify({"status": "error", "message": f"failed to load model: {exc}"}), 400
     with infer_lock:
         infer_state.update(
             {
@@ -507,13 +629,34 @@ def infer_step():
         env_state_dim = infer_state["env_state_dim"]
         action_dim = infer_state["action_dim"]
 
-    state = car.get_state()
-    state_vec = [0.0] * state_dim
-    state_vec[0:3] = [float(state["x"]), float(state["y"]), float(state["angle"])]
-    if state_dim > 3:
-        state_vec[3] = float(car.speed)
+    def _to_fixed_vec(raw, dim: int):
+        vec = [0.0] * dim
+        if not isinstance(raw, list):
+            return vec
+        for i in range(min(dim, len(raw))):
+            try:
+                vec[i] = float(raw[i])
+            except (TypeError, ValueError):
+                vec[i] = 0.0
+        return vec
+
+    data = request.get_json(silent=True) or {}
+    state_input = data.get("state")
+    env_input = data.get("env_state")
+
+    if state_input is None or env_input is None:
+        state = car.get_state()
+        state_vec = [0.0] * state_dim
+        state_vec[0:3] = [float(state["x"]), float(state["y"]), float(state["angle"])]
+        if state_dim > 3:
+            state_vec[3] = float(car.speed)
+        env_vec = [0.0] * env_state_dim
+    else:
+        state_vec = _to_fixed_vec(state_input, state_dim)
+        env_vec = _to_fixed_vec(env_input, env_state_dim)
+
     state_tensor = torch.tensor([state_vec], dtype=torch.float32, device=device)
-    env_tensor = torch.zeros((1, env_state_dim), dtype=torch.float32, device=device)
+    env_tensor = torch.tensor([env_vec], dtype=torch.float32, device=device)
     with torch.no_grad():
         actions, _ = model({OBS_STATE: state_tensor, OBS_ENV_STATE: env_tensor})
     action_vec = actions[0, 0].detach().cpu().numpy().tolist()
