@@ -36,20 +36,20 @@ def handle_action(action):
         car.y -= math.sin(car.angle) * car.speed * 2
         car.speed = 0
     state = car.get_state()
-    emit('car_state', state, broadcast=True)
+    emit('car_state', state)
 
 
 @socketio.on('get_car_state')
 def get_car_state():
     status = car.get_state()
-    emit('car_state', status, broadcast=True)
+    emit('car_state', status)
 
 
 @socketio.on('reset_car_state')
 def get_car_state():
     car.reset()
     status = car.get_state()
-    emit('car_state', status, broadcast=True)
+    emit('car_state', status)
 
 
 def _load_act_model():
