@@ -183,23 +183,20 @@ def get_red_bucket_local(frame):
 
 @dataclass
 class Robot:
-    CROP_SIZE = 80
-    X_LEFT_GRAB = 216
-    X_RIGHT_GRAB = 256
-    TENNIS_WIDTH_FAR = 310
-    TENNIS_WIDTH_NEAR = 390
+    FRAME_WIDTH = 640
+    X_LEFT_GRAB = 258
+    X_RIGHT_GRAB = X_LEFT_GRAB + 40
+    TENNIS_WIDTH_FAR = 300
+    TENNIS_WIDTH_NEAR = 360
     MAX_SPEED = 240
+    MIN_SPEED = MAX_SPEED // 6  # 40
     status: str = "chase_tennis" # 机器人状态: chase_tennis, chase_bucket, grab_tennis, position_tennis, release_tennis
-    prev_status: str = ""
     box_cur_width: int = 0
-    move_direction: str = "stop"  # 机器人移动方向: left, right, forward, backward, stop
-    fast_speed = MAX_SPEED // 2     # 120
-    normal_speed = MAX_SPEED // 4   # 60
-    slow_speed = MAX_SPEED // 8     # 30
-    aiming_speed = MAX_SPEED // 8  # 30
-    scanning_tennis = MAX_SPEED // 4  # 60
-    scanning_bucket = MAX_SPEED // 3    # 80
-    speed: int = normal_speed   # 机器人移动速度: max, fast, normal, slow, aiming, scanning
+    box_cur_height: int = 0
+    box_cur_x: int = 0
+    frame_height: int = 0
+
+    idle_speed = MAX_SPEED // 3  # 80
     grab_confirm_count = 0
 
     servo: STS3215 = field(init=False)
@@ -219,100 +216,103 @@ class Robot:
 
     def update_status(self):
         if self.status == "chase_tennis":
-            if self.move_direction == "stop":
+            if self.TENNIS_WIDTH_FAR <= self.box_cur_width <= self.TENNIS_WIDTH_NEAR:
                 self.status = "position_tennis"
-                self.prev_status = "chase_tennis" 
         elif self.status == "position_tennis":
-            if self.move_direction == "stop":
-                self.status = "grab_tennis"
-                self.prev_status = "position_tennis"
-            elif not self.TENNIS_WIDTH_FAR < self.box_cur_width < self.TENNIS_WIDTH_NEAR:
+            if not self.TENNIS_WIDTH_FAR < self.box_cur_width < self.TENNIS_WIDTH_NEAR:
                 self.status = "chase_tennis"
-                self.prev_status = "position_tennis"
-        elif self.status == "chase_bucket" and self.box_cur_width >= 640:
+            elif self.X_LEFT_GRAB <= self.box_cur_x <= self.X_RIGHT_GRAB:
+                self.status = "grab_tennis"
+        elif self.status == "chase_bucket" and self.box_cur_width >= self.FRAME_WIDTH:
             self.status = "release_tennis"
-            self.prev_status = "chase_bucket"
 
-    def set_direction_speed(self, width, result):
+    def set_motor_speed(self, result):
+        IMG_WIDTH = self.FRAME_WIDTH
+        MAX_SPEED = self.MAX_SPEED
+        MIN_SPEED = self.MIN_SPEED
+        WHEEL_BASE = 10.0
+        TARGET_X = IMG_WIDTH // 2
+        if self.status == "chase_bucket":
+            TARGET_W = IMG_WIDTH
+        else:
+            TARGET_W = int(self.TENNIS_WIDTH_FAR * 0.6 + self.TENNIS_WIDTH_NEAR * 0.4)
+
+        Kp_dist = 1.0 if self.status == "chase_bucket" else 0.8
+        Kp_angle = 0.04 if self.status == "chase_bucket" else 0.02
+
         result_sorted = sorted(result, key=lambda x: x['w'], reverse=True)
         box = result_sorted[0]
-        x, y, w, h = box["x"], box["y"], box["w"], box["h"]
+        x, w, h = box["x"], box["w"], box["h"]
+        self.box_cur_height = h
+        self.box_cur_x = x
         self.box_cur_width = w
-        logging.info("x,y,w,h: %d,%d,%d,%d", x, y, w, h)
+        logging.info("(box_cur_x, box_cur_width, box_cur_height) ==> %d, %d, %d", self.box_cur_x, self.box_cur_width, self.box_cur_height)
 
-        # position_tennis: just slow turn
-        if self.status == "position_tennis":
-            brake(self.left_motor, self.right_motor)
-            if x < self.X_LEFT_GRAB:
-                self.move_direction = "left"
-                self.speed = self.aiming_speed
-            elif x > self.X_RIGHT_GRAB:
-                self.move_direction = "right"
-                self.speed = self.aiming_speed
-            else:
-                self.move_direction = "stop"    # at grab position
-                self.speed = 0
-            return
+        # 1. 计算偏差
+        error_x = (x + w / 2) - TARGET_X
+        error_w = w - TARGET_W
 
-        left_find = (width - self.CROP_SIZE) // 2
-        right_find = left_find + self.CROP_SIZE
-        left = max(0, left_find)
-        right = min(width, right_find)
-        center_x = x + w // 2
+        # 2. 计算线性速度和角速度
+        raw_v = -Kp_dist * error_w
+        raw_omega = -Kp_angle * error_x
 
-        # chase_tennis and chase_bucket: set speed
-        if self.status == "chase_tennis":
-            if w < self.TENNIS_WIDTH_FAR * 0.4:
-                self.speed = self.MAX_SPEED
-            elif w < self.TENNIS_WIDTH_FAR * 0.5:
-                self.speed = self.fast_speed
-            elif w < self.TENNIS_WIDTH_FAR * 0.7:
-                self.speed = self.normal_speed
-            else:
-                self.speed = self.slow_speed
-        elif self.status == "chase_bucket":
-            self.speed = self.MAX_SPEED
+        # 3. 动态限速
+        turn_factor = abs(error_x) / (IMG_WIDTH / 2)
+        if turn_factor > 0.8:
+            max_v = MIN_SPEED * 0.3
         else:
-            self.speed = 0
-        
-        # chase_tennis and chase_bucket: set direction
-        if center_x < left and not self.TENNIS_WIDTH_FAR < w < self.TENNIS_WIDTH_NEAR:
-            self.move_direction = "left"
-        elif center_x > right and not self.TENNIS_WIDTH_FAR < w < self.TENNIS_WIDTH_NEAR:
-            self.move_direction = "right"
-        elif not self.status == "chase_bucket" and w > self.TENNIS_WIDTH_NEAR:
-            self.move_direction = "backward"
-        elif not self.status == "chase_bucket" and w < self.TENNIS_WIDTH_FAR:
-            self.move_direction = "forward"
-        elif self.status == "chase_bucket" and w < width :
-            self.move_direction = "forward"
-        else:
-            self.move_direction = "stop"    # need change to positon_tennis
-            self.speed = 0
+            max_v = MAX_SPEED
 
-    def move(self):
+        v = max(min(raw_v, max_v), -max_v)
+
+        if abs(v) < MIN_SPEED and abs(v) > 0:
+            v = MIN_SPEED if v > 0 else -MIN_SPEED
+
+        diff_speed = raw_omega * WHEEL_BASE
+
+        # 4. 差速解算
+        left_pwm = v + diff_speed
+        right_pwm = v - diff_speed
+
+        # 5. 限速
+        left_pwm = max(-MAX_SPEED, min(MAX_SPEED, left_pwm))
+        right_pwm = max(-MAX_SPEED, min(MAX_SPEED, right_pwm))
+
+        if abs(left_pwm) < MIN_SPEED and left_pwm != 0:
+            left_pwm = MIN_SPEED if left_pwm > 0 else -MIN_SPEED
+        if abs(right_pwm) < MIN_SPEED and right_pwm != 0:
+            right_pwm = MIN_SPEED if right_pwm > 0 else -MIN_SPEED
+
+        return int(left_pwm), int(right_pwm)
+
+    def motor_move(self, left_speed, right_speed):
         self.grab_confirm_count = 0
-        if self.move_direction == "left":
-            if not self.status == "chase_bucket" and self.box_cur_width > self.TENNIS_WIDTH_FAR * 0.7:
-                turn_left(self.left_motor, self.right_motor, self.aiming_speed)
-            elif self.status == "chase_bucket" and self.box_cur_width > 640 * 0.7:
-                turn_left(self.left_motor, self.right_motor, self.scanning_bucket)
+        if self.status == "position_tennis":
+            if self.box_cur_x < self.X_LEFT_GRAB:
+                turn_left(self.left_motor, self.right_motor, self.MIN_SPEED)
+            elif self.box_cur_x > self.X_RIGHT_GRAB:
+                turn_right(self.left_motor, self.right_motor, self.MIN_SPEED)
+            return
+        # bucket is too close
+        if self.status == "chase_bucket" and self.box_cur_height == self.frame_height:
+            if self.box_cur_x == 0:
+                # bucket on the left
+                if self.box_cur_width <self.FRAME_WIDTH:    
+                    turn_left(self.left_motor, self.right_motor, self.idle_speed)
+                # don't know bucket position, need to backward
+                else:
+                    backward(self.left_motor, self.right_motor, self.idle_speed)
+                return
             else:
-                forward_left(self.left_motor, self.right_motor, self.speed)
-        elif self.move_direction == "right":
-            if not self.status == "chase_bucket" and self.box_cur_width > self.TENNIS_WIDTH_FAR * 0.7:
-                turn_right(self.left_motor, self.right_motor, self.aiming_speed)
-            elif self.status == "chase_bucket" and self.box_cur_width > 640 * 0.7:
-                turn_right(self.left_motor, self.right_motor, self.scanning_bucket)
-            else:
-                forward_right(self.left_motor, self.right_motor, self.speed)
-        elif self.move_direction == "forward":
-            forward(self.left_motor, self.right_motor, self.speed)
-        elif self.move_direction == "backward":
-            backward(self.left_motor, self.right_motor, self.speed)
-        else:
-            brake(self.left_motor, self.right_motor)
+                # bucket on the right
+                if self.box_cur_x + self.box_cur_width == self.FRAME_WIDTH:
+                    turn_right(self.left_motor, self.right_motor, self.idle_speed)
+                    return
+                # here bucket in the middle
 
+        self.left_motor.set_speed(left_speed)
+        self.right_motor.set_speed(right_speed)
+    
     def grab_tennis(self):
         if self.status == "grab_tennis":
             brake(self.left_motor, self.right_motor)
@@ -320,42 +320,36 @@ class Robot:
             if self.grab_confirm_count >= 10:
                 grab1(self.servo)
                 self.grab_confirm_count = 0
-                self.prev_status = "grab_tennis"
-                time.sleep(1)
+                time.sleep(0.5)
                 pos_servo3 = self.servo.get_position(3)
                 if pos_servo3 == None or pos_servo3 < 3050:
                     grab_pos(self.servo)
-                    backward(self.left_motor, self.right_motor, self.fast_speed)
-                    time.sleep(0.5)
                     self.status = "chase_tennis"
                     return
-                backward(self.left_motor, self.right_motor, self.fast_speed)
-                time.sleep(1)
+                backward(self.left_motor, self.right_motor, self.MAX_SPEED)
+                time.sleep(0.4)
                 self.status = "chase_bucket"
                 release_pos(self.servo)
 
     def release_tennis(self):
         if self.status == "release_tennis":
-            brake(self.left_motor, self.right_motor)
+            forward(self.left_motor, self.right_motor, self.MAX_SPEED)
+            time.sleep(0.5)
+            motor_sleep(self.left_motor, self.right_motor)
             arm_release(self.servo)
-            time.sleep(1)
-            backward(self.left_motor, self.right_motor, self.fast_speed)
-            time.sleep(2)
+            time.sleep(0.5)
+            backward(self.left_motor, self.right_motor, self.MAX_SPEED)
+            time.sleep(0.5)
             self.status = "chase_tennis"
-            self.prev_status = "release_tennis"
             grab_pos(self.servo)
 
     def idle(self):
         self.grab_confirm_count = 0
-        if self.status == "chase_bucket":
-            turn_left(self.left_motor, self.right_motor, self.scanning_bucket)
-        elif self.prev_status in ("chase_tennis", "position_tennis"):
-            backward(self.left_motor, self.right_motor, self.normal_speed)
-            time.sleep(0.5)
-        else:
-            turn_right(self.left_motor, self.right_motor, self.scanning_tennis)
+        turn_right(self.left_motor, self.right_motor, self.idle_speed)
 
 def main_v():
+    all_timings = []    # 每帧的处理时间
+    
     logging.info("正在打开摄像头...")
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
@@ -364,8 +358,14 @@ def main_v():
     robot = Robot()
 
     while True:
-        ret, frame = cap.read()
+        start_time = time.time() * 1000
+        _ret, frame = cap.read()
         height, width = frame.shape[:2]
+        robot.frame_height = height
+        if width != robot.FRAME_WIDTH:
+            logging.warning(f" 当前帧宽度 {width} 不等于 {robot.FRAME_WIDTH}，正在调整大小...")
+            frame = cv2.resize(frame, (robot.FRAME_WIDTH, int(robot.FRAME_WIDTH * height / width)), interpolation=cv2.INTER_LINEAR)
+            robot.frame_height = frame.shape[0]
 
         logging.debug(f" 解算开始")
         if robot.status == "chase_bucket":
@@ -374,11 +374,11 @@ def main_v():
             result = yolo_infer(frame)
         logging.debug(f" 解算完成")
 
-        if result and len(result) > 0:
+        if result:
             robot.update_status()
-            logging.info(f"update_status, status: {robot.status}")
-            robot.set_direction_speed(width, result)
-            logging.info(f"set_direction_speed, direction, speed: {robot.move_direction}, {robot.speed}")
+            logging.info(f"update_status: status ==> {robot.status}")
+            left_speed, right_speed = robot.set_motor_speed(result)
+            logging.info(f"set_motor_speed: (left_speed, right_speed) ==> {left_speed}, {right_speed}")
         else:
             logging.info("idle")
             robot.idle()
@@ -389,7 +389,14 @@ def main_v():
         elif robot.status == "release_tennis":
             robot.release_tennis()
         else:
-            robot.move()
+            # robot.move()
+            robot.motor_move(left_speed, right_speed)
+        
+        all_timings.append(int(time.time() * 1000 - start_time))
+        avg_time = int(sum(all_timings) / len(all_timings) if all_timings else 0)
+        min_time = min(all_timings) if all_timings else 0
+        max_time = max(all_timings) if all_timings else 0
+        logging.info(f"当前帧处理时间: {all_timings[-1]} ms, 平均: {avg_time} ms, 最小: {min_time} ms, 最大: {max_time} ms")
 
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)

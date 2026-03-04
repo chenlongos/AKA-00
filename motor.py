@@ -4,7 +4,7 @@ from periphery import PWM
 # 配置常量
 CHIP_CONFIGS = {
     'sg2002' : {'period_ns': 10000},
-    'rk3588' : {'period_ns': 500000}
+    'rk3588' : {'period_ns': 50000}
 }
 
 class Motor:
@@ -52,10 +52,10 @@ def forward(left, right, speed=255):
 
 def forward_left(left, right, speed=255):
     left.set_speed(speed)
-    right.set_speed(speed * 0.8)
+    right.set_speed(speed - 2)
 
 def forward_right(left, right, speed=255):
-    left.set_speed(speed * 0.8)
+    left.set_speed(speed - 2)
     right.set_speed(speed)
 
 def backward(left, right, speed=255):
