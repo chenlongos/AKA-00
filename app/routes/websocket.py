@@ -1,55 +1,60 @@
 import math
 import os
-import torch
 
-from src.sim.model.car import car
 from ..extensions import socketio
 from flask_socketio import emit
-from src.policies.act.configuration_act import ACTConfig
-from src.policies.act.modeling_act import ACT
-from src.utils.constants import OBS_STATE, OBS_ENV_STATE, ACTION
-from src.configs.types import PolicyFeature, FeatureType
 
-_act_model = None
-_act_device = None
+# 仅在模拟模式下导入模拟相关依赖
+if os.getenv("ENABLE_SIMULATOR", "false").lower() == "true" or os.name == "nt":
+    import torch
+    from src.sim.model.car import car
+    from src.policies.act.configuration_act import ACTConfig
+    from src.policies.act.modeling_act import ACT
+    from src.utils.constants import OBS_STATE, OBS_ENV_STATE, ACTION
+    from src.configs.types import PolicyFeature, FeatureType
+
+    _act_model = None
+    _act_device = None
 
 
 @socketio.on('action')
 def handle_action(action):
-    if action == 'up':
-        if car.speed < car.maxSpeed:
-            car.speed += car.acceleration
-    if action == 'down':
-        if car.speed > -car.maxSpeed / 2:
-            car.speed -= car.acceleration
-    if action == 'left':
-        car.angle -= car.rotationSpeed
-    if action == 'right':
-        car.angle += car.rotationSpeed
+    if os.getenv("ENABLE_SIMULATOR", "false").lower() == "true" or os.name == "nt":
+        if action == 'up':
+            if car.speed < car.maxSpeed:
+                car.speed += car.acceleration
+        if action == 'down':
+            if car.speed > -car.maxSpeed / 2:
+                car.speed -= car.acceleration
+        if action == 'left':
+            car.angle -= car.rotationSpeed
+        if action == 'right':
+            car.angle += car.rotationSpeed
 
-    car.speed *= car.friction
-    car.x += math.cos(car.angle) * car.speed
-    car.y += math.sin(car.angle) * car.speed
+        car.speed *= car.friction
+        car.x += math.cos(car.angle) * car.speed
+        car.y += math.sin(car.angle) * car.speed
 
-    if action == 'stop':
-        car.x -= math.cos(car.angle) * car.speed * 2
-        car.y -= math.sin(car.angle) * car.speed * 2
-        car.speed = 0
-    state = car.get_state()
-    emit('car_state', state, broadcast=True)
-
+        if action == 'stop':
+            car.x -= math.cos(car.angle) * car.speed * 2
+            car.y -= math.sin(car.angle) * car.speed * 2
+            car.speed = 0
+        state = car.get_state()
+        emit('car_state', state, broadcast=True)
 
 @socketio.on('get_car_state')
 def get_car_state():
-    status = car.get_state()
-    emit('car_state', status, broadcast=True)
+    if os.getenv("ENABLE_SIMULATOR", "false").lower() == "true" or os.name == "nt":
+        status = car.get_state()
+        emit('car_state', status, broadcast=True)
 
 
 @socketio.on('reset_car_state')
 def get_car_state():
-    car.reset()
-    status = car.get_state()
-    emit('car_state', status, broadcast=True)
+    if os.getenv("ENABLE_SIMULATOR", "false").lower() == "true" or os.name == "nt":
+        car.reset()
+        status = car.get_state()
+        emit('car_state', status, broadcast=True)
 
 
 def _load_act_model():
@@ -92,6 +97,9 @@ def _to_tensor(data):
 
 @socketio.on('act_infer')
 def act_infer(payload):
+    if os.getenv("ENABLE_SIMULATOR", "false").lower() != "true" and os.name != "nt":
+        emit('act_action', {"error": "ACT model not available"})
+        return
     try:
         _load_act_model()
         if not isinstance(payload, dict):

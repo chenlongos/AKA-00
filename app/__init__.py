@@ -1,6 +1,5 @@
 from flask import Flask
 
-
 def create_app():
     app = Flask(__name__, static_folder="../static", template_folder="../templates")
     from .routes.api import api_bp
@@ -12,6 +11,9 @@ def create_app():
 
     socketio.init_app(app, cors_allowed_origins="*", async_mode="threading")
 
-    from .routes import websocket
+    # 仅在需要时导入模拟相关的websocket路由
+    import os
+    if os.getenv("ENABLE_SIMULATOR", "false").lower() == "true" or os.name == "nt":
+        from .routes import websocket
 
     return app

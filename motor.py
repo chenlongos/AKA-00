@@ -4,7 +4,7 @@ from periphery import PWM
 # 配置常量
 CHIP_CONFIGS = {
     'sg2002' : {'period_ns': 10000},
-    'rk3588' : {'period_ns': 500000}
+    'rk3588' : {'period_ns': 50000}
 }
 
 class Motor:
