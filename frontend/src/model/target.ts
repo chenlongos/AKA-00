@@ -59,10 +59,5 @@ export const checkCollision = (x: number, y: number, mapWidth: number, mapHeight
 };
 
 export const INITIAL_TARGETS: Target[] = [
-    {id: '1', x: 200, y: 150, r: 2, color: '#FF0000', type: 'CIRCLE'},
-    {id: '2', x: 350, y: 200, r: 2, color: '#FF0000', type: 'CIRCLE'},
-    {id: '3', x: 500, y: 180, r: 2, color: '#FF0000', type: 'CIRCLE'},
-    {id: '4', x: 280, y: 350, r: 5, color: '#00CC00', type: 'CIRCLE'},
-    {id: '5', x: 450, y: 400, r: 5, color: '#00CC00', type: 'CIRCLE'},
-    {id: '6', x: 600, y: 300, r: 2, color: '#FF0000', type: 'CIRCLE'},
+    {id: '1', x: 400, y: 170, r: 10, color: '#C7EA46', type: 'CIRCLE'},
 ];
