@@ -73,6 +73,7 @@ RUN_USER="root"
 
 # 启动函数
 start() {
+    sleep 5
 	chmod +x /root/AKA-00/init.sh
 	/root/AKA-00/init.sh
 }
