@@ -391,21 +391,9 @@ ip link set wlan0 up
 ip link set wlan1 up
 
 sleep 5
-python3 /root/AKA-00/run.py
 chmod +x /root/AKA-00/init.sh
 /root/AKA-00/init.sh
 exit 0
 EOF
 
 chmod 755 /etc/init.d/S99webstart
-
-############################################
-# 6. 启动 Web 服务
-############################################
-
-killall python3 2>/dev/null
-chmod +x /root/AKA-00/init.sh
-/root/AKA-00/init.sh
-python3 $BASE_DIR/AKA-00/run.py &
-
-echo "===== WiFi Web Setup Done =====" >> $LOG_FILE
