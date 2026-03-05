@@ -4,8 +4,8 @@ from datetime import datetime
 import json
 import numpy as np
 from dataclasses import dataclass, field
-from arm import STS3215, grab1, grab_pos, release as arm_release, release_pos, arm_init
-from motor import Motor, forward, backward, turn_left, turn_right,forward_left, forward_right, sleep as motor_sleep, brake
+from arm_control.sts3215 import STS3215, grab1, grab_pos, release as arm_release, release_pos, arm_init
+from base_control.n20 import N20, forward, backward, turn_left, turn_right, sleep as motor_sleep, brake
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 IMAGE_DIR = os.path.abspath(os.path.join(BASE_DIR, '.', 'images'))
@@ -200,8 +200,8 @@ class Robot:
     grab_confirm_count = 0
 
     servo: STS3215 = field(init=False)
-    left_motor: Motor = field(init=False)
-    right_motor: Motor = field(init=False)
+    left_motor: N20 = field(init=False)
+    right_motor: N20 = field(init=False)
 
     def __post_init__(self):
         # 初始化机械臂
@@ -210,8 +210,8 @@ class Robot:
         grab_pos(self.servo)
 
         # 初始化车轮
-        self.left_motor = Motor(0, 1, 0, chip_type='rk3588')
-        self.right_motor = Motor(4, 5, 0, chip_type='rk3588')
+        self.left_motor = N20(0, 1, 0, chip_type='rk3588')
+        self.right_motor = N20(4, 5, 0, chip_type='rk3588')
         motor_sleep(self.left_motor, self.right_motor)
 
     def update_status(self):
