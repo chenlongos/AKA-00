@@ -158,15 +158,7 @@ def grab1(servo):
     servo.move_to_position(3, 3000)
 
 def grab_test(servo):
-    servo.move_to_position(1, 1850)
-    servo.move_to_position(2, 2650)
-    servo.move_to_position(3, 4000)
-    time.sleep(1)
-    servo.move_to_position(3, 3000)
-    time.sleep(1)
-    servo.move_to_position(1, 2450)
-    servo.move_to_position(2, 2100)
-    servo.move_to_position(3, 3000)
+    grab1(servo)
     time.sleep(2)
     servo.move_to_position(1, 1850)
     servo.move_to_position(2, 2650)
