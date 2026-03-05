@@ -189,6 +189,13 @@ const BaseControlPage = () => {
                     <ControlButton
                         size="wide"
                         variant="secondary"
+                        onClick={() => window.location.href = "/wifi"}
+                    >
+                        WiFi 配置
+                    </ControlButton>
+                    <ControlButton
+                        size="wide"
+                        variant="secondary"
                         onClick={() => redirect()}
                     >
                         进入试验平台
