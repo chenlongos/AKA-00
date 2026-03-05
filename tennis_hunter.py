@@ -374,7 +374,7 @@ def main_v():
             result = yolo_infer(frame)
         logging.debug(f" 解算完成")
 
-        if result and len(result) > 0:
+        if result:
             robot.update_status()
             logging.info(f"update_status, status: {robot.status}")
             robot.set_direction_speed(width, result)

@@ -1,6 +1,12 @@
 import os
 import threading
 
+# 设置环境变量，默认在Windows上启用模拟器，在Linux上禁用
+if os.name == "nt":
+    os.environ.setdefault("ENABLE_SIMULATOR", "true")
+else:
+    os.environ.setdefault("ENABLE_SIMULATOR", "false")
+
 from app import create_app
 from app.extensions import socketio
 

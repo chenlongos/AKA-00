@@ -12,6 +12,8 @@ class ZP10S:
             stopbits=serial.STOPBITS_ONE,
             timeout=0.1
         )
+        self.id2_angle_open = 150
+        self.id2_angle_close = 105
 
     def close(self):
         if self.ser.is_open:
@@ -24,11 +26,48 @@ class ZP10S:
         cmd = f"#{servo_id:03d}P{pulse:04d}T{1000}!"
         self.ser.write(cmd.encode('ascii'))
         self.ser.flush()
-
+    def _send_cmd(self, servo_id, cmd):
+        cmd = f"#{servo_id:03d}{cmd}"
+        self.ser.write(cmd.encode('ascii'))
+        self.ser.flush()
+    def release_torque(self):
+        _send_cmd(255,"PULK")
+    def restoring_torque(self):
+        _send_cmd(255,"PULR")
     def set_angle(self, servo_id, angle):
         if not 0 <= angle <= 270:
             raise ValueError("angle must be 0~270")
         self._send_frame(servo_id, angle)
+
+def grab(servo):
+    servo.set_angle(2,servo.id2_angle_open)
+    time.sleep(0.3)
+    servo.set_angle(0,70)
+    servo.set_angle(1,230)
+    servo.set_angle(2,servo.id2_angle_open)
+    time.sleep(1)
+    servo.set_angle(2,servo.id2_angle_close)
+    time.sleep(1)
+    servo.set_angle(0,100)
+    servo.set_angle(1,220)
+    servo.set_angle(2,servo.id2_angle_close)
+def release_pos(servo):
+    servo.set_angle(0,140)
+    servo.set_angle(1,220)
+    servo.set_angle(2,servo.id2_angle_close)
+def grab_test(servo):
+    grab(servo)
+    time.sleep(2)
+    release_pos(servo)
+    time.sleep(2)
+    servo.set_angle(0,70)
+    servo.set_angle(1,230)
+    servo.set_angle(2,servo.id2_angle_close)
+    time.sleep(2)
+    servo.set_angle(2,servo.id2_angle_open)
+
+def release(servo):
+    servo.set_angle(2,servo.id2_angle_open)
 
 def main():
     zp10s = ZP10S()

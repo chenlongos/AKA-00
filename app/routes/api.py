@@ -13,15 +13,19 @@ except Exception:
 import socket
 import struct
 import time
-import torch
 
 from flask import Blueprint, request, jsonify
-from src.utils.constants import OBS_STATE, OBS_ENV_STATE, ACTION, OBS_IMAGE, OBS_IMAGES, REWARD, DONE, TRUNCATED, OBS_LANGUAGE, OBS_LANGUAGE_TOKENS, OBS_LANGUAGE_ATTENTION_MASK, ROBOTS, TELEOPERATORS
-from src.sim.model.car import car
-from src.train import train_from_dataset, build_config
-from src.policies.act.modeling_act import ACT
 from ..extensions import socketio
 
+# 仅在模拟模式下导入模拟相关依赖
+if os.getenv("ENABLE_SIMULATOR", "false").lower() == "true" or os.name == "nt" or sys.platform == "darwin":
+    import torch
+    from src.utils.constants import OBS_STATE, OBS_ENV_STATE, ACTION, OBS_IMAGE, OBS_IMAGES, REWARD, DONE, TRUNCATED, OBS_LANGUAGE, OBS_LANGUAGE_TOKENS, OBS_LANGUAGE_ATTENTION_MASK, ROBOTS, TELEOPERATORS
+    from src.sim.model.car import car
+    from src.train import train_from_dataset, build_config
+    from src.policies.act.modeling_act import ACT
+
+# 硬件控制导入
 if os.name == "nt" or sys.platform == "darwin":
     class STS3215:
         def __init__(self, *_, **__):
@@ -58,14 +62,14 @@ if os.name == "nt" or sys.platform == "darwin":
     def brake(*_, **__):
         return None
 else:
-    from arm import STS3215, grab, release, arm_init
+    #from arm import STS3215, grab, release, arm_init
+    from src.arm_control.zl.zp10s.uart_control import ZP10S, grab, release
     from motor import Motor, forward, backward, turn_left, turn_right, sleep, brake
 
 left_motor = Motor(4, 0, 1)
 right_motor = Motor(4, 2, 3)
 
-servo = STS3215("/dev/ttyS2", baudrate=115200)
-arm_init(servo)
+servo = ZP10S("/dev/ttyS2", baudrate=115200)
 
 api_bp = Blueprint("api", __name__)
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -73,6 +77,7 @@ OUTPUT_DIR = ROOT_DIR / "output"
 DATASET_DIR = OUTPUT_DIR / "datasets"
 MODEL_DIR = OUTPUT_DIR / "train"
 
+# 条件初始化训练相关变量
 train_lock = threading.Lock()
 train_state = {
     "status": "idle",
@@ -92,6 +97,7 @@ train_state = {
 }
 train_thread = None
 
+# 条件初始化推理相关变量
 infer_lock = threading.Lock()
 infer_state = {
     "status": "idle",
@@ -152,8 +158,18 @@ def control():
     return jsonify({"status": "success", "action": action})
 
 
+# 仅在模拟模式下处理数据集保存
 @api_bp.route('/dataset', methods=['POST'])
 def save_dataset():
+    if os.getenv("ENABLE_SIMULATOR", "false").lower() != "true" and os.name != "nt" and sys.platform != "darwin":
+        return jsonify({"error": "simulator not enabled"}), 400
+    
+    try:
+        import torch
+        from src.utils.constants import OBS_STATE, OBS_ENV_STATE, ACTION, OBS_IMAGE, OBS_IMAGES, REWARD, DONE, TRUNCATED, OBS_LANGUAGE, OBS_LANGUAGE_TOKENS, OBS_LANGUAGE_ATTENTION_MASK, ROBOTS, TELEOPERATORS
+    except ImportError:
+        return jsonify({"error": "simulator dependencies not installed"}), 500
+        
     payload = request.get_json(silent=True) or {}
     states = payload.get("states") or payload.get(OBS_STATE)
     env_states = payload.get("env_states") or payload.get(OBS_ENV_STATE)
@@ -351,6 +367,14 @@ def _map_action(action_vector, action_dim: int):
 
 
 def _apply_action(action: str):
+    if os.getenv("ENABLE_SIMULATOR", "false").lower() != "true" and os.name != "nt" and sys.platform != "darwin":
+        return
+        
+    try:
+        from src.sim.model.car import car
+    except ImportError:
+        return
+        
     if action == "up":
         if car.speed < car.maxSpeed:
             car.speed += car.acceleration
@@ -375,6 +399,15 @@ def _apply_action(action: str):
 
 
 def _run_training(run_id: str, dataset_path: str, options: dict):
+    if os.getenv("ENABLE_SIMULATOR", "false").lower() != "true" and os.name != "nt" and sys.platform != "darwin":
+        return {"error": "simulator not enabled"}
+        
+    try:
+        import torch
+        from src.train import train_from_dataset
+    except ImportError:
+        return {"error": "training dependencies not installed"}
+        
     output_dir = MODEL_DIR / f"act_{time.strftime('%Y%m%d_%H%M%S')}"
 
     def _progress(epoch: int, total: int, avg_loss: float):
@@ -414,6 +447,7 @@ def _run_training(run_id: str, dataset_path: str, options: dict):
                     "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 }
             )
+        return result
     except Exception as exc:
         with train_lock:
             train_state.update(
@@ -424,10 +458,14 @@ def _run_training(run_id: str, dataset_path: str, options: dict):
                     "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 }
             )
+        return {"error": str(exc)}
 
 
 @api_bp.route("/train/start", methods=["POST"])
 def train_start():
+    if os.getenv("ENABLE_SIMULATOR", "false").lower() != "true" and os.name != "nt" and sys.platform != "darwin":
+        return jsonify({"status": "error", "message": "simulator not enabled"}), 400
+        
     data = request.get_json(silent=True) or {}
     dataset_path_raw = data.get("dataset_path") or _latest_dataset_path()
     if not dataset_path_raw:
@@ -579,6 +617,16 @@ def delete_model(model_id: str):
 
 @api_bp.route("/infer/start", methods=["POST"])
 def infer_start():
+    if os.getenv("ENABLE_SIMULATOR", "false").lower() != "true" and os.name != "nt" and sys.platform != "darwin":
+        return jsonify({"status": "error", "message": "simulator not enabled"}), 400
+        
+    try:
+        import torch
+        from src.policies.act.modeling_act import ACT
+        from src.train import build_config
+    except ImportError:
+        return jsonify({"status": "error", "message": "inference dependencies not installed"}), 500
+        
     data = request.get_json(silent=True) or {}
     model_id = data.get("model_id")
     model_path = data.get("model_path")
@@ -620,6 +668,15 @@ def infer_start():
 
 @api_bp.route("/infer/step", methods=["POST"])
 def infer_step():
+    if os.getenv("ENABLE_SIMULATOR", "false").lower() != "true" and os.name != "nt" and sys.platform != "darwin":
+        return jsonify({"status": "error", "message": "simulator not enabled"}), 400
+        
+    try:
+        import torch
+        from src.sim.model.car import car
+    except ImportError:
+        return jsonify({"status": "error", "message": "inference dependencies not installed"}), 500
+        
     with infer_lock:
         if infer_state["status"] != "running":
             return jsonify({"status": "error", "message": "inference not running"}), 400
