@@ -1,14 +1,10 @@
 import {useEffect, useRef, useState} from "react";
-import {sendAction} from "../api/socket.ts";
 import ControlButton from "../components/ControlButton.tsx";
 
-const FPS = 20
-const frameInterval = 1000 / FPS
 
 const BaseControlPage = () => {
     const [ip, setIp] = useState("获取中...");
     const [status, setStatus] = useState("准备就绪");
-    const [isSimulator, setIsSimulator] = useState(false);
 
     // 当前正在执行的动作（用于模拟器每帧发送）
     const currentActionRef = useRef<string | null>(null);
@@ -44,65 +40,33 @@ const BaseControlPage = () => {
 
     const send = async (action: string) => {
         setStatus("执行: " + action);
-        if (!isSimulator) {
-            console.log("http send " + action);
-            try {
-                const res = await fetch(`/api/control?action=${action}&speed=50&time=0`);
-                if (!res.ok) throw new Error("请求失败");
-                const text = await res.text();
-                if (text) {
-                    try {
-                        console.log(JSON.parse(text));
-                    } catch {
-                        console.log(text);
-                    }
+        console.log("http send " + action);
+        try {
+            const res = await fetch(`/api/control?action=${action}&speed=50&time=0`);
+            if (!res.ok) throw new Error("请求失败");
+            const text = await res.text();
+            if (text) {
+                try {
+                    console.log(JSON.parse(text));
+                } catch {
+                    console.log(text);
                 }
-            } catch (err) {
-                setStatus("错误: " + err);
             }
+        } catch (err) {
+            setStatus("错误: " + err);
         }
     };
 
     // ==== 按钮事件处理 ====
     const handlePressStart = (action: string) => {
         currentActionRef.current = action;
-        if (!isSimulator) {
-            send(action); // 实车立即发
-        }
+        send(action); // 实车立即发
     };
 
     const handlePressEnd = () => {
         currentActionRef.current = null;
-        if (!isSimulator) {
-            send("stop"); // 实车发 stop
-        }
+        send("stop"); // 实车发 stop
     };
-
-    useEffect(() => {
-        if (!isSimulator) return; // 只在模拟器模式运行
-        let animationFrameId: number
-        let lastTime = 0;
-        const renderLoop = (currentTime: number) => {
-            animationFrameId = window.requestAnimationFrame(renderLoop)
-            const action = currentActionRef.current;
-            const delta = currentTime - lastTime
-
-            if (delta < frameInterval) return
-
-            lastTime = currentTime - (delta % frameInterval)
-
-            if (action !== null) {
-                sendAction(action); // 每帧发送当前动作
-            }
-        };
-
-        animationFrameId = requestAnimationFrame(renderLoop);
-
-        return () => {
-            window.cancelAnimationFrame(animationFrameId)
-        }
-
-    }, [isSimulator])
 
     const redirect = async () => {
         setStatus("获取 IP...");
@@ -137,29 +101,6 @@ const BaseControlPage = () => {
         >
             <h2>AKA-00 控制台</h2>
             <div style={{opacity: 0.6}}>{ip}</div>
-
-            {/* 模式状态 */}
-            <div
-                style={{
-                    marginTop: "15px",
-                    padding: "8px 15px",
-                    background: "#1e293b",
-                    borderRadius: "12px",
-                    display: "inline-block",
-                    fontSize: "14px",
-                }}
-            >
-                模式：
-                <span
-                    style={{
-                        marginLeft: "8px",
-                        color: isSimulator ? "#22c55e" : "#3b82f6",
-                        fontWeight: "bold",
-                    }}
-                >
-          {isSimulator ? "模拟" : "实车"}
-        </span>
-            </div>
 
             {/* 方向区 */}
             <div
@@ -251,17 +192,6 @@ const BaseControlPage = () => {
                         onClick={() => redirect()}
                     >
                         进入试验平台
-                    </ControlButton>
-                </div>
-
-                {/* 切换 */}
-                <div style={{marginTop: "40px"}}>
-                    <ControlButton
-                        size="wide"
-                        variant="secondary"
-                        onClick={() => setIsSimulator(!isSimulator)}
-                    >
-                        切换模式
                     </ControlButton>
                 </div>
             </div>

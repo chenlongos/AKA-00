@@ -7,7 +7,7 @@ CHIP_CONFIGS = {
     'rk3588' : {'period_ns': 50000}
 }
 
-class Motor:
+class N20:
     def __init__(self, chip, ch1, ch2, chip_type='sg2002'):
         # 硬件初始化
         self.chip_type = chip_type
@@ -80,11 +80,11 @@ def sleep(left, right, speed=0):
 
 def main():
     # sg2002
-    # left_motor = Motor(4, 0, 1)
-    # right_motor = Motor(4, 2, 3) 
+    # left_motor = N20(4, 0, 1)
+    # right_motor = N20(4, 2, 3)
     # rk3588
-    left_motor = Motor(0, 1, 0, chip_type='rk3588')      # (pin5, pin3)
-    right_motor = Motor(4, 5, 0, chip_type='rk3588')     # (pin16, pin18)
+    left_motor = N20(0, 1, 0, chip_type='rk3588')      # (pin5, pin3)
+    right_motor = N20(4, 5, 0, chip_type='rk3588')     # (pin16, pin18)
 
     print("前进")
     forward(left_motor, right_motor, 500)

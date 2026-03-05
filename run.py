@@ -1,21 +1,16 @@
 import os
 import threading
 
-# 设置环境变量，默认在Windows上启用模拟器，在Linux上禁用
-if os.name == "nt":
-    os.environ.setdefault("ENABLE_SIMULATOR", "true")
-else:
-    os.environ.setdefault("ENABLE_SIMULATOR", "false")
-
 from app import create_app
-from app.extensions import socketio
 
 app = create_app()
+
 
 def run_http():
     default_port = 5000 if os.name == "nt" else 80
     port = int(os.getenv("APP_HTTP_PORT", str(default_port)))
-    socketio.run(app, host="0.0.0.0", port=port, allow_unsafe_werkzeug=True)
+    app.run(host="0.0.0.0", port=port)
+
 
 def run_https():
     cert_path = os.getenv("APP_CERT_PATH", "/root/AKA-00/cert.pem")
@@ -24,7 +19,8 @@ def run_https():
         return
     default_port = 5443 if os.name == "nt" else 443
     port = int(os.getenv("APP_HTTPS_PORT", str(default_port)))
-    socketio.run(app, host='0.0.0.0', port=port, allow_unsafe_werkzeug=True, ssl_context=(cert_path, key_path))
+    app.run(host='0.0.0.0', port=port, ssl_context=(cert_path, key_path))
+
 
 if __name__ == '__main__':
     threading.Thread(target=run_http).start()
