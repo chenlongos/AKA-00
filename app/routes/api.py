@@ -1,17 +1,18 @@
-import os
 import socket
-import sys
+import struct
+
 try:
     import fcntl
     _HAS_FCNTL = True
 except Exception:
     _HAS_FCNTL = False
-import struct
-import time
 
 from flask import Blueprint, request, jsonify
 
 # 硬件控制导入
+import os
+import sys
+
 if os.name == "nt" or sys.platform == "darwin":
     class ZP10S:
         def __init__(self, *_, **__):
@@ -58,6 +59,7 @@ servo = ZP10S("/dev/ttyS2", baudrate=115200)
 
 api_bp = Blueprint("api", __name__)
 
+
 @api_bp.route("/ip")
 def ip():
     return jsonify({
@@ -67,6 +69,7 @@ def ip():
 
 @api_bp.route('/control', methods=['GET'])
 def control():
+    import time
     action = request.args.get('action')
     speed = int(request.args.get('speed', 50))
     milliseconds = float(request.args.get('time', 0))

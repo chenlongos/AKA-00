@@ -31,9 +31,9 @@ class ZP10S:
         self.ser.write(cmd.encode('ascii'))
         self.ser.flush()
     def release_torque(self):
-        _send_cmd(255,"PULK")
+        self._send_cmd(255, "PULK")
     def restoring_torque(self):
-        _send_cmd(255,"PULR")
+        self._send_cmd(255, "PULR")
     def set_angle(self, servo_id, angle):
         if not 0 <= angle <= 270:
             raise ValueError("angle must be 0~270")

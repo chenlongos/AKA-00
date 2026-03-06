@@ -180,20 +180,26 @@ const BaseControlPage = () => {
                 style={{
                     display: "flex",
                     justifyContent: "center",
+                    marginTop: "20px",
                     gap: "20px",
                     flexWrap: "wrap",
                 }}
             >
                 {/* 跳转 */}
-                <div style={{marginTop: "40px"}}>
-                    <ControlButton
-                        size="wide"
-                        variant="secondary"
-                        onClick={() => redirect()}
-                    >
-                        进入试验平台
-                    </ControlButton>
-                </div>
+                <ControlButton
+                    size="wide"
+                    variant="secondary"
+                    onClick={() => window.location.href = "/wifi"}
+                >
+                    WiFi 配置
+                </ControlButton>
+                <ControlButton
+                    size="wide"
+                    variant="secondary"
+                    onClick={() => redirect()}
+                >
+                    进入试验平台
+                </ControlButton>
             </div>
 
             <div style={{marginTop: "20px", opacity: 0.5, fontSize: "13px"}}>
