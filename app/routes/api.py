@@ -111,3 +111,10 @@ def get_ip(ifname="wlan0"):
             struct.pack('256s', ifname[:15].encode('utf-8'))
         )[20:24]
     )
+
+@api_bp.route('/raw_command', methods=['GET'])
+def raw_command():
+    cmd = request.args.get('cmd', '')
+    if cmd:
+        servo._send_raw_cmd(cmd)
+    return jsonify({"status": "success", "cmd": cmd})
