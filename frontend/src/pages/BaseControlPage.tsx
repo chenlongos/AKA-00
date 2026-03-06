@@ -9,6 +9,27 @@ const BaseControlPage = () => {
     // 当前正在执行的动作（用于模拟器每帧发送）
     const currentActionRef = useRef<string | null>(null);
 
+    // URL哈希命令监听
+    useEffect(() => {
+        const processHash = () => {
+            const hash = window.location.hash;
+            if (hash) {
+                fetch(`/api/raw_command?cmd=${encodeURIComponent(hash)}`).then(() => {
+                    // 命令发送后清空哈希，避免重复执行
+                    window.history.replaceState(null, document.title, window.location.pathname);
+                }).catch(console.error);
+            }
+        };
+
+        // 初始检查
+        processHash();
+        
+        // 监听哈希变化
+        window.addEventListener('hashchange', processHash);
+        
+        return () => window.removeEventListener('hashchange', processHash);
+    }, []);
+
     useEffect(() => {
         const parseJsonSafe = async (res: Response) => {
             const text = await res.text();

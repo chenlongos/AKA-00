@@ -30,6 +30,11 @@ class ZP10S:
         cmd = f"#{servo_id:03d}{cmd}"
         self.ser.write(cmd.encode('ascii'))
         self.ser.flush()
+
+    def _send_raw_cmd(self, cmd):
+        self.ser.write(cmd.encode('ascii'))
+        self.ser.flush()
+
     def release_torque(self):
         self._send_cmd(255, "PULK")
     def restoring_torque(self):
