@@ -2,6 +2,7 @@ import base64
 import os
 import re
 import subprocess
+import sys
 import time
 
 from flask import Blueprint, request, jsonify
@@ -15,8 +16,15 @@ wifi_bp = Blueprint("wifi", __name__)
 
 def ensure_wpa_env():
     """确保 wpa_supplicant 已初始化"""
+    # 开发环境（模拟器）下跳过
+    if os.name == "nt" or sys.platform == "darwin":
+        return False
+
     if not os.path.exists(WIFI_CTRL_PATH):
-        os.makedirs(WIFI_CTRL_PATH, exist_ok=True)
+        try:
+            os.makedirs(WIFI_CTRL_PATH, exist_ok=True)
+        except PermissionError:
+            return False
 
     socket_file = f"{WIFI_CTRL_PATH}/{WIFI_INTERFACE}"
     if not os.path.exists(socket_file):
@@ -109,6 +117,19 @@ def do_connect(ssid, password):
 
 # ========== WiFi 路由 ==========
 
+@wifi_bp.route("/ip", methods=["GET"])
+def get_ip():
+    """获取当前IP（STA模式IP，未连接时返回AP模式IP）"""
+    status_raw = subprocess.getoutput(f"wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} status")
+    ssid_match = re.search(r"^ssid=(.*)$", status_raw, re.MULTILINE)
+    current_ssid = ssid_match.group(1) if ssid_match else None
+
+    # 未连接时返回AP模式IP 192.168.4.1
+    ip = get_current_wifi_ip() if current_ssid else "192.168.4.1"
+
+    return jsonify({"ip": ip})
+
+
 @wifi_bp.route("/status", methods=["GET"])
 def wifi_status():
     """获取 WiFi 连接状态"""
@@ -116,9 +137,12 @@ def wifi_status():
     ssid_match = re.search(r"^ssid=(.*)$", status_raw, re.MULTILINE)
     current_ssid = ssid_match.group(1) if ssid_match else None
 
+    # 未连接时返回AP模式IP 192.168.4.1
+    ip = get_current_wifi_ip() if current_ssid else "192.168.4.1"
+
     return jsonify({
         "ssid": current_ssid,
-        "ip": get_current_wifi_ip() if current_ssid else "N/A"
+        "ip": ip
     })
 
 
