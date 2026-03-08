@@ -42,19 +42,25 @@ const WiFiConfigPage = () => {
 
     const updateStatus = async () => {
         try {
-            const r = await fetch("/status");
-            const data = await r.json();
-            if (data.ssid) {
+            const [statusRes, ipRes] = await Promise.all([fetch("/status"), fetch("/ip")]);
+            const statusData = await statusRes.json();
+            const ipData = await ipRes.json();
+            if (statusData.ssid) {
                 setConnectionStatus(
                     <span>
-                        <span style={{color: "#34c759"}}>●</span> 已连接: <b>{data.ssid}</b> | IP:{" "}
-                        <b style={{color: "#007aff"}}>{data.ip}</b>
+                        <span style={{color: "#34c759"}}>●</span> 已连接: <b>{statusData.ssid}</b> | IP:{" "}
+                        <b style={{color: "#007aff"}}>{ipData.ip}</b>
                     </span>
                 );
             } else {
-                setConnectionStatus(<span style={{color: "#ff3b30"}}>○</span>);
+                setConnectionStatus(
+                    <span>
+                        <span style={{color: "#ff3b30"}}>○</span> 未连接 | IP: <b>{ipData.ip}</b>
+                    </span>
+                );
             }
-        } catch (e) {
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        } catch (_) {
             console.error("无法获取状态");
         }
     };
@@ -107,7 +113,8 @@ const WiFiConfigPage = () => {
             if (status === "success") {
                 setTimeout(loadList, 2500);
             }
-        } catch (e) {
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        } catch (_) {
             setMessages((prev) => ({...prev, [network.id]: "请求超时"}));
         } finally {
             setConnecting(false);

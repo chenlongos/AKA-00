@@ -31,23 +31,12 @@ const BaseControlPage = () => {
     }, []);
 
     useEffect(() => {
-        const parseJsonSafe = async (res: Response) => {
-            const text = await res.text();
-            if (!text) return null;
-            try {
-                return JSON.parse(text);
-            } catch {
-                return null;
-            }
-        };
-
         const getIp = async () => {
             setStatus("获取 IP...");
             try {
-                const res = await fetch("/api/ip");
+                const res = await fetch("/ip");
                 if (!res.ok) throw new Error("请求失败");
-                const data = await parseJsonSafe(res);
-                if (!data?.ip) throw new Error("无IP数据");
+                const data = await res.json();
                 console.log("device ip:", data.ip);
                 setIp("IP: " + data.ip);
                 setStatus("准备就绪");
@@ -57,6 +46,11 @@ const BaseControlPage = () => {
         };
 
         getIp();
+
+        // 定期刷新 IP 状态
+        const interval = setInterval(getIp, 5000);
+
+        return () => clearInterval(interval);
     }, []);
 
     const send = async (action: string) => {
@@ -92,11 +86,9 @@ const BaseControlPage = () => {
     const redirect = async () => {
         setStatus("获取 IP...");
         try {
-            const res = await fetch("/api/ip");
+            const res = await fetch("/ip");
             if (!res.ok) throw new Error("请求失败");
-            const text = await res.text();
-            if (!text) throw new Error("空响应");
-            const data = JSON.parse(text);
+            const data = await res.json();
             if (!data?.ip) throw new Error("无IP数据");
             const targetUrl = "https://ai.maodouketang.cn/";
             const fullUrl = `${targetUrl}?ip=${encodeURIComponent(data.ip)}`;

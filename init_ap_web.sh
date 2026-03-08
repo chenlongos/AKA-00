@@ -1,11 +1,16 @@
 #!/bin/sh
 echo "=== 安装 AP热点 + DHCP(稳定版) ==="
 
+# 生成基于 MAC 地址的固定 SSID ID (1-99)
+MAC_SUFFIX=$(cat /sys/class/net/wlan0/address 2>/dev/null | tr -d ':' | tail -c 2)
+RANDOM_ID=$((16#${MAC_SUFFIX} % 99 + 1))
+SSID="chenlong-robot-${RANDOM_ID}"
+
 # 热点配置
-cat > /etc/hostapd.conf <<'EOF'
+cat > /etc/hostapd.conf <<EOF
 interface=wlan0
 driver=nl80211
-ssid=chenlong-robot
+ssid=${SSID}
 hw_mode=g
 channel=6
 auth_algs=1
@@ -43,7 +48,7 @@ ifconfig wlan0 192.168.4.1 netmask 255.255.255.0 up
 udhcpd /etc/udhcpd.conf &
 hostapd -B /etc/hostapd.conf
 
-echo "✅ 热点: sg2002-01"
+echo "✅ 热点: ${SSID}"
 echo "✅ DHCP已启动"
 echo "连接后访问: http://192.168.4.1"
 echo "已启用wlan1 作为wifi连接网口"
