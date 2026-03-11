@@ -1,9 +1,10 @@
 #!/bin/sh
 echo "=== 安装 AP热点 + DHCP(稳定版) ==="
 
-# 生成基于 MAC 地址的固定 SSID ID (1-99)
-MAC_SUFFIX=$(cat /sys/class/net/wlan0/address 2>/dev/null | tr -d ':' | tail -c 2)
-RANDOM_ID=$((16#${MAC_SUFFIX} % 99 + 1))
+# 生成基于 MAC 地址的固定 SSID ID (绝对唯一)
+# 使用完整 MAC 的后 6 位，约 1680 万种可能，映射到 1-9999999
+MAC_SUFFIX=$(cat /sys/class/net/wlan0/address 2>/dev/null | tr -d ':' | tail -c 6)
+RANDOM_ID=$((16#${MAC_SUFFIX} % 9999999 + 1))
 SSID="chenlong-robot-${RANDOM_ID}"
 
 # 热点配置
