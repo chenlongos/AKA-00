@@ -46,11 +46,6 @@ const BaseControlPage = () => {
         };
 
         getIp();
-
-        // 定期刷新 IP 状态
-        const interval = setInterval(getIp, 5000);
-
-        return () => clearInterval(interval);
     }, []);
 
     const send = async (action: string) => {
