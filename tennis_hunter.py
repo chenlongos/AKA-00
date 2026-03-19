@@ -4,7 +4,7 @@ from datetime import datetime
 import json
 import numpy as np
 from dataclasses import dataclass, field
-from arm_control.sts3215 import STS3215, grab1, grab_pos, release as arm_release, release_pos, arm_init
+from arm_control.sts3215 import STS3215, grab1, grab_prepare, grab_pos, release as arm_release, release_pos, arm_init
 from base_control.n20 import N20, forward, backward, turn_left, turn_right, sleep as motor_sleep, brake
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -186,8 +186,8 @@ class Robot:
     FRAME_WIDTH = 640
     X_LEFT_GRAB = 258
     X_RIGHT_GRAB = X_LEFT_GRAB + 40
-    TENNIS_WIDTH_FAR = 300
-    TENNIS_WIDTH_NEAR = 360
+    TENNIS_WIDTH_FAR = 320
+    TENNIS_WIDTH_NEAR = 380
     MAX_SPEED = 240
     MIN_SPEED = MAX_SPEED // 6  # 40
     status: str = "chase_tennis" # 机器人状态: chase_tennis, chase_bucket, grab_tennis, position_tennis, release_tennis
@@ -318,16 +318,15 @@ class Robot:
             brake(self.left_motor, self.right_motor)
             self.grab_confirm_count += 1
             if self.grab_confirm_count >= 10:
+                grab_prepare(self.servo)
                 grab1(self.servo)
                 self.grab_confirm_count = 0
-                time.sleep(0.5)
+                time.sleep(1.0)
                 pos_servo3 = self.servo.get_position(3)
                 if pos_servo3 == None or pos_servo3 < 3050:
                     grab_pos(self.servo)
                     self.status = "chase_tennis"
                     return
-                backward(self.left_motor, self.right_motor, self.MAX_SPEED)
-                time.sleep(0.4)
                 self.status = "chase_bucket"
                 release_pos(self.servo)
 

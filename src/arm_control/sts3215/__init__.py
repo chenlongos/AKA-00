@@ -120,6 +120,17 @@ class STS3215:
         data = int(mode).to_bytes(1, 'little')
         self.write_reg(servo_id, 0x16, data)
 
+servo3_close = 2800
+servo3_open = 4000
+servo3_grab = 3000
+servo1_grab = 1850
+servo1_grab_prepare = 2300
+servo1_release = 2700
+servo1_normal = 3100
+servo2_grab_prepare = 2100
+servo2_grab = 2650
+servo2_normal = 2600
+
 def arm_init(servo):
     for i in range(1,4):
         servo.set_operating_mode(i, 0)
@@ -147,15 +158,19 @@ def grab(servo):
     servo.move_to_position(3, 3300)
 
 def grab1(servo):
-    servo.move_to_position(1, 1850)
-    servo.move_to_position(2, 2650)
-    servo.move_to_position(3, 4000)
+    servo.move_to_position(3, servo3_open)
+    servo.move_to_position(2, servo2_grab_prepare)
+    servo.move_to_position(1, servo1_grab_prepare)
+    time.sleep(0.4)
+    servo.move_to_position(1, servo1_grab)
+    servo.move_to_position(2, servo2_grab)
+    servo.move_to_position(3, servo3_open)
     time.sleep(1)
-    servo.move_to_position(3, 3000)
+    servo.move_to_position(3, servo3_grab)
     time.sleep(1)
-    servo.move_to_position(1, 2450)
-    servo.move_to_position(2, 2100)
-    servo.move_to_position(3, 3000)
+    servo.move_to_position(1, servo1_grab_prepare)
+    servo.move_to_position(2, servo2_grab_prepare)
+    servo.move_to_position(3, servo3_grab)
 
 def grab_test(servo):
     grab1(servo)
@@ -167,19 +182,27 @@ def grab_test(servo):
     servo.move_to_position(3, 4000)
 
 def grab_pos(servo):
-    servo.move_to_position(3, 4000)
-    time.sleep(0.5)
-    servo.move_to_position(1, 2300)
-    servo.move_to_position(2, 2100)
-    servo.move_to_position(3, 4000)
+    servo.move_to_position(2, servo2_grab_prepare)
+    servo.move_to_position(1, servo1_normal)
+    time.sleep(0.4)
+    servo.move_to_position(2, servo2_normal)
+    servo.move_to_position(3, servo3_close)
 
 def release_pos(servo):
-    servo.move_to_position(1, 2700)
-    servo.move_to_position(2, 2600)
-    servo.move_to_position(3, 3000)
+    servo.move_to_position(1, servo1_normal)
+    servo.move_to_position(2, servo2_grab_prepare)
+    time.sleep(0.5)
+    servo.move_to_position(2, servo2_normal)
+    servo.move_to_position(3, servo3_grab)
+
+def grab_prepare(servo):
+    servo.move_to_position(2, servo2_grab_prepare)
+    time.sleep(0.4)
 
 def release(servo):
-    servo.move_to_position(3, 3700)
+    servo.move_to_position(1, servo1_release)
+    time.sleep(0.5)
+    servo.move_to_position(3, servo3_open)
 
 def main():
     # 实例化，注意波特率必须与系统设置及电机设置一致
