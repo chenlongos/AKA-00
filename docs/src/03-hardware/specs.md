@@ -10,10 +10,14 @@
 | CPU | 算能 SG2002  <br/>大核：1GHz RISC-V C906 / ARM A53 二选一;<br/>小核：700MHz RISC-V C906；       |
 | NPU | 1 TOPS (INT8)，支持 BF16                                                               |
 
-## 机械臂控制板(微雪UART串口通信控制板)
+## 机械臂舵机和控制板
+
+### 控制板
+微雪UART串口通信控制板
 
 ![主控图](../../images/hardware/uart.png)
 
+### 使用的舵机
 | 参数 | 值 |
 |------|-----|
 | 型号 | ZL-ZP10S |
@@ -21,7 +25,7 @@
 | 设备 | /dev/ttyACM0 |
 | 波特率 | 115200 |
 
-### 舵机支持
+### 支持的舵机
 
 - **STS3215** 
 - **MG996R**
@@ -31,7 +35,9 @@
 
 ![drv8833.png](../../images/hardware/drv8833.png)
 
-![img.png](../../images/hardware/drv8833-2.png)
+![drv8833-2.png](../../images/hardware/drv8833-2.png)
+
+### 使用的电机
 
 | 参数 | 值 |
 |------|-----|
