@@ -9,8 +9,8 @@
 
 ## 硬件
 
-- [硬件接线](./03-hardware/wiring.md)
 - [硬件参数](./03-hardware/specs.md)
+- [硬件接线](./03-hardware/wiring.md)
 
 ## 配置
 

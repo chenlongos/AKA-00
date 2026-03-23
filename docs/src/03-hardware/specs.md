@@ -2,7 +2,7 @@
 
 ## 主控板
 
-![img.png](../../images/hardware/sg2002.png)
+![img.png](images/sg2002.png)
 
 | 参数 | 值                                                                                |
 |------|----------------------------------------------------------------------------------|
@@ -15,7 +15,7 @@
 ### 控制板
 微雪UART串口通信控制板
 
-![主控图](../../images/hardware/uart.png)
+![主控图](images/uart.png)
 
 ### 使用的舵机
 | 参数 | 值 |
@@ -33,9 +33,7 @@
 
 ## 电机控制板(DRV8833)
 
-![drv8833.png](../../images/hardware/drv8833.png)
-
-![drv8833-2.png](../../images/hardware/drv8833-2.png)
+![drv8833-2.png](images/drv8833-2.png)
 
 ### 使用的电机
 

@@ -1,22 +1,9 @@
 # 第三章 基础配置
 
-以下基于wifi版
+
 
 ## 3.1 连接网络
-- 方式一、通过wifi指定直接连接网络
 
-- 方式二、在win上，通过usb实现网络共享
-
-```shell
-ip addr flush dev usb0
-ip addr add 192.168.137.100/24 dev usb0
-ip link set usb0 up
-
-ip route del default
-ip route add default via 192.168.137.1
-
-echo "nameserver 8.8.8.8" > /etc/resolv.conf
-```
 
 ## 3.2 运行程序
 
