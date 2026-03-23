@@ -43,27 +43,14 @@ GET /api/control?action=<action>&speed=<speed>&time=<time>
 
 ```bash
 # 前进
-curl "http://192.168.1.100/api/control?action=up&speed=30&time=1000"
+curl "http://<ip>/api/control?action=up&speed=30&time=1000"
 
 # 左转
-curl "http://192.168.1.100/api/control?action=left&speed=20&time=500"
+curl "http://<ip>/api/control?action=left&speed=20&time=500"
 
 # 抓取
-curl "http://192.168.1.100/api/control?action=grab"
+curl "http://<ip>/api/control?action=grab"
 
 # 释放
-curl "http://192.168.1.100/api/control?action=release"
+curl "http://<ip>/api/control?action=release"
 ```
-
-## 运行模式
-
-在 `tennis_hunter.py` 中配置：
-
-```python
-HARDWARE_MODE = 'rk3588'  # 或 'cpu'
-```
-
-| 模式 | 模型 | 说明 |
-|------|------|------|
-| cpu | best.onnx | 通用 PC 推理 |
-| rk3588 | best.rknn | RK3588 NPU 推理 |

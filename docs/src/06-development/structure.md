@@ -43,11 +43,11 @@ AKA-00/
 
 ## 关键模块
 
-| 文件 | 功能 |
-|------|------|
+| 文件 | 功能                        |
+|------|---------------------------|
 | `run.py` | Flask 服务器启动，支持 HTTP/HTTPS |
-| `tennis_hunter.py` | 网球收集主逻辑，包含目标检测和控制流程 |
-| `app/__init__.py` | Flask 应用工厂，初始化硬件驱动 |
-| `app/routes/api.py` | HTTP API，提供运动/夹爪控制 |
-| `src/arm_control/sts3215/` | 串口舵机通信协议实现 |
-| `src/base_control/n20/` | PWM 电机速度控制 |
+| `tennis_hunter.py` | 网球收集主逻辑，包含目标检测和控制流程       |
+| `app/__init__.py` | Flask 应用工厂，初始化硬件驱动        |
+| `app/routes/api.py` | HTTP API，提供运动/夹爪控制        |
+| `src/arm_control/` | 舵机通信协议实现                  |
+| `src/base_control/n20/` | PWM N20电机速度控制             |

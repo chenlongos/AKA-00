@@ -1,4 +1,4 @@
-# 本地项目启动方法
+# 在pc上项目启动方法
 
 1. 安装Miniconda用于控制python的版本
 
@@ -29,3 +29,5 @@ npm run build && cd ..
 
 ```shell
 python run.py
+```
+之后访问本地的80端口或443端口即可

@@ -1,53 +1,41 @@
 # 第三章 基础配置
 
+这部分为机器人的初始化部分，都会在用户拿到设备前实现，如果用户需要自行初始化也可以安装本流程实现。
 
+## 3.1 烧录镜象
+从Releases处下载最新镜像，通过烧入工具将镜像烧录到tf卡中，镜像中会自带一份项目文件。
 
-## 3.1 连接网络
+## 3.2 连接主控
 
+通过type-c接口可以将板子连接到电脑上
 
-## 3.2 运行程序
+在win下在终端里输入ipconfig，找到一个新的以太网，例如 `10.163.124.100`。
+之后可以使用ssh进行连接，`ssh root@10.163.124.1`
 
-```python
-python3 car_control_server.py
-```
+## 3.3 连接网络
 
-后台启动
-```python
-nohup python3 car_control_server.py > app.log 2>&1 &
-```
+启动一次根目录下的`init_ap_web.sh`这会让小车自己成为一个热点，方便个人设备的连接，同时将项目自启动脚本写入系统。
 
-## 3.3 mDNS配置(暂没实现)
+## 3.4 项目启动
 
-sg2002 内置支持了avahi，用
+可以选择重启机器人，或者手动启动项目。
 ```shell
-ps | grep avahi
+chmod +x init.sh
+./init.sh
 ```
-可以发现
-```shell
-470 avahi avahi-daemon: running [licheervnano-366e.local]
-```
-为
-<主机名>-<冲突后缀>.local
+会生成https的证书后运行项目
 
-修改 /etc/hosts和 /etc/hostname
-
-修改/etc/avahi/下的
-avahi-daemon.conf
-
-之后kill avahi的pid
-之后 avahi-daemon -D
-
-## 3.4 https服务需要生成证书
-```shell
-openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 3650 -nodes
-```
-
+## 3.5 https服务生成证书的指令
 -  无交互生成自签名证书，有效期10年（3650天）
 ```shell
 openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 3650 -nodes -subj "/C=CN/ST=Beijing/L=Beijing/O=MyOrg/OU=MyDept/CN=localhost"
 ```
 
-## 3.5 开机自启动
+如果想通过指定wifi的方式连接项目并自启动可以遵循以下流程
+
+## 3.6 开机自启动
+
+删除wifi.ap文件，[修改方式](https://wiki.sipeed.com/hardware/zh/lichee/RV_Nano/5_peripheral.html#WIFI)
 
 在/etc/init.d 文件中 添加 一个appinit文件，输入
 
@@ -101,7 +89,7 @@ exit 0
 app::sysinit:/etc/init.d/appinit start
 ```
 
-## 3.6 网络配置
+## 3.7 网络配置
 修改 /etc/wpa_supplicant.conf 文件
 ```shell
 ctrl_interface=/var/run/wpa_supplicant
@@ -114,7 +102,7 @@ network={
 }
 
 network={
-  ssid="BoBoPhone"
+  ssid="#####"
   psk="********"
   priority=5
 }
