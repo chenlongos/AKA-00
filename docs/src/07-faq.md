@@ -69,4 +69,4 @@ export APP_KEY_PATH=/path/to/key.pem
 
 ### Q: 如何设置开机自启？
 
-参考 [软件部署](./04-setup/software.md) 中的开机自启配置。
+参考 [机器人连接](./04-setup/connection.md) 中的开机自启配置。

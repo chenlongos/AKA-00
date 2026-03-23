@@ -31,8 +31,7 @@ chmod +x init.sh
 openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 3650 -nodes -subj "/C=CN/ST=Beijing/L=Beijing/O=MyOrg/OU=MyDept/CN=localhost"
 ```
 
-如果想通过指定wifi的方式连接项目并自启动可以遵循以下流程
-
+### 如果想通过指定wifi的方式连接项目并自启动可以遵循以下流程
 ## 3.6 开机自启动
 
 删除wifi.ap文件，[修改方式](https://wiki.sipeed.com/hardware/zh/lichee/RV_Nano/5_peripheral.html#WIFI)
