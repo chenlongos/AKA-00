@@ -12,11 +12,11 @@
     - A17：PWM5
     - A18：PWM6
     - A19：PWM7
-  - 舵机控制
+- **舵机控制**
     - A28：UART2TX
     - A29：UART2RX
-  - VBUS 5V
-  - GND
+- VBUS 5V
+- GND
 
 ### 底盘控制板接口图
 ![img.png](images/drv8833-2.png)
@@ -44,23 +44,19 @@
 ![img.png](images/hardware_connect.png)
 接线前请确保断电操作。
 
-### 机械臂
+### 机械臂UART控制
 
 - 机械臂串口连接至 `/dev/ttyACM0`
 - 波特率：115200
 
-### 电机
+### 电机PWM控制
 
 | 电机 | PWM Chip | Channel |
 |------|----------|---------|
 | 左电机 | 4        | 0, 1 |
 | 右电机 | 4        | 2, 3 |
 
-### 摄像头
-
-- USB 接口，设备文件：`/dev/video0`
-
-## 原理图
+## 更多原理图
 
 硬件原理图位于 `hardware/` 目录：
 
