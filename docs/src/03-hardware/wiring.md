@@ -4,8 +4,10 @@
 
 ### 主控接口图
 ![img.png](images/lichee_rv.png)
-- 使用了
-  - 电机控制
+
+本项目使用了以下接口：
+
+- **电机控制**
     - A16：PWM4
     - A17：PWM5
     - A18：PWM6
