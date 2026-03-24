@@ -1,6 +1,6 @@
-# 第三章 基础配置
+# 第三章 初始化配置
 
-这部分为机器人的初始化部分，都会在用户拿到设备前实现，如果用户需要自行初始化也可以安装本流程实现。
+这部分为机器人的初始化部分，都会在用户拿到设备前实现，如果用户需要自行初始化也可以按照本流程实现。
 
 ## 3.1 烧录镜象
 从Releases处下载最新镜像，通过烧入工具将镜像烧录到tf卡中，镜像中会自带一份项目文件。
@@ -9,7 +9,7 @@
 
 通过type-c接口可以将板子连接到电脑上
 
-在win下在终端里输入ipconfig，找到一个新的以太网，例如 `10.163.124.100`。
+在win下在终端里输入`ipconfig`，找到一个新的以太网，例如 `10.163.124.100`。
 之后可以使用ssh进行连接，`ssh root@10.163.124.1`
 
 ## 3.3 连接网络
@@ -23,7 +23,8 @@
 chmod +x init.sh
 ./init.sh
 ```
-会生成https的证书后运行项目
+
+如果没有生成过证书文件，会生成https的证书后运行项目
 
 ## 3.5 https服务生成证书的指令
 -  无交互生成自签名证书，有效期10年（3650天）
@@ -34,7 +35,7 @@ openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 3650 -nod
 ### 如果想通过指定wifi的方式连接项目并自启动可以遵循以下流程
 ## 3.6 开机自启动
 
-删除wifi.ap文件，[修改方式](https://wiki.sipeed.com/hardware/zh/lichee/RV_Nano/5_peripheral.html#WIFI)
+设置为sta模式，[修改方式](https://wiki.sipeed.com/hardware/zh/lichee/RV_Nano/5_peripheral.html#WIFI)
 
 在/etc/init.d 文件中 添加 一个appinit文件，输入
 

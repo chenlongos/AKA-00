@@ -13,9 +13,9 @@
 
 ## 配置
 
-- [机器人连接](./04-setup/connection.md)
-- [WiFi 配置](./04-setup/wifi-config.md)
-- [本地启动](./04-setup/software.md)
+- [初始化配置](./04-setup/connection.md)
+- [WiFi 连接配置](./04-setup/wifi-config.md)
+- [项目本地启动](./04-setup/software.md)
 
 ## 使用
 
