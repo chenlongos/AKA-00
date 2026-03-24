@@ -14,15 +14,15 @@
 
 ## 开始使用
 
-1. [快速开始](./02-quickstart.md) - 5 分钟内让机器人跑起来
-2. [项目介绍](./01-intro.md) - 了解 AKA-00 核心能力
-3. [硬件接线](./03-hardware/wiring.md) - 正确连接硬件
+- [快速开始](./02-quickstart.md) - 快速让机器人跑起来
+- [项目介绍](./01-intro.md) - 了解 AKA-00 核心能力
+- [硬件接线](./03-hardware/wiring.md) - 正确连接硬件
 
 ## 配置指南
 
-- [机器人连接](./04-setup/connection.md) - 首次连接配置
-- [WiFi 配置](./04-setup/wifi-config.md) - 网络设置
-- [软件部署](./04-setup/software.md) - 部署到控制板
+- [机器人连接](./04-setup/wifi-config.md) - 网络设置
+- [软件部署](./04-setup/software.md) - 项目本地启动并部署到控制板
+- [初始化配置](./04-setup/connection.md) - 初始化配置
 
 ## 使用文档
 
