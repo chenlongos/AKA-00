@@ -47,14 +47,14 @@ class ZP10S:
 def grab(servo):
     servo.set_angle(2,servo.id2_angle_open)
     time.sleep(0.3)
-    servo.set_angle(0,70)
-    servo.set_angle(1,230)
+    servo.set_angle(0,245)
+    servo.set_angle(1,75)
     servo.set_angle(2,servo.id2_angle_open)
     time.sleep(1)
     servo.set_angle(2,servo.id2_angle_close)
     time.sleep(1)
-    servo.set_angle(0,100)
-    servo.set_angle(1,220)
+    servo.set_angle(0,200)
+    servo.set_angle(1,75)
     servo.set_angle(2,servo.id2_angle_close)
 def release_pos(servo):
     servo.set_angle(0,140)
