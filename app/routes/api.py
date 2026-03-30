@@ -31,6 +31,9 @@ if os.name == "nt" or sys.platform == "darwin":
         def __init__(self, *_, **__):
             pass
 
+        def set_speed(self, _):
+            pass
+
     def forward(*_, **__):
         return None
 
@@ -144,3 +147,22 @@ def raw_command():
     if cmd:
         servo._send_raw_cmd(cmd)
     return jsonify({"status": "success", "cmd": cmd})
+
+
+@api_bp.route('/motor_direct', methods=['GET'])
+def motor_direct():
+    """直接设置左右轮速度
+
+    Query params:
+        left: int  左轮速度 (-255 ~ 255)
+        right: int 右轮速度 (-255 ~ 255)
+    """
+    left = int(request.args.get('left', 0))
+    right = int(request.args.get('right', 0))
+
+    left_motor.set_speed(left)
+    right_motor.set_speed(right)
+    state_tracker.update_left(left)
+    state_tracker.update_right(right)
+
+    return jsonify({"status": "success", "left": left, "right": right})
