@@ -51,9 +51,13 @@ if os.name == "nt" or sys.platform == "darwin":
 else:
     from src.arm_control.zl.zp10s.uart_control import ZP10S, grab, release
     from src.base_control.n20 import N20, forward, backward, turn_left, turn_right, brake
+    from src.state import MotorStateTracker
 
 left_motor = N20(4, 0, 1)
 right_motor = N20(4, 2, 3)
+
+# 初始化状态追踪器
+state_tracker = MotorStateTracker.get_instance()
 
 servo = ZP10S("/dev/ttyS2", baudrate=115200)
 
@@ -64,6 +68,16 @@ api_bp = Blueprint("api", __name__)
 def ip():
     return jsonify({
         "ip": get_ip()
+    })
+
+
+@api_bp.route("/motor_status")
+def motor_status():
+    """获取小车左右轮当前状态"""
+    status = state_tracker.get_status()
+    return jsonify({
+        "left_speed": status.left_speed,
+        "right_speed": status.right_speed
     })
 
 
@@ -78,14 +92,24 @@ def control():
     # --- 运动逻辑 ---
     if action == 'up':
         forward(left_motor, right_motor, speed)
+        state_tracker.update_left(speed)
+        state_tracker.update_right(speed)
     elif action == 'down':
         backward(left_motor, right_motor, speed)
+        state_tracker.update_left(-speed)
+        state_tracker.update_right(-speed)
     elif action == 'left':
         turn_left(left_motor, right_motor, speed)
+        state_tracker.update_left(speed)
+        state_tracker.update_right(-speed)
     elif action == 'right':
         turn_right(left_motor, right_motor, speed)
+        state_tracker.update_left(-speed)
+        state_tracker.update_right(speed)
     elif action == 'stop':
         brake(left_motor, right_motor)
+        state_tracker.update_left(0)
+        state_tracker.update_right(0)
     elif action == 'grab':
         grab(servo)
     elif action == 'release':
@@ -94,6 +118,8 @@ def control():
     if milliseconds > 0 and action in ['up', 'down', 'left', 'right']:
         time.sleep(milliseconds / 1000.0)
         sleep(left_motor, right_motor)
+        state_tracker.update_left(0)
+        state_tracker.update_right(0)
 
         return jsonify({"status": "success", "message": f"{action} for {milliseconds}s done"})
 
