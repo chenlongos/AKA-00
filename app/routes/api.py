@@ -25,7 +25,11 @@ def ip():
 @api_bp.route("/motor_status")
 def motor_status():
     """获取小车左右轮当前状态。"""
-    return jsonify(get_control_service().get_motor_status())
+    timestamp = request.args.get("timestamp")
+    if timestamp is None:
+        return jsonify({"error": "timestamp is required"}), 400
+    timestamp = int(timestamp)
+    return jsonify(get_control_service().get_motor_status(timestamp))
 
 
 @api_bp.route('/control', methods=['GET'])

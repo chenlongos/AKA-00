@@ -27,9 +27,10 @@ class ControlService:
     def _normalize_speed(speed: int) -> int:
         return max(0, min(50, speed)) * 240 // 50
 
-    def get_motor_status(self) -> dict[str, int]:
+    def get_motor_status(self, timestamp: int) -> dict[str, int]:
         status = self._state_tracker.get_status()
         return {
+            "timestamp": timestamp,
             "left_speed": status.left_speed,
             "right_speed": status.right_speed,
         }
