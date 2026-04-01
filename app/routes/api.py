@@ -70,3 +70,24 @@ def motor_direct():
     right = int(request.args.get('right', 0))
 
     return jsonify(get_control_service().set_motor_speed(left, right))
+
+
+@api_bp.route("/heartbeat")
+def heartbeat():
+    """心跳检测API，用于检查服务是否存活。"""
+    config = load_hardware_config()
+    mac_address = get_mac_address(config.wifi_interface)
+    return jsonify({
+        "status": "ok",
+        "service": "AKA-00",
+        "mac_address": mac_address
+    })
+
+
+def get_mac_address(ifname="wlan0"):
+    """获取指定网络接口的MAC地址。"""
+    try:
+        with open(f"/sys/class/net/{ifname}/address", "r") as f:
+            return f.read().strip()
+    except Exception:
+        return "unknown"
