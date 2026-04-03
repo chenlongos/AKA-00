@@ -13,7 +13,7 @@ class ZP10S:
             timeout=0.1
         )
         self.id2_angle_open = 150
-        self.id2_angle_close = 105
+        self.id2_angle_close = 90
 
     def close(self):
         if self.ser.is_open:
@@ -48,13 +48,13 @@ def grab(servo):
     servo.set_angle(2,servo.id2_angle_open)
     time.sleep(0.3)
     servo.set_angle(0,245)
-    servo.set_angle(1,75)
+    servo.set_angle(1,180)
     servo.set_angle(2,servo.id2_angle_open)
     time.sleep(1)
     servo.set_angle(2,servo.id2_angle_close)
     time.sleep(1)
     servo.set_angle(0,200)
-    servo.set_angle(1,75)
+    servo.set_angle(1,180)
     servo.set_angle(2,servo.id2_angle_close)
 def release_pos(servo):
     servo.set_angle(0,140)
