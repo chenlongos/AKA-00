@@ -28,8 +28,8 @@ class N20:
             p.enable()
 
     def set_speed(self, speed):
-        speed = max(-255, min(255, speed))
-        duty = int(abs(speed) * self.period_ns // 255)
+        speed = max(-100, min(100, speed))
+        duty = int(((abs(speed) * 2 // 5) + 60) * self.period_ns // 100)
         if speed == 0:
             self.pwm1.duty_cycle_ns = 0
             self.pwm2.duty_cycle_ns = 0
@@ -48,14 +48,6 @@ class N20:
 
 def forward(left, right, speed=255):
     left.set_speed(speed)
-    right.set_speed(speed)
-
-def forward_left(left, right, speed=255):
-    left.set_speed(speed)
-    right.set_speed(speed - 2)
-
-def forward_right(left, right, speed=255):
-    left.set_speed(speed - 2)
     right.set_speed(speed)
 
 def backward(left, right, speed=255):

@@ -23,10 +23,6 @@ class ControlService:
             baudrate=config.arm_baudrate,
         )
 
-    @staticmethod
-    def _normalize_speed(speed: int) -> int:
-        return max(0, min(50, speed)) * 240 // 50
-
     def get_motor_status(self, timestamp: int) -> dict[str, int]:
         status = self._state_tracker.get_status()
         return {
@@ -36,9 +32,7 @@ class ControlService:
         }
 
     def execute_action(self, action: str, speed: int = 50, milliseconds: float = 0) -> dict:
-        normalized_speed = self._normalize_speed(speed)
-
-        if not (self._apply_base_action(action, normalized_speed) or self._apply_arm_action(action)):
+        if not (self._apply_base_action(action, speed) or self._apply_arm_action(action)):
             raise ValueError(f"unsupported action: {action}")
 
         if milliseconds > 0 and action in ["up", "down", "left", "right"]:
@@ -64,9 +58,9 @@ class ControlService:
         elif action == "down":
             self._motor_pair.set_speed(-speed, -speed)
         elif action == "left":
-            self._motor_pair.set_speed(speed, -speed)
-        elif action == "right":
             self._motor_pair.set_speed(-speed, speed)
+        elif action == "right":
+            self._motor_pair.set_speed(speed, -speed)
         elif action == "stop":
             self._motor_pair.brake()
         else:
