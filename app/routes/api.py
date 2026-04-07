@@ -1,5 +1,6 @@
 import socket
 import struct
+import time
 
 try:
     import fcntl
@@ -30,6 +31,28 @@ def motor_status():
         return jsonify({"error": "timestamp is required"}), 400
     timestamp = int(timestamp)
     return jsonify(get_control_service().get_motor_status(timestamp))
+
+
+@api_bp.route("/motor_status_at")
+def motor_status_at():
+    """按 Real 端时间戳和时钟偏移查询小车对应时刻的状态。"""
+    capture_time_ms = request.args.get("capture_time_ms") # 捕获时间
+    if capture_time_ms is None:
+        return jsonify({"error": "capture_time_ms is required"}), 400
+    offset_ms = request.args.get("offset_ms", "0")
+
+    query_timestamp_ms = int(capture_time_ms) + int(float(offset_ms))
+    payload = get_control_service().get_motor_status(query_timestamp_ms)
+    payload["capture_time_ms"] = int(capture_time_ms)
+    payload["offset_ms"] = int(float(offset_ms))
+    return jsonify(payload)
+
+
+@api_bp.route("/time_sync")
+def time_sync():
+    return jsonify({
+        "device_time_ms": int(time.time() * 1000),
+    })
 
 
 @api_bp.route('/control', methods=['GET'])
@@ -64,7 +87,7 @@ def raw_command():
 
 @api_bp.route('/motor_direct', methods=['GET'])
 def motor_direct():
-    """直接设置左右轮速度
+    """直接设置左右轮速度和运动的持续时间
 
     Query params:
         left: int    左轮速度 (-255 ~ 255)

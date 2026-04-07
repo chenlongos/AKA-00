@@ -24,14 +24,7 @@ class ControlService:
         )
 
     def get_motor_status(self, timestamp: int) -> dict[str, int]:
-        status = self._state_tracker.get_status()
-        return {
-            "timestamp": timestamp,
-            "left_speed": status.left_speed,
-            "right_speed": status.right_speed,
-            "left_target": status.left_target,
-            "right_target": status.right_target,
-        }
+        return self._state_tracker.get_status_at(timestamp)
 
     def execute_action(self, action: str, speed: int = 50, milliseconds: float = 0) -> dict:
         if not (self._apply_base_action(action, speed) or self._apply_arm_action(action)):
