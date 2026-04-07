@@ -48,6 +48,21 @@ class ControlService:
         self._motor_pair.set_speed(left, right)
         return {"status": "success", "left": left, "right": right}
 
+    def run_motor(self, left: int, right: int, duration: float = 0) -> dict[str, int | str]:
+        """设置电机速度，可选持续时间
+
+        Args:
+            left: 左轮速度 (-100 ~ 100)
+            right: 右轮速度 (-100 ~ 100)
+            duration: 持续时间（秒），0 表示无限
+        """
+        self._motor_pair.set_speed(left, right)
+        if duration > 0:
+            time.sleep(duration)
+            self._motor_pair.sleep()
+            return {"status": "success", "left": left, "right": right, "duration": duration}
+        return {"status": "success", "left": left, "right": right}
+
     def send_raw_command(self, cmd: str) -> dict[str, str]:
         raw_sender = getattr(getattr(self._gripper, "_zp10s", None), "_send_raw_cmd", None)
         if cmd and raw_sender is not None:

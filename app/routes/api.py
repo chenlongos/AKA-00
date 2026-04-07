@@ -67,13 +67,15 @@ def motor_direct():
     """直接设置左右轮速度
 
     Query params:
-        left: int  左轮速度 (-255 ~ 255)
-        right: int 右轮速度 (-255 ~ 255)
+        left: int    左轮速度 (-255 ~ 255)
+        right: int   右轮速度 (-255 ~ 255)
+        duration: float 持续时间（秒），0 表示无限
     """
     left = int(request.args.get('left', 0))
     right = int(request.args.get('right', 0))
+    duration = float(request.args.get('duration', 0))
 
-    return jsonify(get_control_service().set_motor_speed(left, right))
+    return jsonify(get_control_service().run_motor(left, right, duration))
 
 
 @api_bp.route("/heartbeat")
