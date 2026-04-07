@@ -7,6 +7,8 @@ class MotorStatus:
     """左右轮状态管理"""
     left_speed: int = 0
     right_speed: int = 0
+    left_target: int = 0
+    right_target: int = 0
 
 
 class MotorStateTracker:
@@ -40,6 +42,10 @@ class MotorStateTracker:
         self.status.right_speed = speed
         if self._right_callback:
             self._right_callback(speed)
+
+    def update_target(self, left: int, right: int):
+        self.status.left_target = left
+        self.status.right_target = right
 
     def get_status(self) -> MotorStatus:
         return self.status

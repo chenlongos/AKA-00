@@ -43,6 +43,7 @@ class MotorPairAdapter:
         self._state_tracker = MotorStateTracker.get_instance()
 
     def set_speed(self, left: int, right: int) -> None:
+        self._state_tracker.update_target(left, right)
         self._left.set_speed(left)
         self._right.set_speed(right)
         self._state_tracker.update_left(left)
@@ -69,6 +70,7 @@ class MockMotorPair:
 
     def set_speed(self, left: int, right: int) -> None:
         print(f"[MockMotorPair] set_speed(left={left}, right={right})")
+        self._state_tracker.update_target(left, right)
         self._state_tracker.update_left(left)
         self._state_tracker.update_right(right)
 

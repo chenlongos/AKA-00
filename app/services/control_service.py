@@ -29,6 +29,8 @@ class ControlService:
             "timestamp": timestamp,
             "left_speed": status.left_speed,
             "right_speed": status.right_speed,
+            "left_target": status.left_target,
+            "right_target": status.right_target,
         }
 
     def execute_action(self, action: str, speed: int = 50, milliseconds: float = 0) -> dict:
