@@ -52,12 +52,14 @@ class MotorPairAdapter:
     def brake(self) -> None:
         self._left.brake()
         self._right.brake()
+        self._state_tracker.update_target(0, 0)
         self._state_tracker.update_left(0)
         self._state_tracker.update_right(0)
 
     def sleep(self) -> None:
         self._left.set_speed(0)
         self._right.set_speed(0)
+        self._state_tracker.update_target(0, 0)
         self._state_tracker.update_left(0)
         self._state_tracker.update_right(0)
 
@@ -76,11 +78,13 @@ class MockMotorPair:
 
     def brake(self) -> None:
         print("[MockMotorPair] brake()")
+        self._state_tracker.update_target(0, 0)
         self._state_tracker.update_left(0)
         self._state_tracker.update_right(0)
 
     def sleep(self) -> None:
         print("[MockMotorPair] sleep()")
+        self._state_tracker.update_target(0, 0)
         self._state_tracker.update_left(0)
         self._state_tracker.update_right(0)
 
