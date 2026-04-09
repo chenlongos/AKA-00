@@ -1,4 +1,4 @@
-import time
+import threading
 
 from src.arm_control.interfaces import create_gripper
 from src.base_control.interfaces import create_motor_pair
@@ -8,6 +8,8 @@ from src.state import MotorStateTracker
 class ControlService:
     def __init__(self, config):
         self._state_tracker = MotorStateTracker.get_instance()
+        self._duration_timer: threading.Timer | None = None
+        self._duration_timer_lock = threading.Lock()
         self._motor_pair = create_motor_pair(
             left_chip=config.base_left_chip,
             left_ch1=config.base_left_ch1,
@@ -27,13 +29,13 @@ class ControlService:
         return self._state_tracker.get_status_at(timestamp)
 
     def execute_action(self, action: str, speed: int = 50, milliseconds: float = 0) -> dict:
+        self._cancel_pending_stop()
         if not (self._apply_base_action(action, speed) or self._apply_arm_action(action)):
             raise ValueError(f"unsupported action: {action}")
 
         if milliseconds > 0 and action in ["up", "down", "left", "right"]:
-            time.sleep(milliseconds / 1000.0)
-            self._motor_pair.sleep()
-            return {"status": "success", "message": f"{action} for {milliseconds}s done"}
+            self._schedule_stop(milliseconds / 1000.0)
+            return {"status": "success", "message": f"{action} scheduled for {milliseconds}ms"}
 
         return {"status": "success", "action": action}
 
@@ -49,11 +51,11 @@ class ControlService:
             right: 右轮速度 (-100 ~ 100)
             duration: 持续时间（秒），0 表示无限
         """
+        self._cancel_pending_stop()
         self._motor_pair.set_speed(left, right)
         if duration > 0:
-            time.sleep(duration)
-            self._motor_pair.sleep()
-            return {"status": "success", "left": left, "right": right, "duration": duration}
+            self._schedule_stop(duration)
+            return {"status": "success", "left": left, "right": right, "duration": duration, "mode": "scheduled"}
         return {"status": "success", "left": left, "right": right}
 
     def send_raw_command(self, cmd: str) -> dict[str, str]:
@@ -61,6 +63,26 @@ class ControlService:
         if cmd and raw_sender is not None:
             raw_sender(cmd)
         return {"status": "success", "cmd": cmd}
+
+    def _cancel_pending_stop(self) -> None:
+        with self._duration_timer_lock:
+            if self._duration_timer is not None:
+                self._duration_timer.cancel()
+                self._duration_timer = None
+
+    def _schedule_stop(self, duration: float) -> None:
+        timer = threading.Timer(duration, self._stop_motors)
+        timer.daemon = True
+        with self._duration_timer_lock:
+            if self._duration_timer is not None:
+                self._duration_timer.cancel()
+            self._duration_timer = timer
+        timer.start()
+
+    def _stop_motors(self) -> None:
+        self._motor_pair.sleep()
+        with self._duration_timer_lock:
+            self._duration_timer = None
 
     TURN_SPEED_RATIO = 0.3  # 转弯速度比例
 
