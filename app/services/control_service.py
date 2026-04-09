@@ -62,15 +62,17 @@ class ControlService:
             raw_sender(cmd)
         return {"status": "success", "cmd": cmd}
 
+    TURN_SPEED_RATIO = 0.3  # 转弯速度比例
+
     def _apply_base_action(self, action: str, speed: int) -> bool:
         if action == "up":
             self._motor_pair.set_speed(speed, speed)
         elif action == "down":
             self._motor_pair.set_speed(-speed, -speed)
         elif action == "left":
-            self._motor_pair.set_speed(-speed, speed)
+            self._motor_pair.set_speed(-int(speed * self.TURN_SPEED_RATIO), int(speed * self.TURN_SPEED_RATIO))
         elif action == "right":
-            self._motor_pair.set_speed(speed, -speed)
+            self._motor_pair.set_speed(int(speed * self.TURN_SPEED_RATIO), -int(speed * self.TURN_SPEED_RATIO))
         elif action == "stop":
             self._motor_pair.brake()
         else:
