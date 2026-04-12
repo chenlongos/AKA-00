@@ -28,8 +28,7 @@
 
 ## 💬 交流社区
 
-<img src="./images/qq_1.png" width="200" alt="qq"> 
-<img src="./images/qq_2.jpeg" width="200" alt="qq">
+<img src="./images/qq_1.png" width="200" alt="qq"> <img src="./images/qq_2.jpeg" width="200" alt="qq">
 
 QQ群：901307286
 
@@ -174,17 +173,14 @@ curl "http://192.168.1.100/api/control?action=release"
 <!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
-<div align="center" style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
-  <a href="https://github.com/BoBoDai"><img src="https://avatars.githubusercontent.com/u/95924216?v=4?s=100" width="80px;" style="border-radius: 50%;" alt="BoBoDai"/><br /><sub><b>BoBoDai</b></sub></a>
-  <a href="https://github.com/shzhxh"><img src="https://avatars.githubusercontent.com/u/17696265?v=4?s=100" width="80px;" style="border-radius: 50%;" alt="shzhxh"/><br /><sub><b>shzhxh</b></sub></a>
-  <a href="https://github.com/moyufei-MAX"><img src="https://avatars.githubusercontent.com/u/210985094?v=4?s=100" width="80px;" style="border-radius: 50%;" alt="moyufei-MAX"/><br /><sub><b>moyufei-MAX</b></sub></a>
-  <a href="https://github.com/yydawx"><img src="https://avatars.githubusercontent.com/u/195621032?v=4?s=100" width="80px;" style="border-radius: 50%;" alt="yydawx"/><br /><sub><b>yydawx</b></sub></a>
-</div>
-<!-- markdownlint-restore -->
-<!-- prettier-ignore-end -->
-
-<!-- ALL-CONTRIBUTORS-LIST:END -->
-<!-- prettier-ignore-end -->
+<table align="center" border="0" cellspacing="10">
+  <tr>
+    <td align="center"><a href="https://github.com/BoBoDai"><img src="https://avatars.githubusercontent.com/u/95924216?v=4?s=100" width="80px;" style="border-radius: 50%;" alt="BoBoDai"/><br/><b>BoBoDai</b></a></td>
+    <td align="center"><a href="https://github.com/shzhxh"><img src="https://avatars.githubusercontent.com/u/17696265?v=4?s=100" width="80px;" style="border-radius: 50%;" alt="shzhxh"/><br/><b>shzhxh</b></a></td>
+    <td align="center"><a href="https://github.com/moyufei-MAX"><img src="https://avatars.githubusercontent.com/u/210985094?v=4?s=100" width="80px;" style="border-radius: 50%;" alt="moyufei-MAX"/><br/><b>moyufei-MAX</b></a></td>
+    <td align="center"><a href="https://github.com/yydawx"><img src="https://avatars.githubusercontent.com/u/195621032?v=4?s=100" width="80px;" style="border-radius: 50%;" alt="yydawx"/><br/><b>yydawx</b></a></td>
+  </tr>
+</table>
 
 ## 💪 贡献
 
