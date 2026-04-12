@@ -1,0 +1,52 @@
+{
+  "projectName": "AKA-00",
+  "projectOwner": "chenlongos",
+  "repoType": "github",
+  "repoHost": "https://github.com",
+  "files": [
+    "README.md"
+  ],
+  "imageSize": 100,
+  "commit": false,
+  "commitConvention": "none",
+  " contributors": [],
+  "contributorsPerLine": 5,
+  "contributors": [
+    {
+      "login": "BoBoDai",
+      "name": "junbo dai",
+      "avatar_url": "https://avatars.githubusercontent.com/u/95924216?v=4",
+      "profile": "https://github.com/BoBoDai",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "shzhxh",
+      "name": "Zhenxing",
+      "avatar_url": "https://avatars.githubusercontent.com/u/17696265?v=4",
+      "profile": "https://github.com/shzhxh",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "moyufei-MAX",
+      "name": "moyufei-MAX",
+      "avatar_url": "https://avatars.githubusercontent.com/u/210985094?v=4",
+      "profile": "https://github.com/moyufei-MAX",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "yydawx",
+      "name": "yydawx",
+      "avatar_url": "https://avatars.githubusercontent.com/u/195621032?v=4",
+      "profile": "https://github.com/yydawx",
+      "contributions": [
+        "code"
+      ]
+    }
+  ]
+}

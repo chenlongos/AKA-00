@@ -1,10 +1,51 @@
 # AKA-00
 
-辰龙AI教育机器人
+🤖 全开源辰龙AI教育机器人，降低具身智能学习门槛！
 
-## 项目目标
+💰 299¥，一只耳机价，让人手一台AI机器人成为可能！
 
-AKA-00 是一个面向教学的低成本AI机器人，通过提供简单的平台实现多种算法的训练和仿真。
+![展示图片](./images/1.jpeg)
+
+视频：[B站辰龙机器人捡球视频](https://www.bilibili.com/video/BVxxx)
+
+## 📰 新闻
+
+- **2026.4.2**：[299元的辰龙AI教育机器人杀进社区，具身智能的"平民化拐点"已至](https://mp.weixin.qq.com/s/j8OQqoJPdnPGpCfcy5K-Qg)
+- **2026.4.1**：[【北京市政府官网报道】299元"手搓"机器人！海淀这家企业，带中小学生玩AI](https://www.beijing.gov.cn/fuwu/lqfw/gggs/202604/t20260401_4572025.html)
+- **2026.3.31**：[2026"AI原点杯"全国高校机器人网球抓取大赛报名启动](https://mp.weixin.qq.com/s/bmG5Za7K19GzOHPdTd6O1A)
+- **2026.3.23**：[299元，AI原点社区"手搓"机器人将走进千家万户](https://mp.weixin.qq.com/s/oqU5rqGByOrXw3BGT0NAXg)
+- **2026.3.17**：["手搓"一个机器人，需要几步？这是辰龙AI机器人在北京AI原点社区的答案](https://mp.weixin.qq.com/s/NPAx-GOC3DAy6-46ltMbig)
+- **2026.3.11**：["手搓经济"火了！在京张遗址公园AI创新带，创新可以这么接地气](https://mp.weixin.qq.com/s/1OS5v4nLBUfu4w5yW0DWmQ)
+- **2026.3.10**：[【北京时间】"手搓"机械臂 小成本撬动大创新](https://m.btime.com/item/45f615ca83dc8bc19b6578d93be)
+- **2026.2.28**：[2026"新春第一会"成功召开！北京AI原点社区重磅签约海淀区"1+X+1"现代化产业体系建设布局！](https://mp.weixin.qq.com/s/43tqfgR5vWyXNMvIIJGpRw)
+- **2026.2.6**：[【央视新闻】"十五五"开好局起好步 "创新生态"内如何"长出"产业链？](https://content-static.cctvnews.cctv.com/snow-book/video.html?item_id=3222772778021294082&t=1770334881318&toc_style_id=video_default&share_to=wechat&track_id=69617c7b-a6ff-4ff8-a7ec-bcfffbed544c)
+
+## 🙌 关于我们
+
+从2024年的初步构想，到2025年依托开源机械臂项目实现技术突破，再到2025年底提出概念：让人手一台机器人成为可能！这一路，有不少优秀的伙伴参与进来，和我们一起把机器人硬件做的更加低成本，共同把这个开源项目做得更好！
+
+终于在2026年初，299元辰龙AI教育机器人正式落地！它能完成"识别网球位置—自主移动—完成捡球动作"的视觉-运动-执行完整闭环。软硬件开源，使得学习者可以进行二次开发改造，降低具身智能的学习门槛。辰龙机器人是一个面向教学的低成本AI机器人，通过提供简单的平台实现多种算法的训练和仿真。
+
+## 💬 交流社区
+
+<img src="./images/qq_1.png" width="200" alt="qq"> 
+<img src="./images/qq_2.jpeg" width="200" alt="qq">
+
+QQ群：901307286
+
+## 📖 文档
+
+[辰龙AI教育机器人技术文档](./docs/src/README.md)
+
+## 💰 总成本
+
+299¥ 即可购买辰龙AI教育机器人组件套装，微信小店购买：[链接]
+
+## 🚀 快速开始
+
+1. 💰 购买硬件：[购买链接]
+2. 🔨 组装：[组装文档/视频链接]
+3. 💻 软件课程，请报名训练营学习：[训练营课程链接]
 
 ## 目前功能
 
@@ -54,7 +95,7 @@ AKA-00/
 
 | 设备    | 型号                |
 |-------|-------------------|
-| 开发板   | [LicheeRV Nano](https://wiki.sipeed.com/hardware/zh/lichee/RV_Nano/1_intro.html)<br/>        |
+| 开发板   | [LicheeRV Nano](https://wiki.sipeed.com/hardware/zh/lichee/RV_Nano/1_intro.html) |
 | 机械臂舵机 | ZL-ZP10S |
 | 电机    | N20 直流减速电机        |
 
@@ -109,7 +150,7 @@ curl "http://192.168.1.100/api/control?action=grab"
 curl "http://192.168.1.100/api/control?action=release"
 ```
 
-## 硬件配置详情
+## 硬件配件详情
 
 ### 机械臂
 
@@ -122,3 +163,31 @@ curl "http://192.168.1.100/api/control?action=release"
 - **控制**: PWM 调速
 - **左电机**: chip=4, ch1=0, ch2=1
 - **右电机**: chip=4, ch2=2, ch3=3
+
+## 🙏 致谢
+
+[![Contributors](https://img.shields.io/github/contributors/chenlongos/AKA-00?style=flat-square)](https://github.com/chenlongos/AKA-00/graphs/contributors)
+[![Last Commit](https://img.shields.io/github/last-commit/chenlongos/AKA-00?style=flat-square)](https://github.com/chenlongos/AKA-00/commits/main)
+
+感谢所有为 AKA-00 做出贡献的人！
+
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<div align="center" style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
+  <a href="https://github.com/BoBoDai"><img src="https://avatars.githubusercontent.com/u/95924216?v=4?s=100" width="80px;" style="border-radius: 50%;" alt="BoBoDai"/><br /><sub><b>BoBoDai</b></sub></a>
+  <a href="https://github.com/shzhxh"><img src="https://avatars.githubusercontent.com/u/17696265?v=4?s=100" width="80px;" style="border-radius: 50%;" alt="shzhxh"/><br /><sub><b>shzhxh</b></sub></a>
+  <a href="https://github.com/moyufei-MAX"><img src="https://avatars.githubusercontent.com/u/210985094?v=4?s=100" width="80px;" style="border-radius: 50%;" alt="moyufei-MAX"/><br /><sub><b>moyufei-MAX</b></sub></a>
+  <a href="https://github.com/yydawx"><img src="https://avatars.githubusercontent.com/u/195621032?v=4?s=100" width="80px;" style="border-radius: 50%;" alt="yydawx"/><br /><sub><b>yydawx</b></sub></a>
+</div>
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+
+<!-- ALL-CONTRIBUTORS-LIST:END -->
+<!-- prettier-ignore-end -->
+
+## 💪 贡献
+
+👋 想要为 AKA-00 做出贡献吗？请参阅 [CONTRIBUTING.md](./CONTRIBUTING.md)，了解如何参与。
+
+## 免责声明
