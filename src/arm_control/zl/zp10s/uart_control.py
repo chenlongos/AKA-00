@@ -1,6 +1,8 @@
 import serial
 import time
 
+from src.arm_control.angle_config import load_arm_angles
+
 
 class ZP10S:
     def __init__(self, port="/dev/ttyS2", baudrate=115200):
@@ -12,8 +14,21 @@ class ZP10S:
             stopbits=serial.STOPBITS_ONE,
             timeout=0.1
         )
-        self.id2_angle_open = 150
-        self.id2_angle_close = 90
+        self._angles = load_arm_angles("zp10s")
+
+    def update_angles(self, angles):
+        self._angles = {**self._angles, **angles}
+
+    def _angle(self, key, default):
+        return self._angles.get(key, default)
+
+    @property
+    def id2_angle_open(self):
+        return self._angle("servo2_prepare", 150)
+
+    @property
+    def id2_angle_close(self):
+        return self._angle("servo2_grab", 90)
 
     def close(self):
         if self.ser.is_open:
@@ -46,16 +61,16 @@ class ZP10S:
 
 def grab(servo):
     servo.set_angle(2,servo.id2_angle_open)
-    time.sleep(0.3)
-    servo.set_angle(0,245)
-    servo.set_angle(1,180)
-    servo.set_angle(2,servo.id2_angle_open)
+    time.sleep(0.5)
+    servo.set_angle(0, servo._angle("servo0_prepare", 245))
+    servo.set_angle(1, servo._angle("servo1_prepare", 180))
+    servo.set_angle(2, servo._angle("servo2_approach", 150))
     time.sleep(1)
     servo.set_angle(2,servo.id2_angle_close)
     time.sleep(1)
-    servo.set_angle(0,200)
-    servo.set_angle(1,180)
-    servo.set_angle(2,servo.id2_angle_close)
+    servo.set_angle(0, servo._angle("servo0_lift", 200))
+    servo.set_angle(1, servo._angle("servo1_lift", 180))
+    servo.set_angle(2, servo._angle("servo2_lift", 90))
 def release_pos(servo):
     servo.set_angle(0,140)
     servo.set_angle(1,220)

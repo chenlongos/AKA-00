@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from typing import Literal, Optional, Protocol, runtime_checkable
 
@@ -51,6 +52,12 @@ class MockGripper:
     def get_status(self) -> GripperStatus:
         return self._status
 
+    def update_angles(self, angles: dict[str, int]) -> None:
+        pass
+
+    def preview_angle(self, key: str, angle: int) -> None:
+        print(f"[MockGripper] preview_angle({key}={angle})")
+
 
 class ZP10SGripperAdapter:
     """ZP10S 夹爪适配器。"""
@@ -74,6 +81,13 @@ class ZP10SGripperAdapter:
     def get_status(self) -> GripperStatus:
         return self._status
 
+    def update_angles(self, angles: dict[str, int]) -> None:
+        self._zp10s.update_angles(angles)
+
+    def preview_angle(self, key: str, angle: int) -> None:
+        servo_id = _extract_servo_id(key)
+        self._zp10s.set_angle(servo_id, angle)
+
 
 class STS3215GripperAdapter:
     """STS3215 夹爪适配器。"""
@@ -87,9 +101,9 @@ class STS3215GripperAdapter:
         release(self._servo)
 
     def close(self) -> None:
-        from src.arm_control.sts3215 import grab1
+        from src.arm_control.sts3215 import grab
 
-        grab1(self._servo)
+        grab(self._servo)
 
     def get_status(self) -> GripperStatus:
         position = self._servo.get_position(3)
@@ -100,6 +114,20 @@ class STS3215GripperAdapter:
         if position < 2800:
             return "closed"
         return "moving"
+
+    def update_angles(self, angles: dict[str, int]) -> None:
+        self._servo.update_angles(angles)
+
+    def preview_angle(self, key: str, angle: int) -> None:
+        servo_id = _extract_servo_id(key)
+        self._servo.move_to_position(servo_id, angle)
+
+
+def _extract_servo_id(key: str) -> int:
+    match = re.match(r"servo(\d+)_", key)
+    if not match:
+        raise ValueError(f"invalid servo key: {key}")
+    return int(match.group(1))
 
 
 def create_gripper(

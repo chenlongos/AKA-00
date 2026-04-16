@@ -1,6 +1,8 @@
 import serial
 import time
 
+from src.arm_control.angle_config import load_arm_angles
+
 
 class STS3215:
     def __init__(self, port="/dev/ttyS2", baudrate=115200):  # 已修改为115200
@@ -11,6 +13,13 @@ class STS3215:
         )
         self.ser.flushInput()
         self.ser.flushOutput()
+        self._angles = load_arm_angles("sts3215")
+
+    def update_angles(self, angles):
+        self._angles = {**self._angles, **angles}
+
+    def _angle(self, key, default):
+        return self._angles.get(key, default)
 
     def checksum(self, data: bytes) -> int:
         return (~sum(data)) & 0xFF
@@ -120,17 +129,6 @@ class STS3215:
         data = int(mode).to_bytes(1, 'little')
         self.write_reg(servo_id, 0x16, data)
 
-servo3_close = 2800
-servo3_open = 4000
-servo3_grab = 3000
-servo1_grab = 1850
-servo1_grab_prepare = 2300
-servo1_release = 2700
-servo1_normal = 3100
-servo2_grab_prepare = 2100
-servo2_grab = 2650
-servo2_normal = 2600
-
 def arm_init(servo):
     for i in range(1,4):
         servo.set_operating_mode(i, 0)
@@ -145,35 +143,22 @@ def arm_init(servo):
             servo.set_overload_torque(i, 25)
 
 def grab(servo):
-    servo.move_to_position(3, 4000)
-    time.sleep(0.7)
-    servo.move_to_position(1, 1800)
-    servo.move_to_position(2, 2400)
-    servo.move_to_position(3, 4000)
-    time.sleep(1)
-    servo.move_to_position(3, 3300)
-    time.sleep(1)
-    servo.move_to_position(1, 2600)
-    servo.move_to_position(2, 2500)
-    servo.move_to_position(3, 3300)
-
-def grab1(servo):
-    servo.move_to_position(3, servo3_open)
-    servo.move_to_position(2, servo2_grab_prepare)
-    servo.move_to_position(1, servo1_grab_prepare)
+    servo.move_to_position(3, servo._angle("servo3_prepare", 4000))
+    servo.move_to_position(2, servo._angle("servo2_prepare", 2100))
+    servo.move_to_position(1, servo._angle("servo1_prepare", 2300))
     time.sleep(0.4)
-    servo.move_to_position(1, servo1_grab)
-    servo.move_to_position(2, servo2_grab)
-    servo.move_to_position(3, servo3_open)
+    servo.move_to_position(1, servo._angle("servo1_enter", 1850))
+    servo.move_to_position(2, servo._angle("servo2_enter", 2650))
+    servo.move_to_position(3, servo._angle("servo3_enter", 4000))
     time.sleep(1)
-    servo.move_to_position(3, servo3_grab)
+    servo.move_to_position(3, servo._angle("servo3_grab", 3000))
     time.sleep(1)
-    servo.move_to_position(1, servo1_grab_prepare)
-    servo.move_to_position(2, servo2_grab_prepare)
-    servo.move_to_position(3, servo3_grab)
+    servo.move_to_position(1, servo._angle("servo1_lift", 2300))
+    servo.move_to_position(2, servo._angle("servo2_lift", 2100))
+    servo.move_to_position(3, servo._angle("servo3_lift", 3000))
 
 def grab_test(servo):
-    grab1(servo)
+    grab(servo)
     time.sleep(2)
     servo.move_to_position(1, 1850)
     servo.move_to_position(2, 2650)
@@ -182,27 +167,27 @@ def grab_test(servo):
     servo.move_to_position(3, 4000)
 
 def grab_pos(servo):
-    servo.move_to_position(2, servo2_grab_prepare)
-    servo.move_to_position(1, servo1_normal)
+    servo.move_to_position(2, servo._angle("servo2_prepare", 2100))
+    servo.move_to_position(1, servo._angle("servo1_lift", 2300))
     time.sleep(0.4)
-    servo.move_to_position(2, servo2_normal)
-    servo.move_to_position(3, servo3_close)
+    servo.move_to_position(2, servo._angle("servo2_lift", 2100))
+    servo.move_to_position(3, servo._angle("servo3_lift", 3000))
 
 def release_pos(servo):
-    servo.move_to_position(1, servo1_normal)
-    servo.move_to_position(2, servo2_grab_prepare)
+    servo.move_to_position(1, servo._angle("servo1_lift", 2300))
+    servo.move_to_position(2, servo._angle("servo2_prepare", 2100))
     time.sleep(0.5)
-    servo.move_to_position(2, servo2_normal)
-    servo.move_to_position(3, servo3_grab)
+    servo.move_to_position(2, servo._angle("servo2_lift", 2100))
+    servo.move_to_position(3, servo._angle("servo3_grab", 3000))
 
 def grab_prepare(servo):
-    servo.move_to_position(2, servo2_grab_prepare)
+    servo.move_to_position(2, servo._angle("servo2_prepare", 2100))
     time.sleep(0.4)
 
 def release(servo):
-    servo.move_to_position(1, servo1_release)
+    servo.move_to_position(1, servo._angle("servo1_lift", 2300))
     time.sleep(0.5)
-    servo.move_to_position(3, servo3_open)
+    servo.move_to_position(3, servo._angle("servo3_prepare", 4000))
 
 def main():
     # 实例化，注意波特率必须与系统设置及电机设置一致

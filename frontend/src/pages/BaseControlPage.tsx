@@ -204,6 +204,13 @@ const BaseControlPage = () => {
                 <ControlButton
                     size="wide"
                     variant="secondary"
+                    onClick={() => window.location.href = "/arm-angles"}
+                >
+                    角度配置
+                </ControlButton>
+                <ControlButton
+                    size="wide"
+                    variant="secondary"
                     onClick={() => redirect()}
                 >
                     进入试验平台

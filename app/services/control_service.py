@@ -7,6 +7,7 @@ from src.state import MotorStateTracker
 
 class ControlService:
     def __init__(self, config):
+        self._arm_driver = config.arm_driver
         self._state_tracker = MotorStateTracker.get_instance()
         self._duration_timer: threading.Timer | None = None
         self._duration_timer_lock = threading.Lock()
@@ -63,6 +64,23 @@ class ControlService:
         if cmd and raw_sender is not None:
             raw_sender(cmd)
         return {"status": "success", "cmd": cmd}
+
+    def update_arm_angles(self, driver: str, angles: dict[str, int]) -> dict[str, object]:
+        if driver != self._arm_driver:
+            raise ValueError(f"driver mismatch: expected {self._arm_driver}, got {driver}")
+        updater = getattr(self._gripper, "update_angles", None)
+        if updater is not None:
+            updater(angles)
+        return {"status": "success", "driver": driver, "angles": angles}
+
+    def preview_arm_angle(self, driver: str, key: str, angle: int) -> dict[str, object]:
+        if driver != self._arm_driver:
+            raise ValueError(f"driver mismatch: expected {self._arm_driver}, got {driver}")
+        previewer = getattr(self._gripper, "preview_angle", None)
+        if previewer is None:
+            raise ValueError("current gripper does not support angle preview")
+        previewer(key, angle)
+        return {"status": "success", "driver": driver, "key": key, "angle": angle}
 
     def _cancel_pending_stop(self) -> None:
         with self._duration_timer_lock:
