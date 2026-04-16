@@ -29,6 +29,13 @@ interface ArmAnglesResponse<T> {
     angles: T;
 }
 
+interface BasePwmChannels {
+    left_ch1: number;
+    left_ch2: number;
+    right_ch1: number;
+    right_ch2: number;
+}
+
 const ArmAnglesPage = () => {
     const [driver, setDriver] = useState<string>("zp10s");
     const [zp10s, setZp10s] = useState<ArmAnglesZP10S>({
@@ -53,13 +60,22 @@ const ArmAnglesPage = () => {
         servo2_lift: 2100,
         servo3_lift: 3000,
     });
+    const [basePwmChannels, setBasePwmChannels] = useState<BasePwmChannels>({
+        left_ch1: 0,
+        left_ch2: 1,
+        right_ch1: 2,
+        right_ch2: 3,
+    });
     const [status, setStatus] = useState<string>("");
+    const [pwmStatus, setPwmStatus] = useState<string>("");
     const [saving, setSaving] = useState(false);
+    const [savingPwm, setSavingPwm] = useState(false);
     const previewTimerRef = useRef<number | null>(null);
     const requestIdRef = useRef(0);
 
     useEffect(() => {
         loadConfig();
+        loadBasePwmChannels();
         return () => {
             if (previewTimerRef.current !== null) {
                 window.clearTimeout(previewTimerRef.current);
@@ -85,6 +101,18 @@ const ArmAnglesPage = () => {
         }
     };
 
+    const loadBasePwmChannels = async () => {
+        try {
+            const r = await fetch("/api/base_pwm_channels");
+            const data = await r.json() as {pwm_channels: BasePwmChannels};
+            if (data.pwm_channels) {
+                setBasePwmChannels(data.pwm_channels);
+            }
+        } catch (e) {
+            console.error("加载 PWM 通道配置失败", e);
+        }
+    };
+
     const saveConfig = async () => {
         setSaving(true);
         setStatus("");
@@ -107,6 +135,28 @@ const ArmAnglesPage = () => {
             setStatus("请求失败: " + e);
         } finally {
             setSaving(false);
+        }
+    };
+
+    const savePwmChannels = async () => {
+        setSavingPwm(true);
+        setPwmStatus("");
+        try {
+            const r = await fetch("/api/base_pwm_channels", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({pwm_channels: basePwmChannels}),
+            });
+            if (r.ok) {
+                setPwmStatus("PWM 通道已保存并生效");
+                setTimeout(() => setPwmStatus(""), 2000);
+            } else {
+                setPwmStatus("保存失败");
+            }
+        } catch (e) {
+            setPwmStatus("请求失败: " + e);
+        } finally {
+            setSavingPwm(false);
         }
     };
 
@@ -162,6 +212,35 @@ const ArmAnglesPage = () => {
             queuePreviewSave(key, value, next);
             return next;
         });
+    };
+
+    const updateBasePwmChannels = (key: keyof BasePwmChannels, value: number) => {
+        setBasePwmChannels((prev) => ({...prev, [key]: value}));
+    };
+
+    const swapLeftRightWheels = () => {
+        setBasePwmChannels((prev) => ({
+            left_ch1: prev.right_ch1,
+            left_ch2: prev.right_ch2,
+            right_ch1: prev.left_ch1,
+            right_ch2: prev.left_ch2,
+        }));
+    };
+
+    const swapLeftWheelDirection = () => {
+        setBasePwmChannels((prev) => ({
+            ...prev,
+            left_ch1: prev.left_ch2,
+            left_ch2: prev.left_ch1,
+        }));
+    };
+
+    const swapRightWheelDirection = () => {
+        setBasePwmChannels((prev) => ({
+            ...prev,
+            right_ch1: prev.right_ch2,
+            right_ch2: prev.right_ch1,
+        }));
     };
 
     return (
@@ -544,6 +623,111 @@ const ArmAnglesPage = () => {
                     </div>
                 </div>
             )}
+
+            <div style={{padding: 16, paddingTop: 0}}>
+                <div
+                    style={{
+                        background: "#fff",
+                        borderRadius: 10,
+                        padding: 16,
+                        boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                    }}
+                >
+                    <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16}}>
+                        <div>
+                            <h3 style={{fontSize: 15, fontWeight: 600, margin: 0}}>底盘 PWM 通道</h3>
+                            <div style={{fontSize: 12, color: "#8e8e93", marginTop: 4}}>
+                                配置文件保存到 `base_pwm_channels.json`
+                            </div>
+                        </div>
+                        <button
+                            onClick={savePwmChannels}
+                            disabled={savingPwm}
+                            style={{
+                                color: savingPwm ? "#8e8e93" : "#007aff",
+                                fontSize: 15,
+                                cursor: savingPwm ? "not-allowed" : "pointer",
+                                background: "none",
+                                border: "none",
+                                fontWeight: 600,
+                            }}
+                        >
+                            {savingPwm ? "保存中..." : "保存 PWM"}
+                        </button>
+                    </div>
+
+                    {pwmStatus && (
+                        <div
+                            style={{
+                                textAlign: "center",
+                                padding: 10,
+                                marginBottom: 16,
+                                borderRadius: 8,
+                                background: pwmStatus.includes("成功") || pwmStatus.includes("生效") ? "#d4edda" : "#f8d7da",
+                                color: pwmStatus.includes("成功") || pwmStatus.includes("生效") ? "#155724" : "#721c24",
+                            }}
+                        >
+                            {pwmStatus}
+                        </div>
+                    )}
+
+                    <div style={{display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10, marginBottom: 16}}>
+                        <button
+                            onClick={swapLeftRightWheels}
+                            style={{padding: "10px 12px", borderRadius: 8, border: "1px solid #d1d1d6", background: "#f7f7fa", cursor: "pointer", fontSize: 14}}
+                        >
+                            切换左右轮
+                        </button>
+                        <button
+                            onClick={swapLeftWheelDirection}
+                            style={{padding: "10px 12px", borderRadius: 8, border: "1px solid #d1d1d6", background: "#f7f7fa", cursor: "pointer", fontSize: 14}}
+                        >
+                            左轮前后切换
+                        </button>
+                        <button
+                            onClick={swapRightWheelDirection}
+                            style={{padding: "10px 12px", borderRadius: 8, border: "1px solid #d1d1d6", background: "#f7f7fa", cursor: "pointer", fontSize: 14}}
+                        >
+                            右轮前后切换
+                        </button>
+                    </div>
+
+                    {[
+                        {key: "left_ch1" as const, label: "左轮前进 ch1"},
+                        {key: "left_ch2" as const, label: "左轮后退 ch2"},
+                        {key: "right_ch1" as const, label: "右轮前进 ch1"},
+                        {key: "right_ch2" as const, label: "右轮后退 ch2"},
+                    ].map((item) => (
+                        <div
+                            key={item.key}
+                            style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                                padding: "12px 0",
+                                borderTop: "1px solid #f2f2f7",
+                                gap: 12,
+                            }}
+                        >
+                            <span style={{fontSize: 14}}>{item.label}</span>
+                            <input
+                                type="number"
+                                min="0"
+                                step="1"
+                                value={basePwmChannels[item.key]}
+                                onChange={(e) => updateBasePwmChannels(item.key, parseInt(e.target.value || "0", 10))}
+                                style={{
+                                    width: 88,
+                                    border: "1px solid #d1d1d6",
+                                    borderRadius: 8,
+                                    padding: "8px 10px",
+                                    fontSize: 14,
+                                }}
+                            />
+                        </div>
+                    ))}
+                </div>
+            </div>
 
             {/* Back button */}
             <div style={{padding: "0 16px 30px"}}>

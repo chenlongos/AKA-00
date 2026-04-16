@@ -2,28 +2,34 @@ import threading
 
 from src.arm_control.interfaces import create_gripper
 from src.base_control.interfaces import create_motor_pair
+from src.base_control.pwm_channel_config import load_pwm_channels
 from src.state import MotorStateTracker
 
 
 class ControlService:
     def __init__(self, config):
+        self._config = config
         self._arm_driver = config.arm_driver
         self._state_tracker = MotorStateTracker.get_instance()
         self._duration_timer: threading.Timer | None = None
         self._duration_timer_lock = threading.Lock()
-        self._motor_pair = create_motor_pair(
-            left_chip=config.base_left_chip,
-            left_ch1=config.base_left_ch1,
-            left_ch2=config.base_left_ch2,
-            right_chip=config.base_right_chip,
-            right_ch1=config.base_right_ch1,
-            right_ch2=config.base_right_ch2,
-            chip_type=config.base_chip_type,
-        )
+        self._pwm_channels = load_pwm_channels(config)
+        self._motor_pair = self._create_motor_pair()
         self._gripper = create_gripper(
             driver=config.arm_driver,
             port=config.arm_port,
             baudrate=config.arm_baudrate,
+        )
+
+    def _create_motor_pair(self):
+        return create_motor_pair(
+            left_chip=self._config.base_left_chip,
+            left_ch1=self._pwm_channels["left_ch1"],
+            left_ch2=self._pwm_channels["left_ch2"],
+            right_chip=self._config.base_right_chip,
+            right_ch1=self._pwm_channels["right_ch1"],
+            right_ch2=self._pwm_channels["right_ch2"],
+            chip_type=self._config.base_chip_type,
         )
 
     def get_motor_status(self, timestamp: int) -> dict[str, int]:
@@ -81,6 +87,16 @@ class ControlService:
             raise ValueError("current gripper does not support angle preview")
         previewer(key, angle)
         return {"status": "success", "driver": driver, "key": key, "angle": angle}
+
+    def get_pwm_channels(self) -> dict[str, int]:
+        return self._pwm_channels.copy()
+
+    def update_pwm_channels(self, pwm_channels: dict[str, int]) -> dict[str, object]:
+        self._cancel_pending_stop()
+        self._motor_pair.sleep()
+        self._pwm_channels = pwm_channels.copy()
+        self._motor_pair = self._create_motor_pair()
+        return {"status": "success", "pwm_channels": self.get_pwm_channels()}
 
     def _cancel_pending_stop(self) -> None:
         with self._duration_timer_lock:

@@ -13,6 +13,7 @@ from flask import Blueprint, request, jsonify
 from app.config import load_hardware_config
 from app.services import get_control_service
 from src.arm_control.angle_config import load_arm_angles, save_arm_angles
+from src.base_control.pwm_channel_config import save_pwm_channels
 
 api_bp = Blueprint("api", __name__)
 
@@ -136,6 +137,29 @@ def arm_angles_preview():
         "key": key,
         "value": angle_value,
         "angles": angles,
+    })
+
+
+@api_bp.route("/base_pwm_channels", methods=["GET", "POST"])
+def base_pwm_channels():
+    config = load_hardware_config()
+
+    if request.method == "GET":
+        return jsonify({
+            "pwm_channels": get_control_service().get_pwm_channels(),
+        })
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "json body is required"}), 400
+
+    pwm_channels_payload = payload.get("pwm_channels", payload)
+    pwm_channels = save_pwm_channels(config, pwm_channels_payload)
+    get_control_service().update_pwm_channels(pwm_channels)
+
+    return jsonify({
+        "status": "success",
+        "pwm_channels": pwm_channels,
     })
 
 
