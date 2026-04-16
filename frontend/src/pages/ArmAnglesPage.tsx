@@ -237,10 +237,10 @@ const ArmAnglesPage = () => {
                         <h3 style={{fontSize: 15, fontWeight: 600, marginBottom: 16}}>ZP10S 抓取序列</h3>
 
                         <div style={{marginBottom: 20}}>
-                            <div style={{fontSize: 13, fontWeight: 600, color: "#8e8e93", marginBottom: 12}}>准备阶段</div>
+                            <div style={{fontSize: 13, fontWeight: 600, color: "#8e8e93", marginBottom: 12}}>夹取阶段</div>
                             <div style={{marginBottom: 16}}>
                                 <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
-                                    <span style={{fontSize: 14}}>舵机0 准备角度</span>
+                                    <span style={{fontSize: 14}}>舵机0 夹取角度</span>
                                     <span style={{fontSize: 14, fontWeight: 600, color: "#007aff"}}>{zp10s.servo0_prepare}°</span>
                                 </div>
                                 <input
@@ -255,7 +255,7 @@ const ArmAnglesPage = () => {
 
                             <div style={{marginBottom: 16}}>
                                 <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
-                                    <span style={{fontSize: 14}}>舵机1 准备角度</span>
+                                    <span style={{fontSize: 14}}>舵机1 夹取角度</span>
                                     <span style={{fontSize: 14, fontWeight: 600, color: "#007aff"}}>{zp10s.servo1_prepare}°</span>
                                 </div>
                                 <input
@@ -270,7 +270,7 @@ const ArmAnglesPage = () => {
 
                             <div>
                                 <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
-                                    <span style={{fontSize: 14}}>夹爪准备角度 (张开)</span>
+                                    <span style={{fontSize: 14}}>夹爪张开角度</span>
                                     <span style={{fontSize: 14, fontWeight: 600, color: "#007aff"}}>{zp10s.servo2_prepare}°</span>
                                 </div>
                                 <input
@@ -288,7 +288,7 @@ const ArmAnglesPage = () => {
                             <div style={{fontSize: 13, fontWeight: 600, color: "#8e8e93", marginBottom: 12}}>进入阶段</div>
                             <div>
                                 <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
-                                    <span style={{fontSize: 14}}>夹爪进入角度 (保持张开)</span>
+                                    <span style={{fontSize: 14}}>夹爪夹取过程角度 (保持张开)</span>
                                     <span style={{fontSize: 14, fontWeight: 600, color: "#007aff"}}>{zp10s.servo2_approach}°</span>
                                 </div>
                                 <input
@@ -300,13 +300,9 @@ const ArmAnglesPage = () => {
                                     style={{width: "100%"}}
                                 />
                             </div>
-                        </div>
-
-                        <div style={{marginBottom: 20}}>
-                            <div style={{fontSize: 13, fontWeight: 600, color: "#8e8e93", marginBottom: 12}}>抓取阶段</div>
                             <div>
                                 <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
-                                    <span style={{fontSize: 14}}>夹爪抓取角度 (闭合)</span>
+                                    <span style={{fontSize: 14}}>夹爪闭合角度</span>
                                     <span style={{fontSize: 14, fontWeight: 600, color: "#007aff"}}>{zp10s.servo2_grab}°</span>
                                 </div>
                                 <input
