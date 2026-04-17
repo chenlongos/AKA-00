@@ -45,6 +45,12 @@ class N20:
         self.pwm1.duty_cycle_ns = duty
         self.pwm2.duty_cycle_ns = duty
 
+    def close(self):
+        self.pwm1.disable()
+        self.pwm2.disable()
+        self.pwm1.close()
+        self.pwm2.close()
+
 
 def forward(left, right, speed=255):
     left.set_speed(speed)

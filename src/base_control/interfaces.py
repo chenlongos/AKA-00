@@ -33,6 +33,9 @@ class MotorPairProtocol(Protocol):
     def sleep(self) -> None:
         ...
 
+    def close(self) -> None:
+        ...
+
 
 class MotorPairAdapter:
     """N20 双轮适配器。"""
@@ -56,6 +59,10 @@ class MotorPairAdapter:
         self._left.set_speed(0)
         self._right.set_speed(0)
         self._state_tracker.update_target(0, 0)
+
+    def close(self) -> None:
+        self._left.close()
+        self._right.close()
 
 
 class MockMotorPair:

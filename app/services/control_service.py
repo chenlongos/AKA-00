@@ -94,6 +94,7 @@ class ControlService:
     def update_pwm_channels(self, pwm_channels: dict[str, int]) -> dict[str, object]:
         self._cancel_pending_stop()
         self._motor_pair.sleep()
+        self._motor_pair.close()
         self._pwm_channels = pwm_channels.copy()
         self._motor_pair = self._create_motor_pair()
         return {"status": "success", "pwm_channels": self.get_pwm_channels()}
