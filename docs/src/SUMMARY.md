@@ -16,6 +16,7 @@
 - [WiFi 连接配置](./04-setup/wifi-config.md)
 - [项目本地启动](./04-setup/software.md)
 - [初始化配置](./04-setup/connection.md)
+- [镜像烧录](./04-setup/image-burn.md)
 
 ## 使用
 
