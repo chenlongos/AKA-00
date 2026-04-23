@@ -1,6 +1,7 @@
 import os
 import socket
 import struct
+import subprocess
 import time
 
 try:
@@ -221,7 +222,7 @@ def get_mac_address(ifname="wlan0"):
 
 @api_bp.route("/demo/init", methods=["POST"])
 def demo_init():
-    """执行指定 demo 文件夹下的 init.sh"""
+    """启动 demo 进程，可通过 /demo/stop 停止"""
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         return jsonify({"error": "json body is required"}), 400
@@ -240,24 +241,86 @@ def demo_init():
     if not os.path.isfile(init_script):
         return jsonify({"error": f"init.sh not found in demo '{demo_name}'"}), 404
 
+    if hasattr(demo_init, "_process") and demo_init._process is not None:
+        return jsonify({"error": "demo is already running"}), 409
+
     os.chmod(init_script, 0o755)
 
     import subprocess
     try:
-        result = subprocess.run(
+        proc = subprocess.Popen(
             [init_script],
             cwd=demo_dir,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=30,
         )
+        demo_init._process = proc
+        demo_init._name = demo_name
         return jsonify({
-            "status": "success",
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "returncode": result.returncode,
+            "status": "started",
+            "pid": proc.pid,
+            "name": demo_name,
         })
-    except subprocess.TimeoutExpired:
-        return jsonify({"error": "script timed out after 30 seconds"}), 408
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
+
+
+@api_bp.route("/demo/wait", methods=["POST"])
+def demo_wait():
+    """等待当前 demo 进程结束并返回结果"""
+    if not hasattr(demo_init, "_process") or demo_init._process is None:
+        return jsonify({"error": "no demo is running"}), 400
+
+    proc = demo_init._process
+    demo_name = getattr(demo_init, "_name", "unknown")
+    demo_init._process = None
+    demo_init._name = None
+
+    try:
+        stdout, stderr = proc.communicate(timeout=60)
+        return jsonify({
+            "status": "completed",
+            "returncode": proc.returncode,
+            "stdout": stdout,
+            "stderr": stderr,
+            "name": demo_name,
+        })
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        stdout, stderr = proc.communicate()
+        return jsonify({
+            "status": "timeout_killed",
+            "returncode": -1,
+            "stdout": stdout,
+            "stderr": stderr,
+            "name": demo_name,
+        }), 408
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@api_bp.route("/demo/stop", methods=["POST"])
+def demo_stop():
+    """立即停止当前运行的 demo 进程"""
+    if not hasattr(demo_init, "_process") or demo_init._process is None:
+        return jsonify({"error": "no demo is running"}), 400
+
+    proc = demo_init._process
+    demo_name = getattr(demo_init, "_name", "unknown")
+    demo_init._process = None
+    demo_init._name = None
+
+    try:
+        proc.terminate()
+        proc.wait(timeout=5)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+    return jsonify({
+        "status": "stopped",
+        "name": demo_name,
+    })
