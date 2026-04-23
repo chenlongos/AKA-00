@@ -34,3 +34,4 @@
 - [开发板使用](./06-development/dev-board.md) - SG2002 开发指南
 - [代码结构](./06-development/structure.md) - 项目代码组织
 - [调试方法](./06-development/debug.md) - 调试技巧
+- [镜像的制作](./06-development/image_creation.md) - 自定义镜像制作
