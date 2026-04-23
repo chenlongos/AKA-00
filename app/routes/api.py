@@ -1,3 +1,4 @@
+import os
 import socket
 import struct
 import time
@@ -216,3 +217,47 @@ def get_mac_address(ifname="wlan0"):
             return f.read().strip()
     except Exception:
         return "unknown"
+
+
+@api_bp.route("/demo/init", methods=["POST"])
+def demo_init():
+    """执行指定 demo 文件夹下的 init.sh"""
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "json body is required"}), 400
+
+    demo_name = payload.get("name")
+    if not isinstance(demo_name, str) or not demo_name:
+        return jsonify({"error": "name is required"}), 400
+
+    base_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "demo")
+    demo_dir = os.path.join(base_dir, demo_name)
+    init_script = os.path.join(demo_dir, "init.sh")
+
+    if not os.path.isdir(demo_dir):
+        return jsonify({"error": f"demo '{demo_name}' not found"}), 404
+
+    if not os.path.isfile(init_script):
+        return jsonify({"error": f"init.sh not found in demo '{demo_name}'"}), 404
+
+    os.chmod(init_script, 0o755)
+
+    import subprocess
+    try:
+        result = subprocess.run(
+            [init_script],
+            cwd=demo_dir,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return jsonify({
+            "status": "success",
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "returncode": result.returncode,
+        })
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "script timed out after 30 seconds"}), 408
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500

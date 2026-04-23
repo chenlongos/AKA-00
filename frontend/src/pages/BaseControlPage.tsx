@@ -211,6 +211,13 @@ const BaseControlPage = () => {
                 <ControlButton
                     size="wide"
                     variant="secondary"
+                    onClick={() => window.location.href = "/demo"}
+                >
+                    Demo
+                </ControlButton>
+                <ControlButton
+                    size="wide"
+                    variant="secondary"
                     onClick={() => redirect()}
                 >
                     进入试验平台
