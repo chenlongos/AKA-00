@@ -46,6 +46,19 @@ const BaseControlPage = () => {
         };
 
         getIp();
+
+        // 切回控制台时重新加载 PWM 配置以恢复状态
+        fetch("/api/base_pwm_channels")
+            .then(res => res.json())
+            .then(data => {
+                // 用现有配置 POST 回去，触发 PWM 重启
+                return fetch("/api/base_pwm_channels", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({pwm_channels: data.pwm_channels}),
+                });
+            })
+            .catch(() => {});
     }, []);
 
     const send = async (action: string) => {
