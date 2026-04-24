@@ -1,4 +1,5 @@
 import os
+import signal
 import socket
 import struct
 import subprocess
@@ -254,48 +255,17 @@ def demo_init():
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            start_new_session=True,
         )
         demo_init._process = proc
         demo_init._name = demo_name
+        demo_init._pgid = os.getpgid(proc.pid)
         return jsonify({
             "status": "started",
             "pid": proc.pid,
+            "pgid": demo_init._pgid,
             "name": demo_name,
         })
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
-
-
-@api_bp.route("/demo/wait", methods=["POST"])
-def demo_wait():
-    """等待当前 demo 进程结束并返回结果"""
-    if not hasattr(demo_init, "_process") or demo_init._process is None:
-        return jsonify({"error": "no demo is running"}), 400
-
-    proc = demo_init._process
-    demo_name = getattr(demo_init, "_name", "unknown")
-    demo_init._process = None
-    demo_init._name = None
-
-    try:
-        stdout, stderr = proc.communicate(timeout=60)
-        return jsonify({
-            "status": "completed",
-            "returncode": proc.returncode,
-            "stdout": stdout,
-            "stderr": stderr,
-            "name": demo_name,
-        })
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        stdout, stderr = proc.communicate()
-        return jsonify({
-            "status": "timeout_killed",
-            "returncode": -1,
-            "stdout": stdout,
-            "stderr": stderr,
-            "name": demo_name,
-        }), 408
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 
@@ -304,23 +274,15 @@ def demo_wait():
 def demo_stop():
     """立即停止当前运行的 demo 进程"""
     if not hasattr(demo_init, "_process") or demo_init._process is None:
-        return jsonify({"error": "no demo is running"}), 400
+        return jsonify({
+            "status": "already_stopped",
+            "name": getattr(demo_init, "_name", None) or "unknown",
+        })
 
     proc = demo_init._process
-    demo_name = getattr(demo_init, "_name", "unknown")
-    demo_init._process = None
     demo_init._name = None
-
-    try:
-        proc.terminate()
-        proc.wait(timeout=5)
-    except Exception:
-        try:
-            proc.kill()
-        except Exception:
-            pass
 
     return jsonify({
         "status": "stopped",
-        "name": demo_name,
+        "pid": proc.pid,
     })

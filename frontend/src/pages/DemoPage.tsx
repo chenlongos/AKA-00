@@ -16,10 +16,8 @@ const DemoPage = () => {
                     headers: {"Content-Type": "application/json"},
                     body: JSON.stringify({name: runningDemoRef.current}),
                 });
-                setStatus(`${runningDemoRef.current} 已停止`);
-            } catch (err) {
-                setStatus(`停止失败: ${err}`);
-            }
+            } catch {}
+            setStatus(`${runningDemoRef.current} 已停止`);
             setRunningDemo(null);
             runningDemoRef.current = null;
             setOutput("");
@@ -45,30 +43,6 @@ const DemoPage = () => {
                 return;
             }
 
-            // demo started in background, wait for it
-            const waitRes = await fetch("/api/demo/wait", {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({}),
-            });
-            const result = await waitRes.json();
-
-            setRunningDemo(null);
-            runningDemoRef.current = null;
-
-            if (waitRes.ok) {
-                if (result.status === "completed" || result.status === "timeout_killed") {
-                    setStatus(`${name} 执行结束 (返回码: ${result.returncode})`);
-                    const lines = [];
-                    if (result.stdout) lines.push(`stdout:\n${result.stdout}`);
-                    if (result.stderr) lines.push(`stderr:\n${result.stderr}`);
-                    setOutput(lines.join("\n\n") || "无输出");
-                } else {
-                    setStatus(`${name} 已停止`);
-                }
-            } else {
-                setStatus(`错误: ${result.error}`);
-            }
         } catch (err) {
             setStatus(`错误: ${err}`);
             setRunningDemo(null);
