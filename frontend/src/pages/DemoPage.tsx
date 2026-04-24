@@ -5,11 +5,14 @@ const DemoPage = () => {
     const [status, setStatus] = useState("准备就绪");
     const [output, setOutput] = useState<string>("");
     const [runningDemo, setRunningDemo] = useState<string | null>(null);
+    const [conflictDemo, setConflictDemo] = useState(false);
+    const [loading, setLoading] = useState(false);
     const runningDemoRef = useRef<string | null>(null);
 
     const runDemo = async (name: string) => {
         if (runningDemoRef.current !== null) {
             // stop current demo
+            setLoading(true);
             try {
                 await fetch("/api/demo/stop", {
                     method: "POST",
@@ -17,15 +20,18 @@ const DemoPage = () => {
                     body: JSON.stringify({name: runningDemoRef.current}),
                 });
             } catch {}
+            setLoading(false);
             setStatus(`${runningDemoRef.current} 已停止`);
             setRunningDemo(null);
             runningDemoRef.current = null;
+            setConflictDemo(false);
             setOutput("");
             return;
         }
 
         setStatus(`执行中: ${name}...`);
         setOutput("");
+        setConflictDemo(false);
         setRunningDemo(name);
         runningDemoRef.current = name;
 
@@ -37,11 +43,19 @@ const DemoPage = () => {
             });
             if (!res.ok) {
                 const data = await res.json();
-                setStatus(`错误: ${data.error}`);
-                setRunningDemo(null);
-                runningDemoRef.current = null;
+                if (res.status === 409) {
+                    setStatus(`demo is already running`);
+                    setConflictDemo(true);
+                } else {
+                    setStatus(`错误: ${data.error}`);
+                    setRunningDemo(null);
+                    runningDemoRef.current = null;
+                }
                 return;
             }
+
+            setLoading(true);
+            setTimeout(() => setLoading(false), 5000);
 
         } catch (err) {
             setStatus(`错误: ${err}`);
@@ -74,8 +88,10 @@ const DemoPage = () => {
             >
                 <ControlButton
                     size="wide"
-                    variant={runningDemo === "tennis" ? "danger" : "success"}
+                    variant={runningDemo === "tennis" || conflictDemo ? "danger" : "success"}
                     onClick={() => runDemo("tennis")}
+                    disabled={loading}
+                    loading={loading}
                 >
                     {runningDemo === "tennis" ? "停止 Tennis" : "Tennis Demo"}
                 </ControlButton>

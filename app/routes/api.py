@@ -243,7 +243,14 @@ def demo_init():
         return jsonify({"error": f"init.sh not found in demo '{demo_name}'"}), 404
 
     if hasattr(demo_init, "_process") and demo_init._process is not None:
-        return jsonify({"error": "demo is already running"}), 409
+        pid = demo_init._process.pid
+        try:
+            os.kill(pid, 0)
+            return jsonify({"error": "demo is already running", "pid": pid}), 409
+        except OSError:
+            # process is dead, clear stale reference
+            demo_init._process = None
+            demo_init._name = None
 
     os.chmod(init_script, 0o755)
 
@@ -280,9 +287,17 @@ def demo_stop():
         })
 
     proc = demo_init._process
+    demo_init._process = None
     demo_init._name = None
+
+    pid = proc.pid
+    os.kill(pid, signal.SIGTERM)
+    try:
+        proc.wait(timeout=3)
+    except Exception:
+        pass
 
     return jsonify({
         "status": "stopped",
-        "pid": proc.pid,
+        "pid": pid,
     })

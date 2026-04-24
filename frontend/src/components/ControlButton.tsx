@@ -7,6 +7,8 @@ type ButtonProps = {
     onClick?: () => void;
     variant?: "primary" | "danger" | "success" | "secondary";
     size?: "square" | "wide";
+    disabled?: boolean;
+    loading?: boolean;
 };
 
 const colorMap = {
@@ -30,6 +32,8 @@ const ControlButton = ({
                            onPressStart,
                            onPressEnd,
                            onClick,
+                           disabled = false,
+                           loading = false,
                        }: ButtonProps) => {
     const [isPressed, setIsPressed] = useState(false);
     const baseSize =
@@ -66,13 +70,22 @@ const ControlButton = ({
                 fontSize: "16px",
                 transition: "all 0.15s ease",
                 boxShadow: isPressed
-                    ? "0 3px 8px rgba(0,0,0,0.4)"   // 按下时阴影变浅/变小
+                    ? "0 3px 8px rgba(0,0,0,0.4)"
                     : "0 6px 15px rgba(0,0,0,0.5)",
                 transform: isPressed ? "scale(0.96)" : "scale(1)",
                 touchAction: "none",
+                opacity: disabled || loading ? 0.5 : 1,
+                pointerEvents: disabled || loading ? "none" : "auto",
             }}
         >
-            {children}
+            {loading ? (
+                <span style={{
+                    display: "inline-block",
+                    animation: "spin 1s linear infinite",
+                }}>
+                    ↻
+                </span>
+            ) : children}
         </button>
     )
 }
