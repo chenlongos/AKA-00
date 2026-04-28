@@ -13,7 +13,7 @@ except Exception:
 
 from flask import Blueprint, request, jsonify
 
-from app.config import load_hardware_config
+from app.config import config
 from app.services import get_control_service
 from src.arm_control.angle_config import load_arm_angles, save_arm_angles
 from src.base_control.pwm_channel_config import save_pwm_channels
@@ -24,7 +24,7 @@ api_bp = Blueprint("api", __name__)
 @api_bp.route("/ip")
 def ip():
     return jsonify({
-        "ip": get_ip(load_hardware_config().wifi_interface)
+        "ip": get_ip("wlan0")
     })
 
 
@@ -74,7 +74,7 @@ def control():
 
 @api_bp.route("/arm_angles", methods=["GET", "POST"])
 def arm_angles():
-    driver = load_hardware_config().arm_driver
+    driver = config.arm_driver
 
     if request.method == "GET":
         return jsonify({
@@ -107,7 +107,7 @@ def arm_angles():
 
 @api_bp.route("/arm_angles/preview", methods=["POST"])
 def arm_angles_preview():
-    driver = load_hardware_config().arm_driver
+    driver = config.arm_driver
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         return jsonify({"error": "json body is required"}), 400
@@ -145,8 +145,6 @@ def arm_angles_preview():
 
 @api_bp.route("/base_pwm_channels", methods=["GET", "POST"])
 def base_pwm_channels():
-    config = load_hardware_config()
-
     if request.method == "GET":
         return jsonify({
             "pwm_channels": get_control_service().get_pwm_channels(),
@@ -157,7 +155,7 @@ def base_pwm_channels():
         return jsonify({"error": "json body is required"}), 400
 
     pwm_channels_payload = payload.get("pwm_channels", payload)
-    pwm_channels = save_pwm_channels(config, pwm_channels_payload)
+    pwm_channels = save_pwm_channels(payload=pwm_channels_payload)
     get_control_service().update_pwm_channels(pwm_channels)
 
     return jsonify({
@@ -203,8 +201,7 @@ def motor_direct():
 @api_bp.route("/heartbeat")
 def heartbeat():
     """心跳检测API，用于检查服务是否存活。"""
-    config = load_hardware_config()
-    mac_address = get_mac_address(config.wifi_interface)
+    mac_address = get_mac_address("wlan0")
     return jsonify({
         "status": "ok",
         "service": "AKA-00",

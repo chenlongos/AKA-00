@@ -5,31 +5,29 @@ from pathlib import Path
 
 _PWM_CHANNEL_CONFIG_PATH = Path(__file__).resolve().parents[2] / "pwm_channels.json"
 
-
-def _defaults(config) -> dict[str, int]:
-    return {
-        "left_ch1": config.base_left_ch1,
-        "left_ch2": config.base_left_ch2,
-        "right_ch1": config.base_right_ch1,
-        "right_ch2": config.base_right_ch2,
-    }
+_DEFAULT_PWM_CHANNELS = {
+    "left_ch1": 0,
+    "left_ch2": 1,
+    "right_ch1": 2,
+    "right_ch2": 3,
+}
 
 
-def load_pwm_channels(config) -> dict[str, int]:
-    defaults = _defaults(config)
+def load_pwm_channels(_config=None) -> dict[str, int]:
+    """加载 PWM 通道配置。"""
     if not _PWM_CHANNEL_CONFIG_PATH.exists():
-        return defaults
+        return _DEFAULT_PWM_CHANNELS.copy()
 
     try:
         data = json.loads(_PWM_CHANNEL_CONFIG_PATH.read_text(encoding="utf-8"))
     except Exception:
-        return defaults
+        return _DEFAULT_PWM_CHANNELS.copy()
 
     if not isinstance(data, dict):
-        return defaults
+        return _DEFAULT_PWM_CHANNELS.copy()
 
     normalized: dict[str, int] = {}
-    for key, default_value in defaults.items():
+    for key, default_value in _DEFAULT_PWM_CHANNELS.items():
         try:
             normalized[key] = int(data.get(key, default_value))
         except (TypeError, ValueError):
@@ -37,13 +35,14 @@ def load_pwm_channels(config) -> dict[str, int]:
     return normalized
 
 
-def save_pwm_channels(config, payload: dict[str, object]) -> dict[str, int]:
-    defaults = _defaults(config)
+def save_pwm_channels(_config=None, payload: dict[str, object] = None) -> dict[str, int]:
+    """保存 PWM 通道配置。"""
+    payload = payload or {}
     normalized: dict[str, int] = {}
-    for key, default_value in defaults.items():
+    for key, default_value in _DEFAULT_PWM_CHANNELS.items():
         try:
             normalized[key] = int(payload.get(key, default_value))
-        except (AttributeError, TypeError, ValueError):
+        except (TypeError, ValueError):
             normalized[key] = default_value
 
     _PWM_CHANNEL_CONFIG_PATH.write_text(

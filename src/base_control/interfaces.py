@@ -87,6 +87,9 @@ class MockMotorPair:
         print("[MockMotorPair] sleep()")
         self._state_tracker.update_target(0, 0)
 
+    def close(self) -> None:
+        pass
+
 
 def create_motor_pair(
     left_chip: int = 4,
