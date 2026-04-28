@@ -6,6 +6,7 @@ import os
 import sys
 from typing import Protocol, runtime_checkable
 
+from base_control.tt_pid import TtPidChassis
 from src.state import MotorStateTracker
 
 
@@ -17,6 +18,9 @@ class MotorProtocol(Protocol):
         ...
 
     def brake(self, val: int = 255) -> None:
+        ...
+
+    def close(self):
         ...
 
 
@@ -93,7 +97,7 @@ def create_motor_pair(
     right_ch2: int = 3,
     chip_type: str = "sg2002",
     backend: str = "n20",
-) -> MotorPairProtocol:
+) -> MockMotorPair | TtPidChassis | MotorPairAdapter:
     """
     创建双轮底盘。
 
@@ -103,9 +107,7 @@ def create_motor_pair(
       "mock"   - Windows/macOS 开发用 Mock
     """
     if os.name == "nt" or sys.platform == "darwin":
-        from src.base_control.tt_pid import TtPidChassis
-
-        return TtPidChassis()
+        return MockMotorPair()
 
     if backend == "tt_pid":
         from src.base_control.tt_pid import TtPidChassis
