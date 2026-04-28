@@ -30,6 +30,7 @@ class ControlService:
             right_ch1=self._pwm_channels["right_ch1"],
             right_ch2=self._pwm_channels["right_ch2"],
             chip_type=self._config.base_chip_type,
+            backend=self._config.base_driver,
         )
 
     def get_motor_status(self, timestamp: int) -> dict[str, int]:

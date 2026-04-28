@@ -92,9 +92,25 @@ def create_motor_pair(
     right_ch1: int = 2,
     right_ch2: int = 3,
     chip_type: str = "sg2002",
+    backend: str = "n20",
 ) -> MotorPairProtocol:
+    """
+    创建双轮底盘。
+
+    backend:
+      "n20"    - N20 PWM 直驱（默认）
+      "tt_pid" - TT马达 ESP32-C3 UART 控制
+      "mock"   - Windows/macOS 开发用 Mock
+    """
     if os.name == "nt" or sys.platform == "darwin":
-        return MockMotorPair()
+        from src.base_control.tt_pid import TtPidChassis
+
+        return TtPidChassis()
+
+    if backend == "tt_pid":
+        from src.base_control.tt_pid import TtPidChassis
+
+        return TtPidChassis()
 
     from src.base_control.n20 import N20
 
