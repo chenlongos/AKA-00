@@ -1,36 +1,35 @@
 import subprocess
-import time
 
-width = 640
-height = 480
+class Camera:
+    """ffmpeg 单帧采集相机"""
 
-cmd = [
-    "ffmpeg",
-    "-loglevel", "quiet",   # 👈 关键：关闭所有输出
-    "-f", "v4l2",
-    "-i", "/dev/video0",
-    "-vf", "scale=640:480",
-    "-r", "15",
-    "-f", "rawvideo",
-    "-pix_fmt", "rgb24",
-    "-"
-]
+    def __init__(self, device="/dev/video0", width=640, height=480):
+        self.device = device
+        self.width = width
+        self.height = height
+        self.frame_size = width * height * 3  # rgb24
 
-pipe = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=10**8)
+    def read(self) -> bytes | None:
+        """获取一帧原始图像数据（RGB），失败返回 None"""
+        cmd = [
+            "ffmpeg",
+            "-loglevel", "quiet",
+            "-f", "v4l2",
+            "-i", self.device,
+            "-vf", f"scale={self.width}:{self.height}",
+            "-frames:v", "1",
+            "-f", "rawvideo",
+            "-pix_fmt", "rgb24",
+            "-",
+        ]
 
-frame_size = width * height * 3
+        try:
+            pipe = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            raw = pipe.stdout.read(self.frame_size)
+            pipe.wait()
 
-count = 0
-start = time.time()
-
-while True:
-    raw = pipe.stdout.read(frame_size)
-    if not raw:
-        break
-
-    count += 1
-
-    if time.time() - start >= 1:
-        print("FPS:", count)
-        count = 0
-        start = time.time()
+            if not raw or len(raw) < self.frame_size:
+                return None
+            return raw
+        except Exception:
+            return None
