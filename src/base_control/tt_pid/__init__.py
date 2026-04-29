@@ -179,3 +179,10 @@ class TtPidChassis:
         """重置控制器。"""
         rsp = self._send_cmd(CMD_RESET)
         return rsp is not None and rsp["cmd"] == RSP_ACK
+
+    def get_speeds(self) -> tuple[int, int]:
+        """获取左右轮实时速度（RPM）。"""
+        rpm = self.get_rpm()
+        if rpm is None:
+            return 0, 0
+        return rpm.left, rpm.right

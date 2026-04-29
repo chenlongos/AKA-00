@@ -31,6 +31,10 @@ class MotorPairProtocol(Protocol):
     def set_speed(self, left: int, right: int) -> None:
         ...
 
+    def get_speeds(self) -> tuple[int, int]:
+        """获取左右轮速度。N20 返回目标速度，TT PID 返回实时速度。"""
+        ...
+
     def brake(self) -> None:
         ...
 
@@ -53,6 +57,10 @@ class MotorPairAdapter:
         self._state_tracker.update_target(left, right)
         self._left.set_speed(left)
         self._right.set_speed(right)
+
+    def get_speeds(self) -> tuple[int, int]:
+        status = self._state_tracker.get_status()
+        return int(status.left_target), int(status.right_target)
 
     def brake(self) -> None:
         self._left.brake()
@@ -78,6 +86,10 @@ class MockMotorPair:
     def set_speed(self, left: int, right: int) -> None:
         print(f"[MockMotorPair] set_speed(left={left}, right={right})")
         self._state_tracker.update_target(left, right)
+
+    def get_speeds(self) -> tuple[int, int]:
+        status = self._state_tracker.get_status()
+        return int(status.left_target), int(status.right_target)
 
     def brake(self) -> None:
         print("[MockMotorPair] brake()")
