@@ -7,7 +7,6 @@ import sys
 from typing import Protocol, runtime_checkable
 
 from base_control.tt_pid import TtPidChassis
-from src.state import MotorStateTracker
 
 
 @runtime_checkable
@@ -51,26 +50,29 @@ class MotorPairAdapter:
     def __init__(self, left: MotorProtocol, right: MotorProtocol) -> None:
         self._left = left
         self._right = right
-        self._state_tracker = MotorStateTracker.get_instance()
+        self._last_left = 0
+        self._last_right = 0
 
     def set_speed(self, left: int, right: int) -> None:
-        self._state_tracker.update_target(left, right)
+        self._last_left = left
+        self._last_right = right
         self._left.set_speed(left)
         self._right.set_speed(right)
 
     def get_speeds(self) -> tuple[int, int]:
-        status = self._state_tracker.get_status()
-        return int(status.left_target), int(status.right_target)
+        return self._last_left, self._last_right
 
     def brake(self) -> None:
+        self._last_left = 0
+        self._last_right = 0
         self._left.brake()
         self._right.brake()
-        self._state_tracker.update_target(0, 0)
 
     def sleep(self) -> None:
+        self._last_left = 0
+        self._last_right = 0
         self._left.set_speed(0)
         self._right.set_speed(0)
-        self._state_tracker.update_target(0, 0)
 
     def close(self) -> None:
         self._left.close()
@@ -81,23 +83,26 @@ class MockMotorPair:
     """Mock 双轮底盘，用于 Windows/macOS 开发。"""
 
     def __init__(self) -> None:
-        self._state_tracker = MotorStateTracker.get_instance()
+        self._last_left = 0
+        self._last_right = 0
 
     def set_speed(self, left: int, right: int) -> None:
         print(f"[MockMotorPair] set_speed(left={left}, right={right})")
-        self._state_tracker.update_target(left, right)
+        self._last_left = left
+        self._last_right = right
 
     def get_speeds(self) -> tuple[int, int]:
-        status = self._state_tracker.get_status()
-        return int(status.left_target), int(status.right_target)
+        return self._last_left, self._last_right
 
     def brake(self) -> None:
         print("[MockMotorPair] brake()")
-        self._state_tracker.update_target(0, 0)
+        self._last_left = 0
+        self._last_right = 0
 
     def sleep(self) -> None:
         print("[MockMotorPair] sleep()")
-        self._state_tracker.update_target(0, 0)
+        self._last_left = 0
+        self._last_right = 0
 
     def close(self) -> None:
         pass

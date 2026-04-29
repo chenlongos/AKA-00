@@ -22,7 +22,7 @@ class ControlService:
         )
 
     def _create_motor_pair(self):
-        return create_motor_pair(
+        motor_pair = create_motor_pair(
             left_chip=self._config.base_left_chip,
             left_ch1=self._pwm_channels["left_ch1"],
             left_ch2=self._pwm_channels["left_ch2"],
@@ -32,6 +32,8 @@ class ControlService:
             chip_type=self._config.base_chip_type,
             backend=self._config.base_driver,
         )
+        self._state_tracker.set_motor_pair(motor_pair)
+        return motor_pair
 
     def get_motor_status(self, timestamp: int) -> dict[str, int]:
         return self._state_tracker.get_status_at(timestamp)
