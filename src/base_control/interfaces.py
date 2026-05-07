@@ -6,7 +6,7 @@ import os
 import sys
 from typing import Protocol, runtime_checkable
 
-from base_control.tt_pid import TtPidChassis
+from src.base_control.tt_pid import TtPidChassis
 
 
 @runtime_checkable
