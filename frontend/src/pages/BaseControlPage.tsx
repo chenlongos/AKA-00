@@ -137,20 +137,21 @@ const BaseControlPage = () => {
                 fontFamily: "system-ui, sans-serif",
                 background: "#0f172a",
                 color: "white",
-                minHeight: "100vh",
+                minHeight: "100dvh",
                 padding: "10px",
                 textAlign: "center",
                 overflow: "hidden",
+                touchAction: "none",
             }}
         >
-            <h2>AKA-00 控制台</h2>
+            <h3>AKA-00 控制台</h3>
             <div style={{opacity: 0.6}}>{ip}</div>
 
             {/* 方向区 */}
             <div
                 style={{
                     display: "flex",
-                    gap: "20px",
+                    gap: "10px",
                     justifyItems: "center",
                     flexDirection: "column",
                     alignItems: "center"
@@ -163,7 +164,7 @@ const BaseControlPage = () => {
                 >
                     前进
                 </ControlButton>
-                <div style={{display: 'flex', gap: "20px"}}>
+                <div style={{display: 'flex', gap: "10px"}}>
                     <ControlButton
                         onPressStart={() => handlePressStart("left")}
                         onPressEnd={() => handlePressEnd()}
@@ -198,7 +199,6 @@ const BaseControlPage = () => {
             {/* 电机实时速度显示 */}
             <div
                 style={{
-                    marginTop: "20px",
                     marginBottom: "20px",
                     padding: "10px",
                     background: "rgba(255,255,255,0.1)",
@@ -217,7 +217,7 @@ const BaseControlPage = () => {
                 style={{
                     display: "flex",
                     justifyContent: "center",
-                    gap: "20px",
+                    gap: "10px",
                     flexWrap: "wrap",
                 }}
             >
@@ -242,8 +242,8 @@ const BaseControlPage = () => {
                 style={{
                     display: "flex",
                     justifyContent: "center",
-                    marginTop: "20px",
-                    gap: "20px",
+                    marginTop: "10px",
+                    gap: "10px",
                     flexWrap: "wrap",
                 }}
             >

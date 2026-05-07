@@ -248,8 +248,10 @@ const ArmAnglesPage = () => {
             style={{
                 fontFamily: "-apple-system, sans-serif",
                 background: "#f2f2f7",
-                minHeight: "100vh",
+                minHeight: "100dvh",
                 color: "#1c1c1e",
+                overflowY: "auto",
+                overscrollBehavior: "contain",
             }}
         >
             {/* Header */}

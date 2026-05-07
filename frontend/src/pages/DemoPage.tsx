@@ -70,9 +70,11 @@ const DemoPage = () => {
                 fontFamily: "system-ui, sans-serif",
                 background: "#0f172a",
                 color: "white",
-                minHeight: "100vh",
+                minHeight: "100dvh",
                 padding: "10px",
                 textAlign: "center",
+                overflowY: "auto",
+                overscrollBehavior: "contain",
             }}
         >
             <h2>Demo 控制台</h2>
