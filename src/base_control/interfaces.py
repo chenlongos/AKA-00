@@ -116,7 +116,8 @@ def create_motor_pair(
     right_ch1: int = 2,
     right_ch2: int = 3,
     chip_type: str = "sg2002",
-    backend: str = "n20",
+    backend: str = "tt_pid",
+    base_port: str = "/dev/ttyS1",
 ) -> MockMotorPair | TtPidChassis | MotorPairAdapter:
     """
     创建双轮底盘。
@@ -132,7 +133,7 @@ def create_motor_pair(
     if backend == "tt_pid":
         from src.base_control.tt_pid import TtPidChassis
 
-        return TtPidChassis()
+        return TtPidChassis(port=base_port)
 
     from src.base_control.n20 import N20
 

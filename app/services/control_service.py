@@ -31,6 +31,7 @@ class ControlService:
             right_ch2=self._pwm_channels["right_ch2"],
             chip_type=self._config.base_chip_type,
             backend=self._config.base_driver,
+            base_port=self._config.base_port
         )
         self._state_tracker.set_motor_pair(motor_pair)
         return motor_pair

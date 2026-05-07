@@ -9,6 +9,7 @@ class HardwareConfig:
     arm_baudrate: int = 115200
 
     base_driver: str = "tt_pid"
+    base_port: str = "/dev/ttyS1"
     base_chip_type: str = "sg2002"
     base_left_chip: int = 4
     base_right_chip: int = 4

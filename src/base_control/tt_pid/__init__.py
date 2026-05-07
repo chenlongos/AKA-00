@@ -47,7 +47,7 @@ class TtPidChassis:
 
     def __init__(
         self,
-        port: str = "/dev/ttyS2",
+        port: str = "/dev/ttyS1",
         baudrate: int = 115200,
         ppr: int = 4680,
         pwm_freq: int = 20000,
