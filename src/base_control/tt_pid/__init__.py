@@ -158,21 +158,25 @@ class TtPidChassis:
         return rsp is not None and rsp["cmd"] == RSP_ACK
 
     def get_rpm(self) -> Optional[RpmData]:
-        """获取左右轮 RPM。"""
-        rsp = self._send_cmd(CMD_GET_RPM, bytes([2]))
-        if rsp is None or rsp["cmd"] != RSP_RPM_DATA:
-            return None
-        payload = rsp["payload"]
+        """获取左右轮 RPM（mid=2 返回两个电机数据帧）。"""
+        self.ser.reset_input_buffer()
+        self.ser.write(self._build_frame(CMD_GET_RPM, bytes([2])))
+        self.ser.flush()
+
         left, right = 0, 0
-        i = 0
-        while i + 2 < len(payload):
-            mid = payload[i]
-            rpm = struct.unpack(">h", payload[i + 1:i + 3])[0]
-            if mid == 0:
-                left = rpm
-            elif mid == 1:
-                right = rpm
-            i += 3
+        # mid=2 会连续返回两个帧
+        for _ in range(2):
+            rsp = self._recv_frame(timeout=0.3)
+            if rsp is None or rsp["cmd"] != RSP_RPM_DATA:
+                return None
+            payload = rsp["payload"]
+            if len(payload) >= 3:
+                mid = payload[0]
+                rpm = struct.unpack(">h", payload[1:3])[0]
+                if mid == 0:
+                    left = rpm
+                elif mid == 1:
+                    right = rpm
         return RpmData(left=-left, right=right)
 
     def reset(self) -> bool:

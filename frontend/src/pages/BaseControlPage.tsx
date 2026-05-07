@@ -5,9 +5,32 @@ import ControlButton from "../components/ControlButton.tsx";
 const BaseControlPage = () => {
     const [ip, setIp] = useState("获取中...");
     const [status, setStatus] = useState("准备就绪");
+    const [leftSpeed, setLeftSpeed] = useState(0);
+    const [rightSpeed, setRightSpeed] = useState(0);
 
     // 当前正在执行的动作（用于模拟器每帧发送）
     const currentActionRef = useRef<string | null>(null);
+
+    // 定时获取电机实时速度
+    useEffect(() => {
+        const fetchSpeed = async () => {
+            try {
+                const timestamp = Date.now();
+                const res = await fetch(`/api/motor_status?timestamp=${timestamp}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    setLeftSpeed(data.left_speed ?? 0);
+                    setRightSpeed(data.right_speed ?? 0);
+                }
+            } catch {
+                // 忽略错误，避免刷屏
+            }
+        };
+
+        fetchSpeed();
+        const interval = setInterval(fetchSpeed, 200);
+        return () => clearInterval(interval);
+    }, []);
 
     // URL哈希命令监听
     useEffect(() => {
@@ -169,6 +192,24 @@ const BaseControlPage = () => {
                     后退
                 </ControlButton>
                 <div/>
+            </div>
+
+
+            {/* 电机实时速度显示 */}
+            <div
+                style={{
+                    marginTop: "20px",
+                    marginBottom: "20px",
+                    padding: "10px",
+                    background: "rgba(255,255,255,0.1)",
+                    borderRadius: "8px",
+                    display: "inline-flex",
+                    gap: "30px",
+                    fontSize: "14px",
+                }}
+            >
+                <div>左轮: <span style={{color: "#4ade80"}}>{leftSpeed}</span> RPM</div>
+                <div>右轮: <span style={{color: "#4ade80"}}>{rightSpeed}</span> RPM</div>
             </div>
 
             {/* 功能按钮 */}

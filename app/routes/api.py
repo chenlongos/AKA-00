@@ -2,7 +2,6 @@ import os
 import signal
 import socket
 import struct
-import subprocess
 import time
 
 try:
