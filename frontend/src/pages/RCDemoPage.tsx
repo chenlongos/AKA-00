@@ -1,46 +1,36 @@
-import {useEffect, useRef, useState, useCallback} from "react";
+import {useCallback, useEffect, useRef, useState} from "react";
 
 
 const RCDemoPage = () => {
     const [leftSpeed, setLeftSpeed] = useState(0);
     const [rightSpeed, setRightSpeed] = useState(0);
-    const [connected, setConnected] = useState(false);
-    const [direction, setDirection] = useState(0); // -100 ~ 100 (左 ~ 右)
-    const [throttle, setThrottle] = useState(0);   // -100 ~ 100 (倒 ~ 前)
-    const [braking, setBraking] = useState(false);
+    const [throttleDisplay, setThrottleDisplay] = useState(0);
+    const [directionDisplay, setDirectionDisplay] = useState(0);
+    const [isNarrow, setIsNarrow] = useState(false);
 
-    // 方向和油门值
-    const directionRef = useRef(0);
-    const throttleRef = useRef(0);
-
-    // 检查连接状态
+    // 检测屏幕宽度
     useEffect(() => {
-        const checkConnection = async () => {
-            try {
-                const res = await fetch("/api/heartbeat");
-                if (res.ok) setConnected(true);
-                else setConnected(false);
-            } catch {
-                setConnected(false);
-            }
+        const check = () => {
+            setIsNarrow(window.innerWidth < window.innerHeight);
         };
-        checkConnection();
-        const t = setInterval(checkConnection, 5000);
-        return () => clearInterval(t);
+        check();
+        window.addEventListener("resize", check);
+        return () => window.removeEventListener("resize", check);
     }, []);
 
-    // 电机控制 + 状态轮询（事件驱动）
+    // 控制状态
+    const throttleRef = useRef(0);
+    const directionRef = useRef(0);
+
+    // 电机轮询
     const motorIntervalRef = useRef<number | null>(null);
 
-    const updateAndFetch = async () => {
-        const dir = directionRef.current;
+    const sendCommand = useCallback(async () => {
         const thr = throttleRef.current;
+        const dir = directionRef.current;
         let left, right;
 
-        if (braking) {
-            left = 0;
-            right = 0;
-        } else if (thr === 0) {
+        if (thr === 0) {
             left = 0;
             right = 0;
         } else {
@@ -61,81 +51,131 @@ const RCDemoPage = () => {
                 setRightSpeed(data.right_speed ?? 0);
             }
         } catch {
-            // 忽略错误
+            // 忽略
         }
-    };
+    }, []);
 
-    const startControl = () => {
+    const startControl = useCallback(() => {
         if (motorIntervalRef.current !== null) return;
-        updateAndFetch();
-        motorIntervalRef.current = window.setInterval(updateAndFetch, 100);
-    };
+        sendCommand();
+        motorIntervalRef.current = window.setInterval(sendCommand, 100);
+    }, [sendCommand]);
 
-    const stopControl = () => {
+    const stopControl = useCallback(() => {
         if (motorIntervalRef.current !== null) {
             clearInterval(motorIntervalRef.current);
             motorIntervalRef.current = null;
             fetch("/api/motor_direct?left=0&right=0&duration=0").catch(() => {});
+            setLeftSpeed(0);
+            setRightSpeed(0);
         }
-    };
-
-    // 页面离开时停止电机并关闭摄像头
-    useEffect(() => {
-        return () => {
-            fetch("/api/motor_direct?left=0&right=0&duration=0").catch(() => {});
-            navigator.sendBeacon("/api/video_stream/close");
-        };
     }, []);
 
-    // 方向摇杆控制
-    const directionRefEl = useRef<HTMLDivElement>(null);
-
-    const handleDirectionMove = useCallback((clientX: number) => {
-        if (!directionRefEl.current) return;
-        const rect = directionRefEl.current.getBoundingClientRect();
-        const centerX = rect.left + rect.width / 2;
-        const dx = clientX - centerX;
-        const maxDist = rect.width / 2 - 20;
-        const dist = Math.max(-maxDist, Math.min(maxDist, dx));
-        const dir = Math.round((dist / maxDist) * 100);
-        directionRef.current = dir;
-        setDirection(dir);
-    }, []);
-
-    const handleDirectionEnd = useCallback(() => {
-        directionRef.current = 0;
-        setDirection(0);
-        stopControl();
-    }, []);
-
-    // 油门控制
+    // 油门摇杆（窄屏时水平放置）
     const throttleRefEl = useRef<HTMLDivElement>(null);
+    const throttleActiveRef = useRef(false);
 
-    const handleThrottleMove = useCallback((clientY: number) => {
+    const handleThrottleMove = useCallback((clientX: number, clientY: number) => {
         if (!throttleRefEl.current) return;
         const rect = throttleRefEl.current.getBoundingClientRect();
-        const centerY = rect.top + rect.height / 2;
-        const dy = clientY - centerY;
-        const maxDist = rect.height / 2 - 20;
-        const dist = Math.max(-maxDist, Math.min(maxDist, dy));
-        const thr = Math.round((-dist / maxDist) * 100); // 上为正
-        throttleRef.current = thr;
-        setThrottle(thr);
-        setBraking(false);
-    }, []);
+        let dist, maxDist;
+
+        if (isNarrow) {
+            // 窄屏：水平滑动
+            const centerX = rect.left + rect.width / 2;
+            const dx = clientX - centerX;
+            maxDist = rect.width / 2 - 20;
+            dist = Math.max(-maxDist, Math.min(maxDist, dx));
+            const thr = Math.round((dist / maxDist) * 100);
+            throttleRef.current = thr;
+            setThrottleDisplay(thr);
+        } else {
+            // 宽屏：垂直滑动
+            const centerY = rect.top + rect.height / 2;
+            const dy = clientY - centerY;
+            maxDist = rect.height / 2 - 20;
+            dist = Math.max(-maxDist, Math.min(maxDist, dy));
+            const thr = Math.round((-dist / maxDist) * 100);
+            throttleRef.current = thr;
+            setThrottleDisplay(thr);
+        }
+
+        if (throttleRef.current !== 0 && !throttleActiveRef.current) {
+            throttleActiveRef.current = true;
+            startControl();
+        } else if (throttleRef.current === 0 && throttleActiveRef.current) {
+            throttleActiveRef.current = false;
+            stopControl();
+        }
+    }, [isNarrow, startControl, stopControl]);
 
     const handleThrottleEnd = useCallback(() => {
         throttleRef.current = 0;
-        setThrottle(0);
+        setThrottleDisplay(0);
+        throttleActiveRef.current = false;
         stopControl();
-    }, []);
+    }, [stopControl]);
 
-    // 返回按钮
+    // 方向摇杆（窄屏时垂直放置）
+    const directionRefEl = useRef<HTMLDivElement>(null);
+    const directionActiveRef = useRef(false);
+
+    const handleDirectionMove = useCallback((clientX: number, clientY: number) => {
+        if (!directionRefEl.current) return;
+        const rect = directionRefEl.current.getBoundingClientRect();
+        let dist, maxDist;
+
+        if (isNarrow) {
+            // 窄屏：垂直滑动
+            const centerY = rect.top + rect.height / 2;
+            const dy = clientY - centerY;
+            maxDist = rect.height / 2 - 20;
+            dist = Math.max(-maxDist, Math.min(maxDist, dy));
+            const dir = Math.round((-dist / maxDist) * 100);
+            directionRef.current = dir;
+            setDirectionDisplay(dir);
+        } else {
+            // 宽屏：水平滑动
+            const centerX = rect.left + rect.width / 2;
+            const dx = clientX - centerX;
+            maxDist = rect.width / 2 - 20;
+            dist = Math.max(-maxDist, Math.min(maxDist, dx));
+            const dir = Math.round((dist / maxDist) * 100);
+            directionRef.current = dir;
+            setDirectionDisplay(dir);
+        }
+
+        if (directionRef.current !== 0 && !directionActiveRef.current) {
+            directionActiveRef.current = true;
+            startControl();
+        } else if (directionRef.current === 0 && directionActiveRef.current) {
+            directionActiveRef.current = false;
+            stopControl();
+        }
+    }, [isNarrow, startControl, stopControl]);
+
+    const handleDirectionEnd = useCallback(() => {
+        directionRef.current = 0;
+        setDirectionDisplay(0);
+        directionActiveRef.current = false;
+        stopControl();
+    }, [stopControl]);
+
+    // 返回
     const handleBack = () => {
-        fetch("/api/motor_direct?left=0&right=0&duration=0").catch(() => {});
+        stopControl();
         navigator.sendBeacon("/api/video_stream/close");
         window.location.href = "/";
     };
+
+    // 尺寸
+    const stickSize = 55;
+    const throttleW = isNarrow ? 160 : 70;
+    const throttleH = isNarrow ? 70 : 160;
+    const directionW = isNarrow ? 70 : 160;
+    const directionH = isNarrow ? 160 : 70;
+    const videoW = isNarrow ? Math.min(window.innerWidth - 60, 320) : Math.min(window.innerWidth - 100, 480);
+    const videoH = isNarrow ? videoW * 0.75 : videoW * 0.5;
 
     return (
         <div
@@ -150,192 +190,162 @@ const RCDemoPage = () => {
                 userSelect: "none",
                 touchAction: "none",
                 display: "flex",
-                flexDirection: "column",
+                flexDirection: isNarrow ? "column" : "row",
                 alignItems: "center",
+                justifyContent: "center",
+                gap: isNarrow ? "10px" : "20px",
                 overflow: "hidden",
             }}
         >
-            {/* 顶部 */}
-            <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", width: "100%", maxWidth: "400px"}}>
-                <h2 style={{margin: 0, fontSize: "18px"}}>赛车模式</h2>
-                <div style={{display: "flex", alignItems: "center", gap: "15px"}}>
-                    <span style={{fontSize: "13px", opacity: 0.7}}>
-                        <span style={{color: connected ? "#4ade80" : "#ef4444"}}>●</span> {connected ? "已连接" : "未连接"}
-                    </span>
-                    <button
-                        onClick={handleBack}
-                        style={{
-                            background: "#334155",
-                            border: "none",
-                            color: "white",
-                            padding: "6px 12px",
-                            borderRadius: "6px",
-                            fontSize: "12px",
-                            cursor: "pointer",
-                        }}
-                    >
-                        返回
-                    </button>
-                </div>
-            </div>
-
-            {/* 视频流 */}
-            <div
-                style={{
-                    borderRadius: "12px",
-                    overflow: "hidden",
-                    border: "2px solid #334155",
-                    display: "inline-block",
-                    marginBottom: "10px",
-                }}
-            >
-                <img
-                    src="/api/video_stream"
-                    alt="Camera"
+            {/* 油门摇杆 */}
+            <div style={{display: "flex", flexDirection: "column", alignItems: "center", flex: 1}}>
+                <div style={{fontSize: "12px", opacity: 0.6, marginBottom: "8px"}}>油门</div>
+                <div
+                    ref={throttleRefEl}
+                    onPointerMove={(e) => handleThrottleMove(e.clientX, e.clientY)}
+                    onPointerUp={handleThrottleEnd}
+                    onPointerLeave={handleThrottleEnd}
                     style={{
-                        width: "280px",
-                        height: "210px",
-                        objectFit: "cover",
-                        background: "#000",
+                        width: `${throttleW}px`,
+                        height: `${throttleH}px`,
+                        borderRadius: isNarrow ? "35px" : "40px",
+                        background: "rgba(255,255,255,0.1)",
+                        border: "2px solid #334155",
+                        position: "relative",
+                        touchAction: "none",
                     }}
-                />
-            </div>
-
-            {/* 速度显示 */}
-            <div style={{display: "flex", justifyContent: "center", gap: "30px", fontSize: "13px", marginBottom: "10px"}}>
-                <div>左 <span style={{color: "#4ade80", fontWeight: "bold"}}>{leftSpeed > 0 ? "+" : ""}{leftSpeed}</span></div>
-                <div>右 <span style={{color: "#4ade80", fontWeight: "bold"}}>{rightSpeed > 0 ? "+" : ""}{rightSpeed}</span></div>
-            </div>
-
-            {/* 方向盘 + 油门布局 */}
-            <div style={{display: "flex", justifyContent: "center", gap: "25px", alignItems: "flex-start"}}>
-
-                {/* 方向摇杆 */}
-                <div style={{display: "flex", flexDirection: "column", alignItems: "center"}}>
-                    <div style={{fontSize: "12px", opacity: 0.6, marginBottom: "8px"}}>方向</div>
-                    <div
-                        ref={directionRefEl}
-                        onPointerDown={startControl}
-                        onPointerMove={(e) => handleDirectionMove(e.clientX)}
-                        onPointerUp={handleDirectionEnd}
-                        onPointerLeave={handleDirectionEnd}
-                        style={{
-                            width: "160px",
-                            height: "45px",
-                            borderRadius: "22px",
-                            background: "rgba(255,255,255,0.1)",
-                            border: "2px solid #334155",
-                            position: "relative",
-                            touchAction: "none",
-                        }}
-                    >
-                        {/* 中心标记 */}
-                        <div style={{
-                            position: "absolute",
-                            left: "50%",
-                            top: "50%",
-                            transform: "translate(-50%, -50%)",
-                            width: "4px",
-                            height: "30px",
-                            background: "#475569",
-                            borderRadius: "2px",
-                        }}/>
-                        {/* 滑块 */}
-                        <div style={{
-                            position: "absolute",
-                            width: "35px",
-                            height: "35px",
-                            borderRadius: "50%",
-                            background: direction === 0 ? "#475569" : "#2563eb",
-                            border: "3px solid #64748b",
-                            top: "50%",
-                            left: "50%",
-                            transform: `translate(calc(-50% + ${direction * 0.6}px), -50%)`,
-                            transition: direction === 0 ? "background 0.1s" : "none",
-                            boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
-                        }}/>
-                    </div>
-                    <div style={{fontSize: "12px", marginTop: "4px", opacity: 0.6}}>{direction > 0 ? "→" : direction < 0 ? "←" : "·"} {Math.abs(direction)}%</div>
+                >
+                    {/* 中线 */}
+                    <div style={{
+                        position: "absolute",
+                        left: "50%",
+                        top: "50%",
+                        transform: "translate(-50%, -50%)",
+                        width: isNarrow ? "2px" : "30px",
+                        height: isNarrow ? "30px" : "2px",
+                        background: "#475569",
+                    }}/>
+                    {/* 滑块 */}
+                    <div style={{
+                        position: "absolute",
+                        width: `${stickSize}px`,
+                        height: `${stickSize}px`,
+                        borderRadius: "50%",
+                        background: throttleDisplay >= 0 ? "#22c55e" : "#ef4444",
+                        border: "3px solid #64748b",
+                        left: "50%",
+                        top: "50%",
+                        transform: isNarrow
+                            ? `translate(calc(-50% + ${throttleDisplay * 0.5}px), -50%)`
+                            : `translate(-50%, calc(-50% - ${throttleDisplay * 0.5}px))`,
+                        boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                    }}/>
                 </div>
-
-                {/* 油门/刹车 */}
-                <div style={{display: "flex", flexDirection: "column", alignItems: "center"}}>
-                    <div style={{fontSize: "12px", opacity: 0.6, marginBottom: "8px"}}>油门</div>
-                    <div
-                        ref={throttleRefEl}
-                        onPointerDown={startControl}
-                        onPointerMove={(e) => handleThrottleMove(e.clientY)}
-                        onPointerUp={handleThrottleEnd}
-                        onPointerLeave={handleThrottleEnd}
-                        style={{
-                            width: "55px",
-                            height: "120px",
-                            borderRadius: "27px",
-                            background: "rgba(255,255,255,0.1)",
-                            border: "2px solid #334155",
-                            position: "relative",
-                            touchAction: "none",
-                        }}
-                    >
-                        {/* 中线 */}
-                        <div style={{
-                            position: "absolute",
-                            left: "50%",
-                            top: "50%",
-                            transform: "translate(-50%, -50%)",
-                            width: "35px",
-                            height: "2px",
-                            background: "#475569",
-                        }}/>
-                        {/* 滑块 */}
-                        <div style={{
-                            position: "absolute",
-                            width: "45px",
-                            height: "45px",
-                            borderRadius: "50%",
-                            background: throttle >= 0 ? "#22c55e" : "#ef4444",
-                            border: "3px solid #64748b",
-                            left: "50%",
-                            top: "50%",
-                            transform: `translate(-50%, calc(-50% - ${throttle * 0.35}px))`,
-                            transition: "background 0.1s",
-                            boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
-                        }}/>
-                    </div>
-                    <div style={{fontSize: "12px", marginTop: "4px", opacity: 0.6}}>
-                        {throttle > 0 ? "▲" : throttle < 0 ? "▼" : "·"} {Math.abs(throttle)}%
-                    </div>
-                </div>
-
-                {/* 刹车按钮 */}
-                <div style={{display: "flex", flexDirection: "column", alignItems: "center"}}>
-                    <div style={{fontSize: "12px", opacity: 0.6, marginBottom: "8px"}}>刹车</div>
-                    <button
-                        onPointerDown={() => { setBraking(true); startControl(); }}
-                        onPointerUp={() => { setBraking(false); stopControl(); }}
-                        onPointerLeave={() => { setBraking(false); stopControl(); }}
-                        style={{
-                            width: "55px",
-                            height: "120px",
-                            borderRadius: "27px",
-                            background: braking ? "#ef4444" : "rgba(255,255,255,0.1)",
-                            border: "2px solid #334155",
-                            color: "white",
-                            fontSize: "14px",
-                            fontWeight: "bold",
-                            cursor: "pointer",
-                            touchAction: "none",
-                            transition: "background 0.1s",
-                        }}
-                    >
-                        STOP
-                    </button>
+                <div style={{fontSize: "12px", marginTop: "8px", opacity: 0.6}}>
+                    {throttleDisplay > 0 ? "▲" : throttleDisplay < 0 ? "▼" : "·"} {Math.abs(throttleDisplay)}%
                 </div>
             </div>
 
-            {/* 状态 */}
-            <div style={{marginTop: "10px", fontSize: "14px", opacity: 0.8}}>
-                方向: {direction}% | 油门: {throttle}% | {braking ? "刹车中" : "行驶中"}
+            {/* 中间区域 */}
+            <div style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                flex: 2,
+                transform: isNarrow ? "rotate(90deg)" : "none",
+                transition: "transform 0.2s",
+            }}>
+                {/* 视频流 */}
+                <div
+                    style={{
+                        borderRadius: "12px",
+                        overflow: "hidden",
+                        border: "2px solid #334155",
+                    }}
+                >
+                    <img
+                        src="/api/video_stream"
+                        alt="Camera"
+                        style={{
+                            width: `${videoW}px`,
+                            height: `${videoH}px`,
+                            objectFit: "cover",
+                            background: "#000",
+                        }}
+                    />
+                </div>
+
+                {/* 速度显示 */}
+                <div style={{display: "flex", justifyContent: "center", gap: "20px", fontSize: "13px", marginTop: "10px"}}>
+                    <div>左 <span style={{color: "#4ade80", fontWeight: "bold"}}>{leftSpeed > 0 ? "+" : ""}{leftSpeed}</span></div>
+                    <div>右 <span style={{color: "#4ade80", fontWeight: "bold"}}>{rightSpeed > 0 ? "+" : ""}{rightSpeed}</span></div>
+                </div>
+
+                {/* 返回按钮 */}
+                <button
+                    onClick={handleBack}
+                    style={{
+                        marginTop: "10px",
+                        background: "rgba(255,255,255,0.1)",
+                        border: "1px solid #334155",
+                        color: "white",
+                        padding: "6px 16px",
+                        borderRadius: "6px",
+                        fontSize: "12px",
+                        cursor: "pointer",
+                    }}
+                >
+                    返回
+                </button>
+            </div>
+
+            {/* 方向摇杆 */}
+            <div style={{display: "flex", flexDirection: "column", alignItems: "center", flex: 1}}>
+                <div style={{fontSize: "12px", opacity: 0.6, marginBottom: "8px"}}>方向</div>
+                <div
+                    ref={directionRefEl}
+                    onPointerMove={(e) => handleDirectionMove(e.clientX, e.clientY)}
+                    onPointerUp={handleDirectionEnd}
+                    onPointerLeave={handleDirectionEnd}
+                    style={{
+                        width: `${directionW}px`,
+                        height: `${directionH}px`,
+                        borderRadius: isNarrow ? "35px" : "40px",
+                        background: "rgba(255,255,255,0.1)",
+                        border: "2px solid #334155",
+                        position: "relative",
+                        touchAction: "none",
+                    }}
+                >
+                    {/* 中线 */}
+                    <div style={{
+                        position: "absolute",
+                        left: "50%",
+                        top: "50%",
+                        transform: "translate(-50%, -50%)",
+                        width: isNarrow ? "30px" : "2px",
+                        height: isNarrow ? "2px" : "30px",
+                        background: "#475569",
+                    }}/>
+                    {/* 滑块 */}
+                    <div style={{
+                        position: "absolute",
+                        width: `${stickSize}px`,
+                        height: `${stickSize}px`,
+                        borderRadius: "50%",
+                        background: directionDisplay === 0 ? "#475569" : "#2563eb",
+                        border: "3px solid #64748b",
+                        left: "50%",
+                        top: "50%",
+                        transform: isNarrow
+                            ? `translate(-50%, calc(-50% - ${directionDisplay * 0.5}px))`
+                            : `translate(calc(-50% + ${directionDisplay * 0.5}px), -50%)`,
+                        boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                    }}/>
+                </div>
+                <div style={{fontSize: "12px", marginTop: "8px", opacity: 0.6}}>
+                    {directionDisplay > 0 ? "→" : directionDisplay < 0 ? "←" : "·"} {Math.abs(directionDisplay)}%
+                </div>
             </div>
         </div>
     );
