@@ -174,9 +174,9 @@ class TtPidChassis:
                 mid = payload[0]
                 rpm = struct.unpack(">h", payload[1:3])[0]
                 if mid == 0:
-                    left = rpm
-                elif mid == 1:
                     right = rpm
+                elif mid == 1:
+                    left = rpm
         return RpmData(left=-left, right=right)
 
     def reset(self) -> bool:
