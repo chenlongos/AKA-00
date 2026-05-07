@@ -56,6 +56,8 @@ const ControlButton = ({
             onPointerDown={handlePressStart}
             onPointerUp={handlePressEnd}
             onPointerLeave={handlePressEnd}
+            onPointerCancel={handlePressEnd}
+            onContextMenu={(e) => e.preventDefault()}
             onClick={(e) => {
                 e.preventDefault(); // 防止默认行为（如表单提交）
                 onClick?.();
