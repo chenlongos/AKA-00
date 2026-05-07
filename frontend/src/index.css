@@ -34,7 +34,26 @@ a:hover {
 }
 
 body {
+    overscroll-behavior: contain;
+    overflow-y: auto;
+    width: 100%;
+    height: 100%;
+    height: 100dvh;
+}
 
+html {
+    overscroll-behavior: contain;
+    overflow-y: auto;
+    height: 100%;
+    height: 100dvh;
+}
+
+#root {
+    width: 100%;
+    height: 100%;
+    height: 100dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 h1 {

@@ -29,62 +29,55 @@ const RCDemoPage = () => {
         return () => clearInterval(t);
     }, []);
 
-    // 定时获取电机实时速度
-    useEffect(() => {
-        const fetchSpeed = async () => {
-            try {
-                const timestamp = Date.now();
-                const res = await fetch(`/api/motor_status?timestamp=${timestamp}`);
-                if (res.ok) {
-                    const data = await res.json();
-                    setLeftSpeed(data.left_speed ?? 0);
-                    setRightSpeed(data.right_speed ?? 0);
-                }
-            } catch {
-                // 忽略错误
-            }
-        };
-        fetchSpeed();
-        const interval = setInterval(fetchSpeed, 200);
-        return () => clearInterval(interval);
-    }, []);
+    // 电机控制 + 状态轮询（事件驱动）
+    const motorIntervalRef = useRef<number | null>(null);
 
-    // 计算并发送电机控制
-    const updateMotor = useCallback(() => {
-        const dir = directionRef.current;    // -100 ~ 100
-        const thr = throttleRef.current;     // -100 ~ 100
-
+    const updateAndFetch = async () => {
+        const dir = directionRef.current;
+        const thr = throttleRef.current;
         let left, right;
 
         if (braking) {
-            // 刹车时两轮速度为0
             left = 0;
             right = 0;
         } else if (thr === 0) {
-            // 无油门，停止
             left = 0;
             right = 0;
         } else {
-            // 差速转向：直驶时左右速度相同，转向时一侧减速另一侧加速
-            const base = thr; // 基础速度
-            const turn = dir * 0.5; // 转向差量，最大50
-
-            left = base - turn;
-            right = base + turn;
-
-            // 限制范围
-            left = Math.max(-100, Math.min(100, left));
-            right = Math.max(-100, Math.min(100, right));
+            const base = thr;
+            const turn = dir * 0.5;
+            left = Math.max(-100, Math.min(100, base - turn));
+            right = Math.max(-100, Math.min(100, base + turn));
         }
 
         fetch(`/api/motor_direct?left=${left}&right=${right}&duration=0`).catch(() => {});
-    }, [braking]);
 
-    // 定期更新电机
-    useEffect(() => {
-        const interval = setInterval(updateMotor, 50);
-        return () => clearInterval(interval);
-    }, [updateMotor]);
+        try {
+            const timestamp = Date.now();
+            const res = await fetch(`/api/motor_status?timestamp=${timestamp}`);
+            if (res.ok) {
+                const data = await res.json();
+                setLeftSpeed(data.left_speed ?? 0);
+                setRightSpeed(data.right_speed ?? 0);
+            }
+        } catch {
+            // 忽略错误
+        }
+    };
+
+    const startControl = () => {
+        if (motorIntervalRef.current !== null) return;
+        updateAndFetch();
+        motorIntervalRef.current = window.setInterval(updateAndFetch, 100);
+    };
+
+    const stopControl = () => {
+        if (motorIntervalRef.current !== null) {
+            clearInterval(motorIntervalRef.current);
+            motorIntervalRef.current = null;
+            fetch("/api/motor_direct?left=0&right=0&duration=0").catch(() => {});
+        }
+    };
 
     // 页面离开时停止电机并关闭摄像头
     useEffect(() => {
@@ -97,7 +90,7 @@ const RCDemoPage = () => {
     // 方向摇杆控制
     const directionRefEl = useRef<HTMLDivElement>(null);
 
-    const handleDirection = useCallback((clientX: number) => {
+    const handleDirectionMove = useCallback((clientX: number) => {
         if (!directionRefEl.current) return;
         const rect = directionRefEl.current.getBoundingClientRect();
         const centerX = rect.left + rect.width / 2;
@@ -109,10 +102,16 @@ const RCDemoPage = () => {
         setDirection(dir);
     }, []);
 
+    const handleDirectionEnd = useCallback(() => {
+        directionRef.current = 0;
+        setDirection(0);
+        stopControl();
+    }, []);
+
     // 油门控制
     const throttleRefEl = useRef<HTMLDivElement>(null);
 
-    const handleThrottle = useCallback((clientY: number) => {
+    const handleThrottleMove = useCallback((clientY: number) => {
         if (!throttleRefEl.current) return;
         const rect = throttleRefEl.current.getBoundingClientRect();
         const centerY = rect.top + rect.height / 2;
@@ -128,6 +127,7 @@ const RCDemoPage = () => {
     const handleThrottleEnd = useCallback(() => {
         throttleRef.current = 0;
         setThrottle(0);
+        stopControl();
     }, []);
 
     // 返回按钮
@@ -215,9 +215,10 @@ const RCDemoPage = () => {
                     <div style={{fontSize: "12px", opacity: 0.6, marginBottom: "8px"}}>方向</div>
                     <div
                         ref={directionRefEl}
-                        onPointerMove={(e) => handleDirection(e.clientX)}
-                        onPointerUp={handleThrottleEnd}
-                        onPointerLeave={handleThrottleEnd}
+                        onPointerDown={startControl}
+                        onPointerMove={(e) => handleDirectionMove(e.clientX)}
+                        onPointerUp={handleDirectionEnd}
+                        onPointerLeave={handleDirectionEnd}
                         style={{
                             width: "160px",
                             height: "45px",
@@ -262,7 +263,8 @@ const RCDemoPage = () => {
                     <div style={{fontSize: "12px", opacity: 0.6, marginBottom: "8px"}}>油门</div>
                     <div
                         ref={throttleRefEl}
-                        onPointerMove={(e) => handleThrottle(e.clientY)}
+                        onPointerDown={startControl}
+                        onPointerMove={(e) => handleThrottleMove(e.clientY)}
                         onPointerUp={handleThrottleEnd}
                         onPointerLeave={handleThrottleEnd}
                         style={{
@@ -309,9 +311,9 @@ const RCDemoPage = () => {
                 <div style={{display: "flex", flexDirection: "column", alignItems: "center"}}>
                     <div style={{fontSize: "12px", opacity: 0.6, marginBottom: "8px"}}>刹车</div>
                     <button
-                        onPointerDown={() => { setBraking(true); }}
-                        onPointerUp={() => { setBraking(false); }}
-                        onPointerLeave={() => { setBraking(false); }}
+                        onPointerDown={() => { setBraking(true); startControl(); }}
+                        onPointerUp={() => { setBraking(false); stopControl(); }}
+                        onPointerLeave={() => { setBraking(false); stopControl(); }}
                         style={{
                             width: "55px",
                             height: "120px",
