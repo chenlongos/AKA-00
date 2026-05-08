@@ -36,14 +36,13 @@ const RCDemoPage = () => {
         const thrZero = Math.abs(thr) < deadZone ? 0 : thr;
         const dirZero = Math.abs(dir) < deadZone ? 0 : dir;
 
-        let left, right;
 
         const base = thrZero;
         const turn = dirZero * 0.5;
-        left = Math.max(-100, Math.min(100, base - turn));
-        right = Math.max(-100, Math.min(100, base + turn));
+        const left = Math.max(-100, Math.min(100, base - turn));
+        const right = Math.max(-100, Math.min(100, base + turn));
 
-        // 只有值变化超过20才发送
+        // 只有值变化超过10才发送
         if (lastCommandRef.current &&
             Math.abs(lastCommandRef.current.left - left) < 10 &&
             Math.abs(lastCommandRef.current.right - right) < 10) {
@@ -51,11 +50,9 @@ const RCDemoPage = () => {
         }
         lastCommandRef.current = {left, right};
 
-        fetch(`/api/motor_direct?left=${left}&right=${right}&duration=0`).catch(() => {});
-
+        // motor_direct 返回时已带速度信息
         try {
-            const timestamp = Date.now();
-            const res = await fetch(`/api/motor_status?timestamp=${timestamp}`);
+            const res = await fetch(`/api/motor_direct?left=${left}&right=${right}&duration=0`);
             if (res.ok) {
                 const data = await res.json();
                 setLeftSpeed(data.left_speed ?? 0);

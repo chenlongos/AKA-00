@@ -133,13 +133,19 @@ class TtPidChassis:
         left = max(-100, min(100, left))
         right = max(-100, min(100, right))
 
-        left_pwm = int(153 + 102 * abs(left) / 100)
-        right_pwm = int(153 + 102 * abs(right) / 100)
+        if left == 0:
+            left_pwm = 0
+        else:
+            left_pwm = int(153 + 102 * abs(left) / 100)
+            if left < 0:
+                left_pwm = -left_pwm
 
-        if left < 0:
-            left_pwm = -left_pwm
-        if right < 0:
-            right_pwm = -right_pwm
+        if right == 0:
+            right_pwm = 0
+        else:
+            right_pwm = int(153 + 102 * abs(right) / 100)
+            if right < 0:
+                right_pwm = -right_pwm
 
         self._set_speeds(left_pwm, right_pwm)
 

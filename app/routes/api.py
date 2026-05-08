@@ -190,12 +190,17 @@ def motor_direct():
         right: int   右轮速度 (-255 ~ 255)
         duration: float 持续时间（秒），0 表示无限
     """
-    left = int(request.args.get('left', 0))
-    right = int(request.args.get('right', 0))
+    left = int(float(request.args.get('left', 0)))
+    right = int(float(request.args.get('right', 0)))
     duration = float(request.args.get('duration', 0))
 
     try:
-        return jsonify(get_control_service().run_motor(left, right, duration))
+        result = get_control_service().run_motor(left, right, duration)
+        # 同时返回当前速度，减少请求次数
+        status = get_control_service().get_motor_status(int(time.time() * 1000))
+        result["left_speed"] = status.get("left_speed", 0)
+        result["right_speed"] = status.get("right_speed", 0)
+        return jsonify(result)
     except Exception as e:
         import traceback
         traceback.print_exc()
