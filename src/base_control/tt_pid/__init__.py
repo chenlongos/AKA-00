@@ -16,6 +16,7 @@ FRAME_H2 = 0x55
 CMD_INIT = 0x01
 CMD_CONFIG = 0x02
 CMD_SET_SPEED = 0x10
+CMD_SET_SPEEDS = 0x13
 CMD_STOP = 0x11
 CMD_BRAKE = 0x12
 CMD_GET_RPM = 0x20
@@ -140,12 +141,12 @@ class TtPidChassis:
         if right < 0:
             right_pwm = -right_pwm
 
-        self._set_motor_speed(0, left_pwm)
-        self._set_motor_speed(1, right_pwm)
+        self._set_speeds(left_pwm, right_pwm)
 
-    def _set_motor_speed(self, motor_id: int, speed: int) -> bool:
-        payload = struct.pack(">Bh", motor_id, speed)
-        rsp = self._send_cmd(CMD_SET_SPEED, payload)
+    def _set_speeds(self, left: int, right: int) -> bool:
+        """同时设置左右轮速度（单帧命令）"""
+        payload = struct.pack(">hh", left, right)
+        rsp = self._send_cmd(CMD_SET_SPEEDS, payload)
         return rsp is not None and rsp["cmd"] == RSP_ACK
 
     def brake(self) -> None:
