@@ -72,10 +72,10 @@ const RCDemoPage = () => {
         if (motorIntervalRef.current !== null) {
             clearInterval(motorIntervalRef.current);
             motorIntervalRef.current = null;
-            fetch("/api/motor_direct?left=0&right=0&duration=0").catch(() => {});
-            setLeftSpeed(0);
-            setRightSpeed(0);
         }
+        fetch("/api/motor_direct?left=0&right=0&duration=0").catch(() => {});
+        setLeftSpeed(0);
+        setRightSpeed(0);
     }, []);
 
     // 油门摇杆（窄屏时水平放置）
@@ -107,22 +107,18 @@ const RCDemoPage = () => {
             setThrottleDisplay(thr);
         }
 
+        // 只要有输入就启动控制
         if (throttleRef.current !== 0 && !throttleActiveRef.current) {
             throttleActiveRef.current = true;
             startControl();
-        } else if (throttleRef.current === 0 && throttleActiveRef.current) {
-            throttleActiveRef.current = false;
-            stopControl();
         }
-    }, [isNarrow, startControl, stopControl]);
+    }, [isNarrow, startControl]);
 
     const handleThrottleEnd = useCallback(() => {
         throttleRef.current = 0;
         setThrottleDisplay(0);
-        throttleActiveRef.current = false;
-        // 不重置方向，让转向继续生效
-        stopControl();
-    }, [stopControl]);
+        // 不停止，继续发送复合速度
+    }, []);
 
     // 方向摇杆（窄屏时垂直放置）
     const directionRefEl = useRef<HTMLDivElement>(null);
@@ -153,27 +149,35 @@ const RCDemoPage = () => {
             setDirectionDisplay(dir);
         }
 
+        // 只要有输入就启动控制
         if (directionRef.current !== 0 && !directionActiveRef.current) {
             directionActiveRef.current = true;
             startControl();
-        } else if (directionRef.current === 0 && directionActiveRef.current) {
-            directionActiveRef.current = false;
-            stopControl();
         }
-    }, [isNarrow, startControl, stopControl]);
+    }, [isNarrow, startControl]);
 
     const handleDirectionEnd = useCallback(() => {
         directionRef.current = 0;
         setDirectionDisplay(0);
-        directionActiveRef.current = false;
-        stopControl();
-    }, [stopControl]);
+        // 不停止，继续发送复合速度
+    }, []);
 
     // 返回
     const handleBack = () => {
         stopControl();
         navigator.sendBeacon("/api/video_stream/close");
         window.location.href = "/";
+    };
+
+    // 刹车
+    const handleBrake = () => {
+        throttleRef.current = 0;
+        directionRef.current = 0;
+        setThrottleDisplay(0);
+        setDirectionDisplay(0);
+        throttleActiveRef.current = false;
+        directionActiveRef.current = false;
+        stopControl();
     };
 
     // 尺寸
@@ -290,11 +294,29 @@ const RCDemoPage = () => {
                     <div>右 <span style={{color: "#4ade80", fontWeight: "bold"}}>{rightSpeed > 0 ? "+" : ""}{rightSpeed.toFixed(2)}</span></div>
                 </div>
 
+                {/* 刹车按钮 */}
+                <button
+                    onClick={handleBrake}
+                    style={{
+                        marginTop: "10px",
+                        background: "rgba(239,68,68,0.3)",
+                        border: "1px solid #ef4444",
+                        color: "white",
+                        padding: "6px 16px",
+                        borderRadius: "6px",
+                        fontSize: "12px",
+                        cursor: "pointer",
+                    }}
+                >
+                    刹车
+                </button>
+
                 {/* 返回按钮 */}
                 <button
                     onClick={handleBack}
                     style={{
                         marginTop: "10px",
+                        marginLeft: "10px",
                         background: "rgba(255,255,255,0.1)",
                         border: "1px solid #334155",
                         color: "white",
