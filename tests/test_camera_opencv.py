@@ -14,8 +14,8 @@ import sys
 def main():
     parser = argparse.ArgumentParser(description="OpenCV Camera Test Server")
     parser.add_argument("--device", type=int, default=0, help="Camera device index")
-    parser.add_argument("--width", type=int, default=640, help="Frame width")
-    parser.add_argument("--height", type=int, default=480, help="Frame height")
+    parser.add_argument("--width", type=int, default=224, help="Frame width")
+    parser.add_argument("--height", type=int, default=224, help="Frame height")
     parser.add_argument("--fps", type=int, default=30, help="Frames per second")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind")
     parser.add_argument("--port", type=int, default=5000, help="Port to bind")
@@ -81,7 +81,7 @@ def main():
             frame_size = frame.nbytes
 
             info_text = f"OpenCV | {w}x{h} | {frame_size} bytes | #{frame_count[0]}"
-            cv2.putText(frame, info_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.putText(frame, info_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 2)
 
             ret, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
             if not ret:
@@ -119,6 +119,6 @@ def main():
 
 
 if __name__ == "__main__":
-    # 默认配置：设备 0，分辨率 640x480，端口 5001
-    sys.argv = ["test_camera_opencv.py", "--port", "5001"]
+    # 默认配置：设备 0，分辨率 224x224，端口 5001
+    sys.argv = ["test_camera_opencv.py", "--device", "0", "--width", "224", "--height", "224", "--port", "5001"]
     main()

@@ -1,125 +1,114 @@
-"""测试 FFmpeg 摄像头视频流，带分辨率和帧大小标记（Linux 专用）。
+"""FFmpeg MJPEG 流服务器（Linux 专用）。
 
 用法:
     python test_camera_ffmpeg.py
+
+然后访问:
+    http://localhost:5002/video_stream - 查看视频流
 """
 import subprocess
-import sys
-import time
 import threading
-import Queue
+import queue
 
 
 def main():
-    device = "/dev/video0"
-    width = 640
-    height = 480
+    width = 224
+    height = 224
     port = 5002
+    device = "/dev/video0"
 
-    import cv2
-    import numpy as np
-    from flask import Flask, Response, jsonify
+    from flask import Flask, Response
 
     app = Flask(__name__)
 
-    frame_size = width * height * 3  # rgb24
-    frame_queue = Queue.Queue(maxsize=2)
+    frame_queue = queue.Queue(maxsize=5)
     running = [True]
-    frame_count = [0]
-    last_frame_time = [time.time()]
 
+    # FFmpeg 输出 MJPEG 格式
     cmd = [
         "ffmpeg",
-        "-loglevel", "quiet",
         "-f", "v4l2",
         "-input_format", "mjpeg",
-        "-thread_queue_size", "64",
         "-i", device,
         "-vf", f"scale={width}:{height}",
-        "-f", "rawvideo",
-        "-pix_fmt", "rgb24",
+        "-f", "mjpeg",
         "-"
     ]
 
-    try:
-        pipe = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
-    except FileNotFoundError:
-        print("Error: ffmpeg not found. Please install ffmpeg on Linux.")
-        sys.exit(1)
+    def read_ffmpeg():
+        try:
+            pipe = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
+        except FileNotFoundError:
+            print("Error: ffmpeg not found")
+            running[0] = False
+            return
 
-    def read_frames():
+        # MJPEG 每帧是独立的 JPEG，用 \xff\xd8 开头，\xff\xd9 结尾
+        JPEG_START = b"\xff\xd8"
+        JPEG_END = b"\xff\xd9"
+
+        buffer = b""
+
         while running[0]:
             try:
-                raw = b""
-                while len(raw) < frame_size:
-                    chunk = pipe.stdout.read(frame_size - len(raw))
-                    if not chunk:
-                        time.sleep(0.01)
-                        continue
-                    raw += chunk
+                chunk = pipe.stdout.read(8192)
+                if not chunk:
+                    break
+                buffer += chunk
 
-                if len(raw) == frame_size:
-                    frame = np.frombuffer(raw, dtype=np.uint8).reshape(height, width, 3)
-                    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                # 提取完整 JPEG 帧
+                while True:
+                    start = buffer.find(JPEG_START)
+                    if start == -1:
+                        break
+                    end = buffer.find(JPEG_END, start + 2)
+                    if end == -1:
+                        buffer = buffer[start:]
+                        break
+
+                    jpeg = buffer[start:end + 2]
+                    buffer = buffer[end + 2:]
+
                     try:
-                        frame_queue.put_nowait(frame)
-                    except Queue.Full:
-                        pass
-            except Exception as e:
-                print(f"Read error: {e}")
-                time.sleep(0.1)
+                        frame_queue.put_nowait(jpeg)
+                    except queue.Full:
+                        pass  # 丢弃旧帧，保持低延迟
+            except Exception:
+                break
 
-    reader_thread = threading.Thread(target=read_frames, daemon=True)
-    reader_thread.start()
+    reader = threading.Thread(target=read_ffmpeg, daemon=True)
+    reader.start()
 
-    def generate_frames():
+    def generate():
         while running[0]:
             try:
-                frame = frame_queue.get(timeout=1)
-            except Queue.Empty:
-                continue
-
-            frame_count[0] += 1
-            now = time.time()
-            delta_ms = (now - last_frame_time[0]) * 1000
-            last_frame_time[0] = now
-
-            frame_size_bytes = frame.nbytes
-
-            info_text = f"FFmpeg | {width}x{height} | {frame_size_bytes}B | dt:{delta_ms:.0f}ms | #{frame_count[0]}"
-            cv2.putText(frame, info_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-
-            ret, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-            if not ret:
+                jpeg = frame_queue.get(timeout=1)
+            except queue.Empty:
                 continue
 
             yield (b"--frame\r\n"
-                   b"Content-Type: image/jpeg\r\n\r\n"
-                   + jpeg.tobytes() + b"\r\n")
+                   b"Content-Type: image/jpeg\r\n\r\n" + jpeg + b"\r\n")
 
     @app.route("/")
     def index():
-        return jsonify({
-            "camera": "ffmpeg",
-            "resolution": f"{width}x{height}",
-            "frame_size": frame_size,
-            "device": device,
-            "stream_url": "/video_stream"
-        })
+        return f"""
+        <html><body>
+        <h1>FFmpeg Camera</h1>
+        <p>Resolution: {width}x{height}</p>
+        <img src="/video_stream" width="{width}" height="{height}" />
+        </body></html>
+        """
 
     @app.route("/video_stream")
     def video_stream():
-        return Response(generate_frames(), mimetype="multipart/x-mixed-replace; boundary=frame")
+        return Response(generate(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
-    print(f"FFmpeg Camera Server started on http://0.0.0.0:{port}")
-    print(f"Video stream: http://0.0.0.0:{port}/video_stream")
-
+    print(f"FFmpeg Camera Server: http://localhost:{port}/video_stream")
+    print(f"Resolution: {width}x{height}")
     try:
         app.run(host="0.0.0.0", port=port, threaded=True)
     finally:
         running[0] = False
-        pipe.terminate()
-        pipe.wait()
 
 
 if __name__ == "__main__":
