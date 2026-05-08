@@ -1,26 +1,15 @@
-"""摄像头服务单例 - 共享帧缓存"""
+"""摄像头服务单例 - 简化版，直接使用 Camera"""
 import threading
-import time
-
-try:
-    from src.cameras.opencv import Camera as OpenCVCamera
-    _HAS_CV2 = True
-except ImportError:
-    _HAS_CV2 = False
 
 
 class CameraService:
-    """全局摄像头单例，支持多客户端共享帧缓存"""
+    """全局摄像头单例，直接透传给 Camera"""
 
     _instance: "CameraService | None" = None
     _lock = threading.Lock()
 
     def __init__(self):
         self._camera = None
-        self._frame = None
-        self._frame_lock = threading.Lock()
-        self._running = False
-        self._thread: threading.Thread | None = None
 
     @classmethod
     def get_instance(cls) -> "CameraService":
@@ -32,49 +21,29 @@ class CameraService:
 
     def _ensure_camera(self):
         """确保摄像头已初始化"""
-        if self._camera is None and _HAS_CV2:
-            self._camera = OpenCVCamera.get_instance()
-
-    def _start_capture(self):
-        """启动后台采集线程"""
-        if self._running:
-            return
-        self._running = True
-        self._thread = threading.Thread(target=self._capture_loop, daemon=True)
-        self._thread.start()
-
-    def _capture_loop(self):
-        """后台持续采集帧"""
-        while self._running:
-            self._ensure_camera()
-            if self._camera is not None:
-                ret, frame = self._camera.read()
-                if ret:
-                    with self._frame_lock:
-                        self._frame = frame
-            time.sleep(0.03)  # ~30fps
+        if self._camera is None:
+            from src.cameras.opencv import Camera as OpenCVCamera
+            self._camera = OpenCVCamera.get_instance(
+                device=0,
+                width=320,
+                height=180,
+                fps=15
+            )
 
     def is_available(self) -> bool:
         self._ensure_camera()
-        self._start_capture()
         return self._camera is not None and self._camera.is_available()
 
     def read(self):
-        """读取最新帧（从共享缓存）"""
-        self._start_capture()
-        with self._frame_lock:
-            if self._frame is None:
-                return False, None
-            return True, self._frame.copy()
+        """读取最新帧"""
+        self._ensure_camera()
+        if self._camera is None:
+            return False, None
+        return self._camera.read()
 
     def close(self):
         """关闭摄像头"""
-        self._running = False
-        if self._thread is not None:
-            self._thread.join(timeout=1)
-            self._thread = None
         if self._camera is not None:
+            from src.cameras.opencv import Camera as OpenCVCamera
             OpenCVCamera.reset()
             self._camera = None
-        with self._frame_lock:
-            self._frame = None

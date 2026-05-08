@@ -194,7 +194,12 @@ def motor_direct():
     right = int(request.args.get('right', 0))
     duration = float(request.args.get('duration', 0))
 
-    return jsonify(get_control_service().run_motor(left, right, duration))
+    try:
+        return jsonify(get_control_service().run_motor(left, right, duration))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 
 @api_bp.route("/heartbeat")
@@ -317,7 +322,8 @@ def video_stream():
                     ret, frame = camera_service.read()
                     if not ret:
                         break
-                    ret, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 50])
+                    # 低质量快速编码
+                    ret, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 30])
                     if not ret:
                         continue
                     yield (b'--frame\r\n'

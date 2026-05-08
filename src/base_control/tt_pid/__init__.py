@@ -81,29 +81,32 @@ class TtPidChassis:
     def _recv_frame(self, timeout: float = 0.2) -> Optional[dict]:
         deadline = time.time() + timeout
         while time.time() < deadline:
-            if self.ser.in_waiting < 4:
-                time.sleep(0.01)
-                continue
-            h1 = self.ser.read(1)
-            if not h1 or h1[0] != FRAME_H1:
-                continue
-            h2 = self.ser.read(1)
-            if not h2 or h2[0] != FRAME_H2:
-                continue
-            header = self.ser.read(2)
-            if len(header) < 2:
-                continue
-            cmd, length = header[0], header[1]
-            payload = self.ser.read(length) if length else b""
-            chk_b = self.ser.read(1)
-            if not chk_b:
-                continue
-            chk = cmd ^ length
-            for b in payload:
-                chk ^= b
-            if chk != chk_b[0]:
+            try:
+                if self.ser.in_waiting < 4:
+                    time.sleep(0.01)
+                    continue
+                h1 = self.ser.read(1)
+                if not h1 or h1[0] != FRAME_H1:
+                    continue
+                h2 = self.ser.read(1)
+                if not h2 or h2[0] != FRAME_H2:
+                    continue
+                header = self.ser.read(2)
+                if len(header) < 2:
+                    continue
+                cmd, length = header[0], header[1]
+                payload = self.ser.read(length) if length else b""
+                chk_b = self.ser.read(1)
+                if not chk_b:
+                    continue
+                chk = cmd ^ length
+                for b in payload:
+                    chk ^= b
+                if chk != chk_b[0]:
+                    return None
+                return {"cmd": cmd, "payload": bytes(payload)}
+            except serial.SerialException:
                 return None
-            return {"cmd": cmd, "payload": bytes(payload)}
         return None
 
     def _send_cmd(self, cmd: int, payload: bytes = b"", timeout: float = 0.2) -> Optional[dict]:
@@ -122,17 +125,23 @@ class TtPidChassis:
         return rsp is not None and rsp["cmd"] == RSP_ACK
 
     def set_speed(self, left: int, right: int) -> None:
-        """设置左右轮速度（-255 ~ 255）。"""
+        """设置左右轮速度（-100 ~ 100）。
+
+        输入 0-100 -> PWM 153-255（3V-5V，对应60%-100%）
+        """
         left = max(-100, min(100, left))
         right = max(-100, min(100, right))
-        left_sign = left // abs(left)
-        right_sign = right // abs(right)
-        left = (255 * 0.4) * (abs(left) / 100) + (255 * 0.6)
-        left = max(-255, min(255, int(left)))
-        right = (255 * 0.4) * (abs(right) / 100) + (255 * 0.6)
-        right = max(-255, min(255, int(right)))
-        self._set_motor_speed(0, left * left_sign)
-        self._set_motor_speed(1, right * right_sign)
+
+        left_pwm = int(153 + 102 * abs(left) / 100)
+        right_pwm = int(153 + 102 * abs(right) / 100)
+
+        if left < 0:
+            left_pwm = -left_pwm
+        if right < 0:
+            right_pwm = -right_pwm
+
+        self._set_motor_speed(0, left_pwm)
+        self._set_motor_speed(1, right_pwm)
 
     def _set_motor_speed(self, motor_id: int, speed: int) -> bool:
         payload = struct.pack(">Bh", motor_id, speed)
