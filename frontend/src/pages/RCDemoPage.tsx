@@ -24,7 +24,6 @@ const RCDemoPage = () => {
 
     // 电机轮询
     const motorIntervalRef = useRef<number | null>(null);
-    const stopControlRef = useRef<(() => void) | null>(null);
     const lastCommandRef = useRef<{left: number, right: number} | null>(null);
 
     const sendCommand = useCallback(async () => {
@@ -42,10 +41,10 @@ const RCDemoPage = () => {
         const left = Math.max(-100, Math.min(100, base - turn));
         const right = Math.max(-100, Math.min(100, base + turn));
 
-        // 只有值变化超过10才发送
+        // 只有值变化超过5才发送
         if (lastCommandRef.current &&
-            Math.abs(lastCommandRef.current.left - left) < 10 &&
-            Math.abs(lastCommandRef.current.right - right) < 10) {
+            Math.abs(lastCommandRef.current.left - left) < 5 &&
+            Math.abs(lastCommandRef.current.right - right) < 5) {
             return;  // 变化太小，不发送
         }
         lastCommandRef.current = {left, right};
@@ -78,9 +77,6 @@ const RCDemoPage = () => {
             setRightSpeed(0);
         }
     }, []);
-
-    // 保持 ref 指向最新的 stopControl
-    stopControlRef.current = stopControl;
 
     // 油门摇杆（窄屏时水平放置）
     const throttleRefEl = useRef<HTMLDivElement>(null);
@@ -116,19 +112,17 @@ const RCDemoPage = () => {
             startControl();
         } else if (throttleRef.current === 0 && throttleActiveRef.current) {
             throttleActiveRef.current = false;
-            stopControlRef.current?.();
+            stopControl();
         }
-    }, [isNarrow, startControl]);
+    }, [isNarrow, startControl, stopControl]);
 
     const handleThrottleEnd = useCallback(() => {
         throttleRef.current = 0;
         setThrottleDisplay(0);
         throttleActiveRef.current = false;
-        // 油门松手时也重置方向，确保完全停车
-        directionRef.current = 0;
-        setDirectionDisplay(0);
-        stopControlRef.current?.();
-    }, []);
+        // 不重置方向，让转向继续生效
+        stopControl();
+    }, [stopControl]);
 
     // 方向摇杆（窄屏时垂直放置）
     const directionRefEl = useRef<HTMLDivElement>(null);
@@ -164,16 +158,16 @@ const RCDemoPage = () => {
             startControl();
         } else if (directionRef.current === 0 && directionActiveRef.current) {
             directionActiveRef.current = false;
-            stopControlRef.current?.();
+            stopControl();
         }
-    }, [isNarrow, startControl]);
+    }, [isNarrow, startControl, stopControl]);
 
     const handleDirectionEnd = useCallback(() => {
         directionRef.current = 0;
         setDirectionDisplay(0);
         directionActiveRef.current = false;
-        stopControlRef.current?.();
-    }, []);
+        stopControl();
+    }, [stopControl]);
 
     // 返回
     const handleBack = () => {
@@ -216,6 +210,7 @@ const RCDemoPage = () => {
                 <div style={{fontSize: "12px", opacity: 0.6, marginBottom: "8px", transform: isNarrow ? "rotate(90deg)" : "none"}}>油门</div>
                 <div
                     ref={throttleRefEl}
+                    onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); handleThrottleMove(e.clientX, e.clientY); }}
                     onPointerMove={(e) => handleThrottleMove(e.clientX, e.clientY)}
                     onPointerUp={handleThrottleEnd}
                     onPointerLeave={handleThrottleEnd}
@@ -318,6 +313,7 @@ const RCDemoPage = () => {
                 <div style={{fontSize: "12px", opacity: 0.6, marginBottom: "8px", transform: isNarrow ? "rotate(90deg)" : "none"}}>方向</div>
                 <div
                     ref={directionRefEl}
+                    onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); handleDirectionMove(e.clientX, e.clientY); }}
                     onPointerMove={(e) => handleDirectionMove(e.clientX, e.clientY)}
                     onPointerUp={handleDirectionEnd}
                     onPointerLeave={handleDirectionEnd}
