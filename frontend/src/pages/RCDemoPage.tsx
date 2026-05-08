@@ -199,7 +199,7 @@ const RCDemoPage = () => {
         >
             {/* 油门摇杆 */}
             <div style={{display: "flex", flexDirection: "column", alignItems: "center", flex: 1}}>
-                <div style={{fontSize: "12px", opacity: 0.6, marginBottom: "8px"}}>油门</div>
+                <div style={{fontSize: "12px", opacity: 0.6, marginBottom: "8px", transform: isNarrow ? "rotate(90deg)" : "none"}}>油门</div>
                 <div
                     ref={throttleRefEl}
                     onPointerMove={(e) => handleThrottleMove(e.clientX, e.clientY)}
@@ -241,7 +241,7 @@ const RCDemoPage = () => {
                         boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
                     }}/>
                 </div>
-                <div style={{fontSize: "12px", marginTop: "8px", opacity: 0.6}}>
+                <div style={{fontSize: "12px", marginTop: "8px", opacity: 0.6, transform: isNarrow ? "rotate(90deg)" : "none"}}>
                     {throttleDisplay > 0 ? "▲" : throttleDisplay < 0 ? "▼" : "·"} {Math.abs(throttleDisplay)}%
                 </div>
             </div>
@@ -301,7 +301,7 @@ const RCDemoPage = () => {
 
             {/* 方向摇杆 */}
             <div style={{display: "flex", flexDirection: "column", alignItems: "center", flex: 1}}>
-                <div style={{fontSize: "12px", opacity: 0.6, marginBottom: "8px"}}>方向</div>
+                <div style={{fontSize: "12px", opacity: 0.6, marginBottom: "8px", transform: isNarrow ? "rotate(90deg)" : "none"}}>方向</div>
                 <div
                     ref={directionRefEl}
                     onPointerMove={(e) => handleDirectionMove(e.clientX, e.clientY)}
@@ -343,7 +343,7 @@ const RCDemoPage = () => {
                         boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
                     }}/>
                 </div>
-                <div style={{fontSize: "12px", marginTop: "8px", opacity: 0.6}}>
+                <div style={{fontSize: "12px", marginTop: "8px", opacity: 0.6, transform: isNarrow ? "rotate(90deg)" : "none"}}>
                     {directionDisplay > 0 ? "→" : directionDisplay < 0 ? "←" : "·"} {Math.abs(directionDisplay)}%
                 </div>
             </div>

@@ -10,7 +10,7 @@ try:
 except Exception:
     _HAS_FCNTL = False
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, make_response
 
 from app.config import config
 from app.services import get_control_service
@@ -297,3 +297,50 @@ def demo_stop():
         "status": "stopped",
         "pid": pid,
     })
+
+
+@api_bp.route("/video_stream")
+def video_stream():
+    """MJPEG视频流"""
+    try:
+        import cv2
+        from app.services.camera_service import CameraService
+
+        camera_service = CameraService.get_instance()
+
+        if not camera_service.is_available():
+            return jsonify({"error": "camera not available"}), 500
+
+        def generate():
+            try:
+                while True:
+                    ret, frame = camera_service.read()
+                    if not ret:
+                        break
+                    ret, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 50])
+                    if not ret:
+                        continue
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
+            except GeneratorExit:
+                pass
+
+        response = make_response(generate())
+        response.headers['Content-Type'] = 'multipart/x-mixed-replace; boundary=frame'
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        return response
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/video_stream/close", methods=["POST"])
+def video_stream_close():
+    """关闭视频流，释放摄像头"""
+    try:
+        from app.services.camera_service import CameraService
+        CameraService.get_instance().close()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
