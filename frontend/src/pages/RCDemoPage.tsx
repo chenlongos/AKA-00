@@ -24,21 +24,32 @@ const RCDemoPage = () => {
 
     // 电机轮询
     const motorIntervalRef = useRef<number | null>(null);
+    const stopControlRef = useRef<(() => void) | null>(null);
+    const lastCommandRef = useRef<{left: number, right: number} | null>(null);
 
     const sendCommand = useCallback(async () => {
         const thr = throttleRef.current;
         const dir = directionRef.current;
+
+        // 死区：摇杆接近归零时视为0
+        const deadZone = 3;
+        const thrZero = Math.abs(thr) < deadZone ? 0 : thr;
+        const dirZero = Math.abs(dir) < deadZone ? 0 : dir;
+
         let left, right;
 
-        if (thr === 0) {
-            left = 0;
-            right = 0;
-        } else {
-            const base = thr;
-            const turn = dir * 0.5;
-            left = Math.max(-100, Math.min(100, base - turn));
-            right = Math.max(-100, Math.min(100, base + turn));
+        const base = thrZero;
+        const turn = dirZero * 0.5;
+        left = Math.max(-100, Math.min(100, base - turn));
+        right = Math.max(-100, Math.min(100, base + turn));
+
+        // 只有值变化超过20才发送
+        if (lastCommandRef.current &&
+            Math.abs(lastCommandRef.current.left - left) < 10 &&
+            Math.abs(lastCommandRef.current.right - right) < 10) {
+            return;  // 变化太小，不发送
         }
+        lastCommandRef.current = {left, right};
 
         fetch(`/api/motor_direct?left=${left}&right=${right}&duration=0`).catch(() => {});
 
@@ -58,7 +69,7 @@ const RCDemoPage = () => {
     const startControl = useCallback(() => {
         if (motorIntervalRef.current !== null) return;
         sendCommand();
-        motorIntervalRef.current = window.setInterval(sendCommand, 100);
+        motorIntervalRef.current = window.setInterval(sendCommand, 200);
     }, [sendCommand]);
 
     const stopControl = useCallback(() => {
@@ -70,6 +81,9 @@ const RCDemoPage = () => {
             setRightSpeed(0);
         }
     }, []);
+
+    // 保持 ref 指向最新的 stopControl
+    stopControlRef.current = stopControl;
 
     // 油门摇杆（窄屏时水平放置）
     const throttleRefEl = useRef<HTMLDivElement>(null);
@@ -105,16 +119,19 @@ const RCDemoPage = () => {
             startControl();
         } else if (throttleRef.current === 0 && throttleActiveRef.current) {
             throttleActiveRef.current = false;
-            stopControl();
+            stopControlRef.current?.();
         }
-    }, [isNarrow, startControl, stopControl]);
+    }, [isNarrow, startControl]);
 
     const handleThrottleEnd = useCallback(() => {
         throttleRef.current = 0;
         setThrottleDisplay(0);
         throttleActiveRef.current = false;
-        stopControl();
-    }, [stopControl]);
+        // 油门松手时也重置方向，确保完全停车
+        directionRef.current = 0;
+        setDirectionDisplay(0);
+        stopControlRef.current?.();
+    }, []);
 
     // 方向摇杆（窄屏时垂直放置）
     const directionRefEl = useRef<HTMLDivElement>(null);
@@ -150,16 +167,16 @@ const RCDemoPage = () => {
             startControl();
         } else if (directionRef.current === 0 && directionActiveRef.current) {
             directionActiveRef.current = false;
-            stopControl();
+            stopControlRef.current?.();
         }
-    }, [isNarrow, startControl, stopControl]);
+    }, [isNarrow, startControl]);
 
     const handleDirectionEnd = useCallback(() => {
         directionRef.current = 0;
         setDirectionDisplay(0);
         directionActiveRef.current = false;
-        stopControl();
-    }, [stopControl]);
+        stopControlRef.current?.();
+    }, []);
 
     // 返回
     const handleBack = () => {
@@ -277,8 +294,8 @@ const RCDemoPage = () => {
 
                 {/* 速度显示 */}
                 <div style={{display: "flex", justifyContent: "center", gap: "20px", fontSize: "13px", marginTop: "10px"}}>
-                    <div>左 <span style={{color: "#4ade80", fontWeight: "bold"}}>{leftSpeed > 0 ? "+" : ""}{leftSpeed}</span></div>
-                    <div>右 <span style={{color: "#4ade80", fontWeight: "bold"}}>{rightSpeed > 0 ? "+" : ""}{rightSpeed}</span></div>
+                    <div>左 <span style={{color: "#4ade80", fontWeight: "bold"}}>{leftSpeed > 0 ? "+" : ""}{leftSpeed.toFixed(2)}</span></div>
+                    <div>右 <span style={{color: "#4ade80", fontWeight: "bold"}}>{rightSpeed > 0 ? "+" : ""}{rightSpeed.toFixed(2)}</span></div>
                 </div>
 
                 {/* 返回按钮 */}
