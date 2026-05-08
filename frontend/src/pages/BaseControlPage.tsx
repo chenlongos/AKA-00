@@ -208,8 +208,8 @@ const BaseControlPage = () => {
                     fontSize: "14px",
                 }}
             >
-                <div>左轮: <span style={{color: "#4ade80"}}>{leftSpeed}</span> RPM</div>
-                <div>右轮: <span style={{color: "#4ade80"}}>{rightSpeed}</span> RPM</div>
+                <div>左轮: <span style={{color: "#4ade80"}}>{leftSpeed}</span> m/s</div>
+                <div>右轮: <span style={{color: "#4ade80"}}>{rightSpeed}</span> m/s</div>
             </div>
 
             {/* 功能按钮 */}
