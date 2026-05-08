@@ -1,0 +1,124 @@
+"""测试 OpenCV 摄像头视频流，带分辨率和帧大小标记。
+
+用法:
+    python test_camera_opencv.py --device 0 --width 640 --height 480 --port 5000
+
+然后访问:
+    http://localhost:5000/          - 查看摄像头信息
+    http://localhost:5000/video_stream - 查看视频流
+"""
+import argparse
+import sys
+
+
+def main():
+    parser = argparse.ArgumentParser(description="OpenCV Camera Test Server")
+    parser.add_argument("--device", type=int, default=0, help="Camera device index")
+    parser.add_argument("--width", type=int, default=640, help="Frame width")
+    parser.add_argument("--height", type=int, default=480, help="Frame height")
+    parser.add_argument("--fps", type=int, default=30, help="Frames per second")
+    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind")
+    parser.add_argument("--port", type=int, default=5000, help="Port to bind")
+    args = parser.parse_args()
+
+    # 延迟导入，避免在没有摄像头的机器上import失败
+    import cv2
+    from flask import Flask, Response, jsonify
+
+    app = Flask(__name__)
+
+    class Camera:
+        _instance = None
+
+        def __init__(self, device=0, width=640, height=480, fps=30):
+            self._cap = None
+            self._device = device
+            self._width = width
+            self._height = height
+            self._fps = fps
+
+        def open(self):
+            self._cap = cv2.VideoCapture(self._device)
+            if self._cap.isOpened():
+                self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._width)
+                self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._height)
+                self._cap.set(cv2.CAP_PROP_FPS, self._fps)
+                return True
+            return False
+
+        def read(self):
+            if self._cap is None:
+                return False, None
+            return self._cap.read()
+
+        def release(self):
+            if self._cap:
+                self._cap.release()
+                self._cap = None
+
+        @classmethod
+        def get_instance(cls, **kwargs):
+            if cls._instance is None:
+                cls._instance = cls(**kwargs)
+            return cls._instance
+
+    Camera._instance = None
+    camera = Camera.get_instance(device=args.device, width=args.width, height=args.height, fps=args.fps)
+    if not camera.open():
+        print(f"Error: Cannot open camera device {args.device}")
+        sys.exit(1)
+
+    frame_count = [0]  # 使用列表以便在闭包中修改
+
+    def generate_frames():
+        while True:
+            ret, frame = camera.read()
+            if not ret or frame is None:
+                break
+
+            frame_count[0] += 1
+            h, w = frame.shape[:2]
+            frame_size = frame.nbytes
+
+            info_text = f"OpenCV | {w}x{h} | {frame_size} bytes | #{frame_count[0]}"
+            cv2.putText(frame, info_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+            ret, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            if not ret:
+                continue
+
+            yield (b"--frame\r\n"
+                   b"Content-Type: image/jpeg\r\n\r\n"
+                   + jpeg.tobytes() + b"\r\n")
+
+    @app.route("/")
+    def index():
+        return jsonify({
+            "camera": "opencv",
+            "resolution": f"{camera._width}x{camera._height}",
+            "actual_resolution": f"{int(camera._cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x{int(camera._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}",
+            "fps": camera._fps,
+            "endpoints": {
+                "info": "GET /",
+                "stream": "GET /video_stream"
+            }
+        })
+
+    @app.route("/video_stream")
+    def video_stream():
+        return Response(generate_frames(), mimetype="multipart/x-mixed-replace; boundary=frame")
+
+    print(f"OpenCV Camera Server started on http://{args.host}:{args.port}")
+    print(f"Video stream: http://{args.host}:{args.port}/video_stream")
+    print(f"Press Ctrl+C to stop")
+
+    try:
+        app.run(host=args.host, port=args.port, threaded=True)
+    finally:
+        camera.release()
+
+
+if __name__ == "__main__":
+    # 默认配置：设备 0，分辨率 640x480，端口 5001
+    sys.argv = ["test_camera_opencv.py", "--port", "5001"]
+    main()
