@@ -14,14 +14,13 @@ import sys
 def main():
     parser = argparse.ArgumentParser(description="OpenCV Camera Test Server")
     parser.add_argument("--device", type=int, default=0, help="Camera device index")
-    parser.add_argument("--width", type=int, default=224, help="Frame width")
-    parser.add_argument("--height", type=int, default=224, help="Frame height")
+    parser.add_argument("--width", type=int, default=320, help="Frame width")
+    parser.add_argument("--height", type=int, default=240, help="Frame height")
     parser.add_argument("--fps", type=int, default=30, help="Frames per second")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind")
     parser.add_argument("--port", type=int, default=5000, help="Port to bind")
     args = parser.parse_args()
 
-    # 延迟导入，避免在没有摄像头的机器上import失败
     import cv2
     from flask import Flask, Response, jsonify
 
@@ -120,5 +119,5 @@ def main():
 
 if __name__ == "__main__":
     # 默认配置：设备 0，分辨率 224x224，端口 5001
-    sys.argv = ["test_camera_opencv.py", "--device", "0", "--width", "224", "--height", "224", "--port", "5001"]
+    sys.argv = ["test_camera_opencv.py", "--device", "0", "--width", "320", "--height", "240", "--port", "5001"]
     main()
