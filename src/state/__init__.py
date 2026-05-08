@@ -47,9 +47,9 @@ class MotorStateTracker:
 
         if self._motor_pair is not None:
             left_rpm, right_rpm = self._motor_pair.get_speeds()
-            # 转换为 m/s
-            left_speed = self._rpm_to_mps(left_rpm)
-            right_speed = self._rpm_to_mps(right_rpm)
+            # 转换为 m/s，保留两位小数
+            left_speed = round(self._rpm_to_mps(left_rpm), 2)
+            right_speed = round(self._rpm_to_mps(right_rpm), 2)
 
         return {
             "matched_timestamp_ms": current_timestamp_ms,
