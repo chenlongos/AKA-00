@@ -30,11 +30,8 @@ def ip():
 @api_bp.route("/motor_status")
 def motor_status():
     """获取小车左右轮当前状态。"""
-    timestamp = request.args.get("timestamp")
-    if timestamp is None:
-        return jsonify({"error": "timestamp is required"}), 400
-    timestamp = int(timestamp)
-    return jsonify(get_control_service().get_motor_status(timestamp))
+    from src.state import get_state_collector
+    return jsonify(get_state_collector().get_state())
 
 
 @api_bp.route("/motor_status_at")
@@ -45,8 +42,8 @@ def motor_status_at():
         return jsonify({"error": "capture_time_ms is required"}), 400
     offset_ms = request.args.get("offset_ms", "0")
 
-    query_timestamp_ms = int(capture_time_ms) + int(float(offset_ms))
-    payload = get_control_service().get_motor_status(query_timestamp_ms)
+    from src.state import get_state_collector
+    payload = get_state_collector().get_state()
     payload["capture_time_ms"] = int(capture_time_ms)
     payload["offset_ms"] = int(float(offset_ms))
     return jsonify(payload)
@@ -197,7 +194,8 @@ def motor_direct():
     try:
         result = get_control_service().run_motor(left, right, duration)
         # 同时返回当前速度，减少请求次数
-        status = get_control_service().get_motor_status(int(time.time() * 1000))
+        from src.state import get_state_collector
+        status = get_state_collector().get_state()
         result["left_speed"] = status.get("left_speed", 0)
         result["right_speed"] = status.get("right_speed", 0)
         return jsonify(result)

@@ -3,14 +3,13 @@ import threading
 from src.arm_control.interfaces import create_gripper
 from src.base_control.interfaces import create_motor_pair
 from src.base_control.pwm_channel_config import load_pwm_channels
-from src.state import MotorStateTracker
+from src.state import get_state_collector
 
 
 class ControlService:
     def __init__(self, config):
         self._config = config
         self._arm_driver = config.arm_driver
-        self._state_tracker = MotorStateTracker.get_instance()
         self._duration_timer: threading.Timer | None = None
         self._duration_timer_lock = threading.Lock()
         self._pwm_channels = load_pwm_channels(config)
@@ -33,11 +32,8 @@ class ControlService:
             backend=self._config.base_driver,
             base_port=self._config.base_port
         )
-        self._state_tracker.set_motor_pair(motor_pair)
+        get_state_collector().set_motor_pair(motor_pair)
         return motor_pair
-
-    def get_motor_status(self, timestamp: int) -> dict[str, int]:
-        return self._state_tracker.get_status_at(timestamp)
 
     def execute_action(self, action: str, speed: int = 50, milliseconds: float = 0) -> dict:
         self._cancel_pending_stop()

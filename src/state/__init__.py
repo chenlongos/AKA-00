@@ -1,7 +1,6 @@
 from dataclasses import dataclass
+import threading
 import time
-from typing import Any
-
 
 @dataclass
 class RobotStatus:
@@ -12,51 +11,105 @@ class RobotStatus:
     right_target: int = 0
 
 
-class MotorStateTracker:
-    """追踪电机状态"""
+class StateCollector:
+    """15fps 状态采集线程，汇总 action / image / state"""
 
-    _instance: 'MotorStateTracker | None' = None
+    _instance: "StateCollector | None" = None
+    _lock = threading.Lock()
 
     def __init__(self):
+        self._running = False
+        self._thread: threading.Thread | None = None
+
+        # 最新数据（线程安全）
+        self._action = {"left": 0, "right": 0}
+        self._image = None
+        self._state = {"left_speed": 0.0, "right_speed": 0.0}
+        self._data_lock = threading.Lock()
+
+        # 相机和电机引用（延迟注入）
+        self._camera = None
         self._motor_pair = None
-        self._last_update_ms = int(time.time() * 1000)
 
     @classmethod
-    def get_instance(cls) -> 'MotorStateTracker':
+    def get_instance(cls) -> "StateCollector":
         if cls._instance is None:
-            cls._instance = MotorStateTracker()
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = StateCollector()
         return cls._instance
 
+    def set_camera(self, camera):
+        self._camera = camera
+
     def set_motor_pair(self, motor_pair):
-        """注入 motor pair 引用，由 ControlService 调用"""
         self._motor_pair = motor_pair
 
-    # 轮胎参数（用于 RPM -> m/s 转换）
-    _WHEEL_DIAMETER_M = 0.065  # 65mm
+    def set_action(self, left: int, right: int):
+        with self._data_lock:
+            self._action = {"left": left, "right": right}
 
-    def _rpm_to_mps(self, rpm: float) -> float:
-        """将 RPM（转/分钟）转换为 m/s。"""
-        circumference = 3.1415926535 * self._WHEEL_DIAMETER_M
-        return rpm * circumference / 60.0
+    def get_action(self) -> dict:
+        with self._data_lock:
+            return self._action.copy()
 
-    def get_status_at(self, timestamp_ms: int) -> dict[str, Any]:
-        current_timestamp_ms = int(time.time() * 1000)
+    def get_image(self):
+        with self._data_lock:
+            return self._image
 
-        left_speed, right_speed = 0, 0
-        left_target, right_target = 0, 0
+    def get_state(self) -> dict:
+        with self._data_lock:
+            return self._state.copy()
 
+    def _update(self):
+        """采集最新数据（每帧调用一次）"""
+        current_ms = int(time.time() * 1000)
+
+        # 1. 更新 image
+        if self._camera is not None:
+            ret, frame = self._camera.read()
+            if ret:
+                with self._data_lock:
+                    self._image = frame
+
+        # 2. 更新 state
+        left_speed, right_speed = 0.0, 0.0
         if self._motor_pair is not None:
             left_rpm, right_rpm = self._motor_pair.get_speeds()
-            # 转换为 m/s，保留两位小数
-            left_speed = round(self._rpm_to_mps(left_rpm), 2)
-            right_speed = round(self._rpm_to_mps(right_rpm), 2)
+            circumference = 3.1415926535 * 0.065
+            left_speed = round(left_rpm * circumference / 60.0, 2)
+            right_speed = round(right_rpm * circumference / 60.0, 2)
 
-        return {
-            "matched_timestamp_ms": current_timestamp_ms,
-            "delta_ms": current_timestamp_ms - timestamp_ms,
-            "source": "current",
-            "left_speed": left_speed,
-            "right_speed": right_speed,
-            "left_target": left_target,
-            "right_target": right_target,
-        }
+        with self._data_lock:
+            self._state = {
+                "left_speed": left_speed,
+                "right_speed": right_speed,
+                "timestamp_ms": current_ms,
+            }
+
+    def _loop(self):
+        interval = 1.0 / 15  # 15fps
+        while self._running:
+            start = time.time()
+            self._update()
+            elapsed = time.time() - start
+            sleep_time = interval - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+
+    def start(self):
+        if self._running:
+            return
+        self._running = True
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._running = False
+        if self._thread is not None:
+            self._thread.join(timeout=2)
+            self._thread = None
+
+
+def get_state_collector() -> StateCollector:
+    return StateCollector.get_instance()
