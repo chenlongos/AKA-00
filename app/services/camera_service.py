@@ -29,6 +29,8 @@ class CameraService:
                 height=180,
                 fps=15
             )
+            from src.state import get_state_collector
+            get_state_collector().set_camera(self._camera)
 
     def is_available(self) -> bool:
         self._ensure_camera()

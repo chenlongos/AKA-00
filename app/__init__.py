@@ -22,6 +22,12 @@ def create_app():
     app.register_blueprint(wifi_bp)  # WiFi 路由注册到根路径
     app.register_blueprint(frontend_bp)
 
+    # 启动状态采集线程
+    from src.state import get_state_collector
+    collector = get_state_collector()
+    collector.set_motor_pair(app.extensions["control_service"]._motor_pair)
+    collector.start()
+
     return app
 
 

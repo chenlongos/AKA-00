@@ -2,6 +2,7 @@ from dataclasses import dataclass
 import threading
 import time
 
+
 @dataclass
 class RobotStatus:
     """左右轮状态管理"""
@@ -61,37 +62,36 @@ class StateCollector:
         with self._data_lock:
             return self._state.copy()
 
-    def _update(self):
-        """采集最新数据（每帧调用一次）"""
-        current_ms = int(time.time() * 1000)
-
-        # 1. 更新 image
-        if self._camera is not None:
-            ret, frame = self._camera.read()
-            if ret:
-                with self._data_lock:
-                    self._image = frame
-
-        # 2. 更新 state
-        left_speed, right_speed = 0.0, 0.0
-        if self._motor_pair is not None:
-            left_rpm, right_rpm = self._motor_pair.get_speeds()
-            circumference = 3.1415926535 * 0.065
-            left_speed = round(left_rpm * circumference / 60.0, 2)
-            right_speed = round(right_rpm * circumference / 60.0, 2)
-
-        with self._data_lock:
-            self._state = {
-                "left_speed": left_speed,
-                "right_speed": right_speed,
-                "timestamp_ms": current_ms,
-            }
-
     def _loop(self):
-        interval = 1.0 / 15  # 15fps
+        """独立 15fps 采集循环"""
+        interval = 1.0 / 15
         while self._running:
             start = time.time()
-            self._update()
+
+            current_ms = int(time.time() * 1000)
+
+            # 1. 更新 image
+            if self._camera is not None:
+                ret, frame = self._camera.read()
+                if ret:
+                    with self._data_lock:
+                        self._image = frame
+
+            # 2. 更新 state
+            left_speed, right_speed = 0.0, 0.0
+            if self._motor_pair is not None:
+                left_rpm, right_rpm = self._motor_pair.get_speeds()
+                circumference = 3.1415926535 * 0.065
+                left_speed = round(left_rpm * circumference / 60.0, 2)
+                right_speed = round(right_rpm * circumference / 60.0, 2)
+
+            with self._data_lock:
+                self._state = {
+                    "left_speed": left_speed,
+                    "right_speed": right_speed,
+                    "timestamp_ms": current_ms,
+                }
+
             elapsed = time.time() - start
             sleep_time = interval - elapsed
             if sleep_time > 0:
