@@ -2,7 +2,8 @@ import os
 import signal
 import socket
 import struct
-import time
+
+from src.state import get_state_collector
 
 try:
     import fcntl
@@ -30,30 +31,7 @@ def ip():
 @api_bp.route("/motor_status")
 def motor_status():
     """获取小车左右轮当前状态。"""
-    from src.state import get_state_collector
     return jsonify(get_state_collector().get_state())
-
-
-@api_bp.route("/motor_status_at")
-def motor_status_at():
-    """按 Real 端时间戳和时钟偏移查询小车对应时刻的状态。"""
-    capture_time_ms = request.args.get("capture_time_ms") # 捕获时间
-    if capture_time_ms is None:
-        return jsonify({"error": "capture_time_ms is required"}), 400
-    offset_ms = request.args.get("offset_ms", "0")
-
-    from src.state import get_state_collector
-    payload = get_state_collector().get_state()
-    payload["capture_time_ms"] = int(capture_time_ms)
-    payload["offset_ms"] = int(float(offset_ms))
-    return jsonify(payload)
-
-
-@api_bp.route("/time_sync")
-def time_sync():
-    return jsonify({
-        "device_time_ms": int(time.time() * 1000),
-    })
 
 
 @api_bp.route('/control', methods=['GET'])
@@ -325,12 +303,12 @@ def video_stream():
                     ret, frame = camera_service.read()
                     if not ret:
                         break
-                    # 低质量快速编码
-                    ret, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 30])
+                    # WebP编码：比JPEG小30-50%，传输更快
+                    ret, webp = cv2.imencode('.webp', frame, [cv2.IMWRITE_WEBP_QUALITY, 20])
                     if not ret:
                         continue
                     yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
+                           b'Content-Type: image/webp\r\n\r\n' + webp.tobytes() + b'\r\n')
             except GeneratorExit:
                 pass
 
@@ -353,3 +331,33 @@ def video_stream_close():
         return jsonify({"status": "ok"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/all_status")
+def all_status():
+    """获取所有状态：电机速度、动作、图像（WebP编码用于最快传输）"""
+    import cv2
+    import base64
+
+    collector = get_state_collector()
+
+    # 获取状态和动作
+    state = collector.get_state()
+    action = collector.get_action()
+
+    # 获取图像并编码为WebP（比JPEG小30-50%）
+    image = collector.get_image()
+    image_data = None
+    if image is not None:
+        # WebP: quality 0 = 最小文件, 抓换最快
+        ret, webp = cv2.imencode('.webp', image, [cv2.IMWRITE_WEBP_QUALITY, 10])
+        if ret:
+            image_data = base64.b64encode(webp.tobytes()).decode('ascii')
+
+    return jsonify({
+        "timestamp": request.args.get("timestamp"),
+        "state": state,
+        "action": action,
+        "image": image_data,
+        "image_format": "webp",
+    })
