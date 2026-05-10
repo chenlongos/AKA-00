@@ -1,4 +1,5 @@
 from flask import Blueprint, request, jsonify, make_response
+import time
 
 from src.state import get_state_collector
 
@@ -30,23 +31,31 @@ def camera_status():
 
 @camera_bp.route("/stream")
 def video_stream():
-    """MJPEG视频流 - 直接从 StateCollector 取最新帧，无冗余读取"""
+    """MJPEG视频流 - 直接从Camera读取最新帧，无竞争"""
     import cv2
     from src.state import get_state_collector
 
     collector = get_state_collector()
 
+    if collector._camera is None or not hasattr(collector._camera, '_frame_ready'):
+        return jsonify({"error": "camera not available"}), 500
+
     def generate():
         try:
             while True:
-                frame = collector.get_image()
-                if frame is None:
+                if not collector._running:
                     break
-                ret, webp = cv2.imencode('.webp', frame, [cv2.IMWRITE_WEBP_QUALITY, 20])
+                # 直接从 Camera 读最新帧引用，无 event 竞争
+                ret, frame = collector._camera.read()
+                if not ret or frame is None:
+                    time.sleep(0.05)
+                    continue
+                ret, jpg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 40])
                 if not ret:
                     continue
                 yield (b'--frame\r\n'
-                       b'Content-Type: image/webp\r\n\r\n' + webp.tobytes() + b'\r\n')
+                       b'Content-Type: image/jpeg\r\n\r\n' + jpg.tobytes() + b'\r\n')
+                time.sleep(0.03)  # ~30fps 上限
         except GeneratorExit:
             pass
 
@@ -66,17 +75,22 @@ def all_status():
     collector = get_state_collector()
     state = collector.get_state()
     action = collector.get_action()
-    image = collector.get_image()
+
+    # 直接从 Camera 读帧，不经过 StateCollector
+    frame = None
+    if collector._camera is not None:
+        ret, frame = collector._camera.read()
+
     image_data = None
-    if image is not None:
-        ret, webp = cv2.imencode('.webp', image, [cv2.IMWRITE_WEBP_QUALITY, 10])
+    if frame is not None:
+        ret, jpg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 25])
         if ret:
-            image_data = base64.b64encode(webp.tobytes()).decode('ascii')
+            image_data = base64.b64encode(jpg.tobytes()).decode('ascii')
 
     return jsonify({
         "timestamp": request.args.get("timestamp"),
         "state": state,
         "action": action,
         "image": image_data,
-        "image_format": "webp",
+        "image_format": "jpeg",
     })

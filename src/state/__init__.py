@@ -63,21 +63,12 @@ class StateCollector:
             return self._state.copy()
 
     def _loop(self):
-        """独立 15fps 采集循环"""
+        """事件驱动采集：新帧到达时立即处理"""
         interval = 1.0 / 15
         while self._running:
             start = time.time()
 
-            current_ms = int(time.time() * 1000)
-
-            # 1. 更新 image
-            if self._camera is not None:
-                ret, frame = self._camera.read()
-                if ret:
-                    with self._data_lock:
-                        self._image = frame
-
-            # 2. 更新 state
+            # 更新电机状态
             left_speed, right_speed = 0.0, 0.0
             if self._motor_pair is not None:
                 left_rpm, right_rpm = self._motor_pair.get_speeds()
@@ -85,6 +76,7 @@ class StateCollector:
                 left_speed = round(left_rpm * circumference / 60.0, 2)
                 right_speed = round(right_rpm * circumference / 60.0, 2)
 
+            current_ms = int(time.time() * 1000)
             with self._data_lock:
                 self._state = {
                     "left_speed": left_speed,
@@ -92,10 +84,7 @@ class StateCollector:
                     "timestamp_ms": current_ms,
                 }
 
-            elapsed = time.time() - start
-            sleep_time = interval - elapsed
-            if sleep_time > 0:
-                time.sleep(sleep_time)
+            time.sleep(interval)
 
     def start(self):
         if self._running:

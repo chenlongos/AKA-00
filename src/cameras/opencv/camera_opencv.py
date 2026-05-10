@@ -19,7 +19,7 @@ class Camera:
     _instance: "Camera | None" = None
     _lock = threading.Lock()
 
-    def __init__(self, device: int = 0, width: int = 320, height: int = 180, fps: int = 15):
+    def __init__(self, device: int = 0, width: int = 320, height: int = 180, fps: int = 10):
         self._cap = None
         self._device = device
         self._width = width
@@ -27,11 +27,12 @@ class Camera:
         self._fps = fps
         self._frame = None
         self._frame_lock = threading.Lock()
+        self._frame_ready = threading.Event()
         self._running = False
         self._thread: threading.Thread | None = None
 
     @classmethod
-    def get_instance(cls, device: int = 0, width: int = 320, height: int = 180, fps: int = 15) -> "Camera":
+    def get_instance(cls, device: int = 0, width: int = 320, height: int = 180, fps: int = 10) -> "Camera":
         """获取 Camera 单例"""
         if cls._instance is None:
             with cls._lock:
@@ -69,7 +70,7 @@ class Camera:
         self._thread.start()
 
     def _capture_loop(self):
-        """独立采集线程，只保留最新帧"""
+        """独立采集线程，只保留最新帧，采集完通知等待者"""
         while self._running:
             if self._cap is None or not self._cap.isOpened():
                 time.sleep(0.1)
@@ -80,6 +81,7 @@ class Camera:
                 continue
             with self._frame_lock:
                 self._frame = frame
+            self._frame_ready.set()
 
     def is_available(self) -> bool:
         """检查摄像头是否可用"""
