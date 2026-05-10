@@ -1,6 +1,7 @@
 import {useEffect, useRef, useState} from "react";
 import {api} from "../api";
 import ControlButton from "../components/ControlButton.tsx";
+import CameraToggle from "../components/CameraToggle";
 
 
 const BaseControlPage = () => {
@@ -8,14 +9,8 @@ const BaseControlPage = () => {
     const [status, setStatus] = useState("准备就绪");
     const [leftSpeed, setLeftSpeed] = useState(0);
     const [rightSpeed, setRightSpeed] = useState(0);
-    const [cameraOn, setCameraOn] = useState(false);
 
     const currentActionRef = useRef<string | null>(null);
-
-    // 摄像头状态
-    useEffect(() => {
-        api.camera.status().then(data => setCameraOn(data.camera_on)).catch(() => {});
-    }, []);
 
     // 定时获取电机实时速度
     useEffect(() => {
@@ -135,33 +130,7 @@ const BaseControlPage = () => {
                 {/* 摄像头开关 */}
                 <div style={{position: "absolute", top: "0", right: "0", display: "flex", alignItems: "center", gap: "6px"}}>
                     <span style={{fontSize: "11px", opacity: 0.6}}>摄像头</span>
-                    <div
-                        onClick={() => {
-                            const req = cameraOn ? api.camera.close() : api.camera.open();
-                            req.then(data => setCameraOn(data.camera_on)).catch(() => {});
-                        }}
-                        style={{
-                            width: "44px",
-                            height: "22px",
-                            borderRadius: "11px",
-                            background: cameraOn ? "#22c55e" : "#334155",
-                            border: `1px solid ${cameraOn ? "#22c55e" : "#475569"}`,
-                            cursor: "pointer",
-                            position: "relative",
-                            transition: "background 0.2s",
-                        }}
-                    >
-                        <div style={{
-                            position: "absolute",
-                            top: "2px",
-                            left: cameraOn ? "23px" : "2px",
-                            width: "16px",
-                            height: "16px",
-                            borderRadius: "50%",
-                            background: "white",
-                            transition: "left 0.2s",
-                        }}/>
-                    </div>
+                    <CameraToggle />
                 </div>
 
                 <div/>
