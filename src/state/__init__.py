@@ -2,6 +2,8 @@ from dataclasses import dataclass
 import threading
 import time
 
+_WHEEL_CIRCUMFERENCE = 3.1415926535 * 0.065  # 轮子周长 (m)
+
 
 @dataclass
 class RobotStatus:
@@ -76,9 +78,8 @@ class StateCollector:
             left_speed, right_speed = 0.0, 0.0
             if self._motor_pair is not None:
                 left_rpm, right_rpm = self._motor_pair.get_speeds()
-                circumference = 3.1415926535 * 0.065
-                left_speed = round(left_rpm * circumference / 60.0, 2)
-                right_speed = round(right_rpm * circumference / 60.0, 2)
+                left_speed = round(left_rpm * _WHEEL_CIRCUMFERENCE / 60.0, 2)
+                right_speed = round(right_rpm * _WHEEL_CIRCUMFERENCE / 60.0, 2)
 
             current_ms = int(time.time() * 1000)
             with self._data_lock:

@@ -54,12 +54,9 @@ class ControlService:
             right: 右轮速度 (-100 ~ 100)
             duration: 持续时间（秒），0 表示无限
         """
-        from src.state import get_state_collector
-        collector = get_state_collector()
-
         self._cancel_pending_stop()
         self._motor_pair.set_speed(left, right)
-        collector.set_target_speed(left, right)
+        get_state_collector().set_target_speed(left, right)
         if duration > 0:
             self._schedule_stop(duration)
             return {"status": "success", "left": left, "right": right, "duration": duration, "mode": "scheduled"}
@@ -123,28 +120,25 @@ class ControlService:
     TURN_SPEED_RATIO = 0.4  # 转弯速度比例
 
     def _apply_base_action(self, action: str, speed: int) -> bool:
-        from src.state import get_state_collector
-        collector = get_state_collector()
-
         if action == "up":
             self._motor_pair.set_speed(speed, speed)
-            collector.set_target_speed(speed, speed)
+            get_state_collector().set_target_speed(speed, speed)
         elif action == "down":
             self._motor_pair.set_speed(-speed, -speed)
-            collector.set_target_speed(-speed, -speed)
+            get_state_collector().set_target_speed(-speed, -speed)
         elif action == "left":
             left = -int(speed * self.TURN_SPEED_RATIO)
             right = int(speed * self.TURN_SPEED_RATIO)
             self._motor_pair.set_speed(left, right)
-            collector.set_target_speed(left, right)
+            get_state_collector().set_target_speed(left, right)
         elif action == "right":
             left = int(speed * self.TURN_SPEED_RATIO)
             right = -int(speed * self.TURN_SPEED_RATIO)
             self._motor_pair.set_speed(left, right)
-            collector.set_target_speed(left, right)
+            get_state_collector().set_target_speed(left, right)
         elif action == "stop":
             self._motor_pair.brake()
-            collector.set_target_speed(0, 0)
+            get_state_collector().set_target_speed(0, 0)
         else:
             return False
         return True

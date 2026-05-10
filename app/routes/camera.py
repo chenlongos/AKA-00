@@ -1,4 +1,6 @@
 from flask import Blueprint, request, jsonify, make_response
+import base64
+import cv2
 import time
 
 from src.state import get_state_collector
@@ -32,9 +34,6 @@ def camera_status():
 @camera_bp.route("/stream")
 def video_stream():
     """MJPEG视频流 - 直接从Camera读取最新帧，无竞争"""
-    import cv2
-    from src.state import get_state_collector
-
     collector = get_state_collector()
 
     if collector._camera is None or not hasattr(collector._camera, '_frame_ready'):
@@ -69,9 +68,6 @@ def video_stream():
 
 @camera_bp.route("/all_status")
 def all_status():
-    import cv2
-    import base64
-
     collector = get_state_collector()
     status = collector.get_status()
     image = collector.get_image()

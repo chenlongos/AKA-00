@@ -1,6 +1,8 @@
 """摄像头服务单例 - 简化版，直接使用 Camera"""
 import threading
 
+from src.state import get_state_collector
+
 
 class CameraService:
     """全局摄像头单例，直接透传给 Camera"""
@@ -29,7 +31,6 @@ class CameraService:
                 height=180,
                 fps=15
             )
-            from src.state import get_state_collector
             get_state_collector().set_camera(self._camera)
 
     def is_available(self) -> bool:
@@ -44,6 +45,5 @@ class CameraService:
         if self._camera is not None:
             from src.cameras.opencv import Camera as OpenCVCamera
             OpenCVCamera.reset()
-            from src.state import get_state_collector
             get_state_collector().clear_camera()
             self._camera = None

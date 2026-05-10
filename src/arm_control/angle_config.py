@@ -59,10 +59,11 @@ def save_arm_angles(driver: str, angles: dict[str, object]) -> dict[str, int]:
     normalized = _normalize_angles(angles, defaults)
     raw_data = _read_arm_angles_file()
 
-    if driver == ZP10S_DRIVER and not any(isinstance(value, dict) for value in raw_data.values()):
+    is_multi_driver = any(isinstance(value, dict) for value in raw_data.values())
+    if driver == ZP10S_DRIVER and not is_multi_driver:
         data_to_write: dict[str, object] = normalized
     else:
-        data_to_write = raw_data if any(isinstance(value, dict) for value in raw_data.values()) else {}
+        data_to_write = raw_data if is_multi_driver else {}
         data_to_write[driver] = normalized
 
     _ARM_ANGLES_PATH.write_text(

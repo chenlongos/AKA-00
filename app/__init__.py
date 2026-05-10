@@ -19,9 +19,7 @@ def create_app():
 
     init_control_service(app)
     # 先注册 api_bp（包含 /control）
-    from app.routes.api import api_bp
     app.register_blueprint(api_bp)
-    # 再注册各子模块
     from app.routes.system import system_bp
     from app.routes.motor import motor_bp
     from app.routes.arm import arm_bp
