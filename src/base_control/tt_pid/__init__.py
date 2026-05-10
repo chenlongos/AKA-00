@@ -182,7 +182,7 @@ class TtPidChassis:
         left, right = 0, 0
         # mid=2 会连续返回两个帧
         for _ in range(2):
-            rsp = self._recv_frame(timeout=0.3)
+            rsp = self._recv_frame(timeout=0.1)
             if rsp is None or rsp["cmd"] != RSP_RPM_DATA:
                 return None
             payload = rsp["payload"]
