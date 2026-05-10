@@ -2,6 +2,7 @@
 import threading
 
 from src.state import get_state_collector
+from src.cameras import Camera
 
 
 class CameraService:
@@ -24,8 +25,7 @@ class CameraService:
     def _ensure_camera(self):
         """确保摄像头已初始化"""
         if self._camera is None:
-            from src.cameras.opencv import Camera as OpenCVCamera
-            self._camera = OpenCVCamera.get_instance(
+            self._camera = Camera.get_instance(
                 device=0,
                 width=320,
                 height=180,
@@ -43,7 +43,6 @@ class CameraService:
     def close(self):
         """关闭摄像头"""
         if self._camera is not None:
-            from src.cameras.opencv import Camera as OpenCVCamera
-            OpenCVCamera.reset()
+            Camera.reset()
             get_state_collector().clear_camera()
             self._camera = None
