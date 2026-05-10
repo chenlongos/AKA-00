@@ -7,6 +7,15 @@ const RCDemoPage = () => {
     const [throttleDisplay, setThrottleDisplay] = useState(0);
     const [directionDisplay, setDirectionDisplay] = useState(0);
     const [isNarrow, setIsNarrow] = useState(false);
+    const [cameraOn, setCameraOn] = useState(false);
+
+    // 摄像头状态
+    useEffect(() => {
+        fetch("/api/camera/status")
+            .then(res => res.json())
+            .then(data => setCameraOn(data.camera_on))
+            .catch(() => {});
+    }, []);
 
     // 检测屏幕宽度
     useEffect(() => {
@@ -165,7 +174,7 @@ const RCDemoPage = () => {
     // 返回
     const handleBack = () => {
         stopControl();
-        navigator.sendBeacon("/api/video_stream/close");
+        navigator.sendBeacon("/api/camera", new Blob([JSON.stringify({action: "close"})], {type: "application/json"}));
         window.location.href = "/";
     };
 
@@ -209,8 +218,7 @@ const RCDemoPage = () => {
                 overflow: "hidden",
             }}
         >
-            {/* 油门摇杆 */}
-            <div style={{display: "flex", flexDirection: "column", alignItems: "center", flex: 1}}>
+                        <div style={{display: "flex", flexDirection: "column", alignItems: "center", flex: 1}}>
                 <div style={{fontSize: "12px", opacity: 0.6, marginBottom: "8px", transform: isNarrow ? "rotate(90deg)" : "none"}}>油门</div>
                 <div
                     ref={throttleRefEl}
@@ -267,7 +275,47 @@ const RCDemoPage = () => {
                 flex: 2,
                 transform: isNarrow ? "rotate(90deg)" : "none",
                 transition: "transform 0.2s",
+                position: "relative",
             }}>
+                {/* 摄像头开关 - 区域内右上角 */}
+                <div style={{position: "absolute", top: "0", right: "0", display: "flex", alignItems: "center", gap: "6px"}}>
+                    <span style={{fontSize: "11px", opacity: 0.6}}>摄像头</span>
+                    <div
+                        onClick={() => {
+                            const action = cameraOn ? "close" : "open";
+                            fetch("/api/camera", {
+                                method: "POST",
+                                headers: {"Content-Type": "application/json"},
+                                body: JSON.stringify({action}),
+                            })
+                                .then(res => res.json())
+                                .then(data => setCameraOn(data.camera_on))
+                                .catch(() => {});
+                        }}
+                        style={{
+                            width: "44px",
+                            height: "22px",
+                            borderRadius: "11px",
+                            background: cameraOn ? "#22c55e" : "#334155",
+                            border: `1px solid ${cameraOn ? "#22c55e" : "#475569"}`,
+                            cursor: "pointer",
+                            position: "relative",
+                            transition: "background 0.2s",
+                        }}
+                    >
+                        <div style={{
+                            position: "absolute",
+                            top: "2px",
+                            left: cameraOn ? "23px" : "2px",
+                            width: "16px",
+                            height: "16px",
+                            borderRadius: "50%",
+                            background: "white",
+                            transition: "left 0.2s",
+                        }}/>
+                    </div>
+                </div>
+
                 {/* 视频流 */}
                 <div
                     style={{
@@ -276,18 +324,36 @@ const RCDemoPage = () => {
                         border: "2px solid #334155",
                     }}
                 >
-                    <img
-                        src="/api/video_stream"
-                        alt="Camera"
-                        style={{
-                            width: `${videoW}px`,
-                            height: `${videoH}px`,
-                            objectFit: "cover",
-                            background: "#000",
-                        }}
-                    />
+                    {cameraOn ? (
+                        <img
+                            src="/api/video_stream"
+                            alt="Camera"
+                            style={{
+                                width: `${videoW}px`,
+                                height: `${videoH}px`,
+                                objectFit: "cover",
+                                background: "#000",
+                            }}
+                        />
+                    ) : (
+                        <div
+                            style={{
+                                width: `${videoW}px`,
+                                height: `${videoH}px`,
+                                background: "#1e293b",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                color: "#94a3b8",
+                                fontSize: "14px",
+                            }}
+                        >
+                            摄像头已关闭
+                        </div>
+                    )}
                 </div>
 
+                
                 {/* 速度显示 */}
                 <div style={{display: "flex", justifyContent: "center", gap: "20px", fontSize: "13px", marginTop: "10px"}}>
                     <div>左 <span style={{color: "#4ade80", fontWeight: "bold"}}>{leftSpeed > 0 ? "+" : ""}{leftSpeed.toFixed(2)}</span></div>

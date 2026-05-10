@@ -322,6 +322,43 @@ def video_stream():
         return jsonify({"error": str(e)}), 500
 
 
+@api_bp.route("/camera", methods=["POST"])
+def camera_control():
+    """打开或关闭摄像头
+
+    Body:
+        action: "open" | "close"
+    """
+    from app.services.camera_service import CameraService
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "json body is required"}), 400
+
+    action = payload.get("action")
+    if action not in ("open", "close"):
+        return jsonify({"error": "action must be 'open' or 'close'"}), 400
+
+    service = CameraService.get_instance()
+
+    if action == "open":
+        service._ensure_camera()
+        available = service.is_available()
+    else:
+        service.close()
+        available = False
+
+    return jsonify({"camera_on": available})
+
+
+@api_bp.route("/camera/status")
+def camera_status():
+    """获取摄像头状态"""
+    from app.services.camera_service import CameraService
+    available = CameraService.get_instance().is_available()
+    return jsonify({"camera_on": available})
+
+
 @api_bp.route("/video_stream/close", methods=["POST"])
 def video_stream_close():
     """关闭视频流，释放摄像头"""
