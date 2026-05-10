@@ -5,15 +5,16 @@ import time
 
 @dataclass
 class RobotStatus:
-    """左右轮状态管理"""
+    """小车状态 - 用于ACT训练"""
     left_speed: float = 0.0
     right_speed: float = 0.0
-    left_target: int = 0
-    right_target: int = 0
+    left_action: float = 0
+    right_action: float = 0
+    timestamp_ms: int = 0
 
 
 class StateCollector:
-    """15fps 状态采集线程，汇总 action / image / state"""
+    """状态采集线程，汇总 speed / action / camera"""
 
     _instance: "StateCollector | None" = None
     _lock = threading.Lock()
@@ -22,10 +23,7 @@ class StateCollector:
         self._running = False
         self._thread: threading.Thread | None = None
 
-        # 最新数据（线程安全）
-        self._action = {"left": 0, "right": 0}
-        self._image = None
-        self._state = {"left_speed": 0.0, "right_speed": 0.0}
+        self._status = RobotStatus()
         self._data_lock = threading.Lock()
 
         # 相机和电机引用（延迟注入）
@@ -48,27 +46,30 @@ class StateCollector:
 
     def set_action(self, left: int, right: int):
         with self._data_lock:
-            self._action = {"left": left, "right": right}
+            self._status.left_action = left
+            self._status.right_action = right
 
-    def get_action(self) -> dict:
+    def get_status(self) -> RobotStatus:
         with self._data_lock:
-            return self._action.copy()
+            return RobotStatus(
+                left_speed=self._status.left_speed,
+                right_speed=self._status.right_speed,
+                left_action=self._status.left_action,
+                right_action=self._status.right_action,
+                timestamp_ms=self._status.timestamp_ms,
+            )
 
     def get_image(self):
-        with self._data_lock:
-            return self._image
-
-    def get_state(self) -> dict:
-        with self._data_lock:
-            return self._state.copy()
+        if self._camera is not None:
+            return self._camera.read()[1]
+        return None
 
     def _loop(self):
-        """事件驱动采集：新帧到达时立即处理"""
-        interval = 1.0 / 15
+        """10fps 状态更新"""
+        interval = 1.0 / 10
         while self._running:
             start = time.time()
 
-            # 更新电机状态
             left_speed, right_speed = 0.0, 0.0
             if self._motor_pair is not None:
                 left_rpm, right_rpm = self._motor_pair.get_speeds()
@@ -78,13 +79,14 @@ class StateCollector:
 
             current_ms = int(time.time() * 1000)
             with self._data_lock:
-                self._state = {
-                    "left_speed": left_speed,
-                    "right_speed": right_speed,
-                    "timestamp_ms": current_ms,
-                }
+                self._status.left_speed = left_speed
+                self._status.right_speed = right_speed
+                self._status.timestamp_ms = current_ms
 
-            time.sleep(interval)
+            elapsed = time.time() - start
+            sleep_time = interval - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
 
     def start(self):
         if self._running:

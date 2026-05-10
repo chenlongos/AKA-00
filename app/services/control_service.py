@@ -46,10 +46,6 @@ class ControlService:
 
         return {"status": "success", "action": action}
 
-    def set_motor_speed(self, left: int, right: int) -> dict[str, int | str]:
-        self._motor_pair.set_speed(left, right)
-        return {"status": "success", "left": left, "right": right}
-
     def run_motor(self, left: int, right: int, duration: float = 0) -> dict[str, int | str]:
         """设置电机速度，可选持续时间
 
@@ -122,16 +118,28 @@ class ControlService:
     TURN_SPEED_RATIO = 0.4  # 转弯速度比例
 
     def _apply_base_action(self, action: str, speed: int) -> bool:
+        from src.state import get_state_collector
+        collector = get_state_collector()
+
         if action == "up":
             self._motor_pair.set_speed(speed, speed)
+            collector.set_action(speed, speed)
         elif action == "down":
             self._motor_pair.set_speed(-speed, -speed)
+            collector.set_action(-speed, -speed)
         elif action == "left":
-            self._motor_pair.set_speed(-int(speed * self.TURN_SPEED_RATIO), int(speed * self.TURN_SPEED_RATIO))
+            left = -int(speed * self.TURN_SPEED_RATIO)
+            right = int(speed * self.TURN_SPEED_RATIO)
+            self._motor_pair.set_speed(left, right)
+            collector.set_action(left, right)
         elif action == "right":
-            self._motor_pair.set_speed(int(speed * self.TURN_SPEED_RATIO), -int(speed * self.TURN_SPEED_RATIO))
+            left = int(speed * self.TURN_SPEED_RATIO)
+            right = -int(speed * self.TURN_SPEED_RATIO)
+            self._motor_pair.set_speed(left, right)
+            collector.set_action(left, right)
         elif action == "stop":
             self._motor_pair.brake()
+            collector.set_action(0, 0)
         else:
             return False
         return True

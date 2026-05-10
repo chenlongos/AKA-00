@@ -73,24 +73,22 @@ def all_status():
     import base64
 
     collector = get_state_collector()
-    state = collector.get_state()
-    action = collector.get_action()
-
-    # 直接从 Camera 读帧，不经过 StateCollector
-    frame = None
-    if collector._camera is not None:
-        ret, frame = collector._camera.read()
+    status = collector.get_status()
+    image = collector.get_image()
 
     image_data = None
-    if frame is not None:
-        ret, jpg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 25])
+    if image is not None:
+        ret, jpg = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 25])
         if ret:
             image_data = base64.b64encode(jpg.tobytes()).decode('ascii')
 
     return jsonify({
         "timestamp": request.args.get("timestamp"),
-        "state": state,
-        "action": action,
+        "left_speed": status.left_speed,
+        "right_speed": status.right_speed,
+        "left_action": status.left_action,
+        "right_action": status.right_action,
+        "timestamp_ms": status.timestamp_ms,
         "image": image_data,
         "image_format": "jpeg",
     })
