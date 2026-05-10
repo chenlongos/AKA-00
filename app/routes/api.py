@@ -32,5 +32,3 @@ from app.routes.arm import arm_bp
 from app.routes.base import base_bp
 from app.routes.camera import camera_bp
 from app.routes.demo import demo_bp
-
-__all__ = ["system_bp", "motor_bp", "arm_bp", "base_bp", "camera_bp", "demo_bp"]

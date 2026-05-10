@@ -4,13 +4,13 @@ import cv2
 import time
 
 from src.state import get_state_collector
+from app.services.camera_service import CameraService
 
 camera_bp = Blueprint("camera", __name__, url_prefix="/api/camera")
 
 
 @camera_bp.route("/open", methods=["POST"])
 def camera_open():
-    from app.services.camera_service import CameraService
     service = CameraService.get_instance()
     service._ensure_camera()
     available = service.is_available()
@@ -19,14 +19,12 @@ def camera_open():
 
 @camera_bp.route("/close", methods=["POST"])
 def camera_close():
-    from app.services.camera_service import CameraService
     CameraService.get_instance().close()
     return jsonify({"camera_on": False})
 
 
 @camera_bp.route("/status")
 def camera_status():
-    from app.services.camera_service import CameraService
     available = CameraService.get_instance().is_available()
     return jsonify({"camera_on": available})
 
