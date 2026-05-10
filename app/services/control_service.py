@@ -97,6 +97,7 @@ class ControlService:
         self._motor_pair.close()
         self._pwm_channels = pwm_channels.copy()
         self._motor_pair = self._create_motor_pair()
+        get_state_collector().set_motor_pair(self._motor_pair)
         return {"status": "success", "pwm_channels": self.get_pwm_channels()}
 
     def _cancel_pending_stop(self) -> None:

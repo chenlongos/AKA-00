@@ -38,11 +38,14 @@ class StateCollector:
                     cls._instance = StateCollector()
         return cls._instance
 
+    def set_motor_pair(self, motor_pair):
+        self._motor_pair = motor_pair
+
     def set_camera(self, camera):
         self._camera = camera
 
-    def set_motor_pair(self, motor_pair):
-        self._motor_pair = motor_pair
+    def clear_camera(self):
+        self._camera = None
 
     def set_target_speed(self, left: int, right: int):
         with self._data_lock:

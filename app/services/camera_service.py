@@ -45,4 +45,6 @@ class CameraService:
         if self._camera is not None:
             from src.cameras.opencv import Camera as OpenCVCamera
             OpenCVCamera.reset()
+            from src.state import get_state_collector
+            get_state_collector().clear_camera()
             self._camera = None
