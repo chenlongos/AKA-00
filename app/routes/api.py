@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify
 
 from app.services import get_control_service
 
-api_bp = Blueprint("api", __name__)
+api_bp = Blueprint("api", __name__, url_prefix="/api")
 
 
 # ===========================

@@ -22,13 +22,13 @@ export const arm = {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({driver, angles}),
-        }),
+        }).then(r => r.json()),
     preview: (driver: string, key: string, value: number, angles: object) =>
         fetch("/api/arm/angles/preview", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({driver, key, value, angles}),
-        }),
+        }).then(r => r.json()),
 };
 
 // 底盘
@@ -62,3 +62,5 @@ export const demo = {
         body: JSON.stringify({}),
     }).then(r => r.json()),
 };
+
+export const api = { system, motor, arm, base, camera, demo };

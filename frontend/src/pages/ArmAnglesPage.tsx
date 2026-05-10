@@ -116,8 +116,8 @@ const ArmAnglesPage = () => {
         setSaving(true);
         setStatus("");
         try {
-            const r = await api.arm.saveAngles(driver, currentAngles);
-            if (r.ok !== false) {
+            const r = await api.arm.saveAngles(driver, currentAngles) as {error?: string};
+            if (!r.error) {
                 setStatus("保存成功");
                 setTimeout(() => setStatus(""), 2000);
             } else {
@@ -134,8 +134,8 @@ const ArmAnglesPage = () => {
         setSavingPwm(true);
         setPwmStatus("");
         try {
-            const r = await api.base.savePwmChannels(basePwmChannels);
-            if (r.ok !== false) {
+            const r = await api.base.savePwmChannels(basePwmChannels) as {error?: string};
+            if (!r.error) {
                 setPwmStatus("PWM 通道已保存并生效");
                 setTimeout(() => setPwmStatus(""), 2000);
             } else {
