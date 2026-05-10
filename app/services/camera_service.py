@@ -37,11 +37,8 @@ class CameraService:
         return self._camera is not None and self._camera.is_available()
 
     def read(self):
-        """读取最新帧"""
-        self._ensure_camera()
-        if self._camera is None:
-            return False, None
-        return self._camera.read()
+        """读取最新帧（直接透传，不自己读）"""
+        return self._camera.read() if self._camera else (False, None)
 
     def close(self):
         """关闭摄像头"""

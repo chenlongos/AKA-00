@@ -30,19 +30,17 @@ def camera_status():
 
 @camera_bp.route("/stream")
 def video_stream():
+    """MJPEG视频流 - 直接从 StateCollector 取最新帧，无冗余读取"""
     import cv2
-    from app.services.camera_service import CameraService
+    from src.state import get_state_collector
 
-    camera_service = CameraService.get_instance()
-
-    if not camera_service.is_available():
-        return jsonify({"error": "camera not available"}), 500
+    collector = get_state_collector()
 
     def generate():
         try:
             while True:
-                ret, frame = camera_service.read()
-                if not ret:
+                frame = collector.get_image()
+                if frame is None:
                     break
                 ret, webp = cv2.imencode('.webp', frame, [cv2.IMWRITE_WEBP_QUALITY, 20])
                 if not ret:
