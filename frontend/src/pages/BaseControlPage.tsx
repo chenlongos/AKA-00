@@ -28,7 +28,7 @@ const BaseControlPage = () => {
         };
 
         fetchSpeed();
-        const interval = setInterval(fetchSpeed, 100);
+        const interval = setInterval(fetchSpeed, 500);
         return () => clearInterval(interval);
     }, []);
 
