@@ -18,7 +18,22 @@ def create_app():
         return _with_cors_headers(response)
 
     init_control_service(app)
-    app.register_blueprint(api_bp, url_prefix="/api")
+    # 先注册 api_bp（包含 /control）
+    from app.routes.api import api_bp
+    app.register_blueprint(api_bp)
+    # 再注册各子模块
+    from app.routes.system import system_bp
+    from app.routes.motor import motor_bp
+    from app.routes.arm import arm_bp
+    from app.routes.base import base_bp
+    from app.routes.camera import camera_bp
+    from app.routes.demo import demo_bp
+    app.register_blueprint(system_bp)
+    app.register_blueprint(motor_bp)
+    app.register_blueprint(arm_bp)
+    app.register_blueprint(base_bp)
+    app.register_blueprint(camera_bp)
+    app.register_blueprint(demo_bp)
     app.register_blueprint(wifi_bp)  # WiFi 路由注册到根路径
     app.register_blueprint(frontend_bp)
 

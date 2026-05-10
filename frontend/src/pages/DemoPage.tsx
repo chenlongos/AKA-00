@@ -1,4 +1,5 @@
 import {useState, useRef} from "react";
+import {api} from "../api";
 import ControlButton from "../components/ControlButton.tsx";
 
 const DemoPage = () => {
@@ -11,14 +12,9 @@ const DemoPage = () => {
 
     const runDemo = async (name: string) => {
         if (runningDemoRef.current !== null) {
-            // stop current demo
             setLoading(true);
             try {
-                await fetch("/api/demo/stop", {
-                    method: "POST",
-                    headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({name: runningDemoRef.current}),
-                });
+                await api.demo.stop();
             } catch {}
             setLoading(false);
             setStatus(`${runningDemoRef.current} 已停止`);
@@ -36,14 +32,9 @@ const DemoPage = () => {
         runningDemoRef.current = name;
 
         try {
-            const res = await fetch("/api/demo/init", {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({name}),
-            });
-            if (!res.ok) {
-                const data = await res.json();
-                if (res.status === 409) {
+            const data = await api.demo.init(name);
+            if (data.error) {
+                if (data.pid) {
                     setStatus(`demo is already running`);
                     setConflictDemo(true);
                 } else {

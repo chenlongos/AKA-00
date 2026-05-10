@@ -1,4 +1,5 @@
 import {useEffect, useRef, useState} from "react";
+import {api} from "../api";
 import ControlButton from "../components/ControlButton.tsx";
 
 
@@ -9,31 +10,21 @@ const BaseControlPage = () => {
     const [rightSpeed, setRightSpeed] = useState(0);
     const [cameraOn, setCameraOn] = useState(false);
 
-    // 当前正在执行的动作（用于模拟器每帧发送）
     const currentActionRef = useRef<string | null>(null);
 
     // 摄像头状态
     useEffect(() => {
-        fetch("/api/camera/status")
-            .then(res => res.json())
-            .then(data => setCameraOn(data.camera_on))
-            .catch(() => {});
+        api.camera.status().then(data => setCameraOn(data.camera_on)).catch(() => {});
     }, []);
 
     // 定时获取电机实时速度
     useEffect(() => {
         const fetchSpeed = async () => {
             try {
-                const timestamp = Date.now();
-                const res = await fetch(`/api/motor_status?timestamp=${timestamp}`);
-                if (res.ok) {
-                    const data = await res.json();
-                    setLeftSpeed(data.left_speed ?? 0);
-                    setRightSpeed(data.right_speed ?? 0);
-                }
-            } catch {
-                // 忽略错误，避免刷屏
-            }
+                const data = await api.motor.status();
+                setLeftSpeed(data.left_speed ?? 0);
+                setRightSpeed(data.right_speed ?? 0);
+            } catch {}
         };
 
         fetchSpeed();
@@ -46,19 +37,13 @@ const BaseControlPage = () => {
         const processHash = () => {
             const hash = window.location.hash;
             if (hash) {
-                fetch(`/api/raw_command?cmd=${encodeURIComponent(hash)}`).then(() => {
-                    // 命令发送后清空哈希，避免重复执行
-                    window.history.replaceState(null, document.title, window.location.pathname);
-                }).catch(console.error);
+                api.motor.rawCommand(hash).catch(console.error);
+                window.history.replaceState(null, document.title, window.location.pathname);
             }
         };
 
-        // 初始检查
         processHash();
-        
-        // 监听哈希变化
         window.addEventListener('hashchange', processHash);
-        
         return () => window.removeEventListener('hashchange', processHash);
     }, []);
 
@@ -66,10 +51,7 @@ const BaseControlPage = () => {
         const getIp = async () => {
             setStatus("获取 IP...");
             try {
-                const res = await fetch("/ip");
-                if (!res.ok) throw new Error("请求失败");
-                const data = await res.json();
-                console.log("device ip:", data.ip);
+                const data = await api.system.ip();
                 setIp("IP: " + data.ip);
                 setStatus("准备就绪");
             } catch {
@@ -79,27 +61,16 @@ const BaseControlPage = () => {
 
         getIp();
 
-        // 切回控制台时重新加载 PWM 配置以恢复状态
-        fetch("/api/base_pwm_channels")
-            .then(res => res.json())
-            .then(data => {
-                // 用现有配置 POST 回去，触发 PWM 重启
-                return fetch("/api/base_pwm_channels", {
-                    method: "POST",
-                    headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({pwm_channels: data.pwm_channels}),
-                });
-            })
-            .catch(() => {});
+        // 恢复PWM配置
+        api.base.pwmChannels().then(data =>
+            api.base.savePwmChannels(data.pwm_channels).catch(() => {})
+        );
     }, []);
 
     const send = async (action: string) => {
         setStatus("执行: " + action);
-        console.log("http send " + action);
         try {
-            const res = await fetch(`/api/control?action=${action}&speed=50&time=0`);
-            if (!res.ok) throw new Error("请求失败");
-            const text = await res.text();
+            const text = await api.motor.action(action);
             if (text) {
                 try {
                     console.log(JSON.parse(text));
@@ -112,29 +83,23 @@ const BaseControlPage = () => {
         }
     };
 
-    // ==== 按钮事件处理 ====
     const handlePressStart = (action: string) => {
         currentActionRef.current = action;
-        send(action); // 实车立即发
+        send(action);
     };
 
     const handlePressEnd = () => {
         currentActionRef.current = null;
-        send("stop"); // 实车发 stop
+        send("stop");
     };
 
     const redirect = async () => {
         setStatus("获取 IP...");
         try {
-            const res = await fetch("/ip");
-            if (!res.ok) throw new Error("请求失败");
-            const data = await res.json();
+            const data = await api.system.ip();
             if (!data?.ip) throw new Error("无IP数据");
-            const targetUrl = "https://ai.maodouketang.cn/";
-            const fullUrl = `${targetUrl}?ip=${encodeURIComponent(data.ip)}`;
-            window.location.replace(fullUrl);
-        } catch (err) {
-            console.error("跳转失败:", err);
+            window.location.replace(`https://ai.maodouketang.cn/?ip=${encodeURIComponent(data.ip)}`);
+        } catch {
             setStatus("跳转失败");
             alert("无法获取IP，请稍后重试");
         }
@@ -167,20 +132,13 @@ const BaseControlPage = () => {
                     position: "relative",
                 }}
             >
-                {/* 摄像头开关 - 区域内右上角 */}
+                {/* 摄像头开关 */}
                 <div style={{position: "absolute", top: "0", right: "0", display: "flex", alignItems: "center", gap: "6px"}}>
                     <span style={{fontSize: "11px", opacity: 0.6}}>摄像头</span>
                     <div
                         onClick={() => {
-                            const action = cameraOn ? "close" : "open";
-                            fetch("/api/camera", {
-                                method: "POST",
-                                headers: {"Content-Type": "application/json"},
-                                body: JSON.stringify({action}),
-                            })
-                                .then(res => res.json())
-                                .then(data => setCameraOn(data.camera_on))
-                                .catch(() => {});
+                            const req = cameraOn ? api.camera.close() : api.camera.open();
+                            req.then(data => setCameraOn(data.camera_on)).catch(() => {});
                         }}
                         style={{
                             width: "44px",
@@ -261,7 +219,7 @@ const BaseControlPage = () => {
                 <div>右轮: <span style={{color: "#4ade80"}}>{rightSpeed}</span> m/s</div>
             </div>
 
-            
+
             {/* 功能按钮 */}
             <div
                 style={{
@@ -297,7 +255,6 @@ const BaseControlPage = () => {
                     flexWrap: "wrap",
                 }}
             >
-                {/* 跳转 */}
                 <ControlButton
                     size="wide"
                     variant="secondary"

@@ -1,4 +1,5 @@
 import {useCallback, useEffect, useRef, useState} from "react";
+import {api} from "../api";
 
 
 const RCDemoPage = () => {
@@ -9,29 +10,19 @@ const RCDemoPage = () => {
     const [isNarrow, setIsNarrow] = useState(false);
     const [cameraOn, setCameraOn] = useState(false);
 
-    // 摄像头状态
     useEffect(() => {
-        fetch("/api/camera/status")
-            .then(res => res.json())
-            .then(data => setCameraOn(data.camera_on))
-            .catch(() => {});
+        api.camera.status().then(data => setCameraOn(data.camera_on)).catch(() => {});
     }, []);
 
-    // 检测屏幕宽度
     useEffect(() => {
-        const check = () => {
-            setIsNarrow(window.innerWidth < window.innerHeight);
-        };
+        const check = () => setIsNarrow(window.innerWidth < window.innerHeight);
         check();
         window.addEventListener("resize", check);
         return () => window.removeEventListener("resize", check);
     }, []);
 
-    // 控制状态
     const throttleRef = useRef(0);
     const directionRef = useRef(0);
-
-    // 电机轮询
     const motorIntervalRef = useRef<number | null>(null);
     const lastCommandRef = useRef<{left: number, right: number} | null>(null);
 
@@ -39,36 +30,27 @@ const RCDemoPage = () => {
         const thr = throttleRef.current;
         const dir = directionRef.current;
 
-        // 死区：摇杆接近归零时视为0
         const deadZone = 3;
         const thrZero = Math.abs(thr) < deadZone ? 0 : thr;
         const dirZero = Math.abs(dir) < deadZone ? 0 : dir;
-
 
         const base = thrZero;
         const turn = dirZero * 0.5;
         const left = Math.max(-100, Math.min(100, base - turn));
         const right = Math.max(-100, Math.min(100, base + turn));
 
-        // 只有值变化超过5才发送
         if (lastCommandRef.current &&
             Math.abs(lastCommandRef.current.left - left) < 5 &&
             Math.abs(lastCommandRef.current.right - right) < 5) {
-            return;  // 变化太小，不发送
+            return;
         }
         lastCommandRef.current = {left, right};
 
-        // motor_direct 返回时已带速度信息
         try {
-            const res = await fetch(`/api/motor_direct?left=${left}&right=${right}&duration=0`);
-            if (res.ok) {
-                const data = await res.json();
-                setLeftSpeed(data.left_speed ?? 0);
-                setRightSpeed(data.right_speed ?? 0);
-            }
-        } catch {
-            // 忽略
-        }
+            const data = await api.motor.direct(left, right);
+            setLeftSpeed(data.left_speed ?? 0);
+            setRightSpeed(data.right_speed ?? 0);
+        } catch {}
     }, []);
 
     const startControl = useCallback(() => {
@@ -82,12 +64,11 @@ const RCDemoPage = () => {
             clearInterval(motorIntervalRef.current);
             motorIntervalRef.current = null;
         }
-        fetch("/api/motor_direct?left=0&right=0&duration=0").catch(() => {});
+        api.motor.direct(0, 0).catch(() => {});
         setLeftSpeed(0);
         setRightSpeed(0);
     }, []);
 
-    // 油门摇杆（窄屏时水平放置）
     const throttleRefEl = useRef<HTMLDivElement>(null);
     const throttleActiveRef = useRef(false);
 
@@ -97,7 +78,6 @@ const RCDemoPage = () => {
         let dist, maxDist;
 
         if (isNarrow) {
-            // 窄屏：水平滑动
             const centerX = rect.left + rect.width / 2;
             const dx = clientX - centerX;
             maxDist = rect.width / 2 - 20;
@@ -106,7 +86,6 @@ const RCDemoPage = () => {
             throttleRef.current = thr;
             setThrottleDisplay(thr);
         } else {
-            // 宽屏：垂直滑动
             const centerY = rect.top + rect.height / 2;
             const dy = clientY - centerY;
             maxDist = rect.height / 2 - 20;
@@ -116,7 +95,6 @@ const RCDemoPage = () => {
             setThrottleDisplay(thr);
         }
 
-        // 只要有输入就启动控制
         if (throttleRef.current !== 0 && !throttleActiveRef.current) {
             throttleActiveRef.current = true;
             startControl();
@@ -126,10 +104,8 @@ const RCDemoPage = () => {
     const handleThrottleEnd = useCallback(() => {
         throttleRef.current = 0;
         setThrottleDisplay(0);
-        // 不停止，继续发送复合速度
     }, []);
 
-    // 方向摇杆（窄屏时垂直放置）
     const directionRefEl = useRef<HTMLDivElement>(null);
     const directionActiveRef = useRef(false);
 
@@ -139,7 +115,6 @@ const RCDemoPage = () => {
         let dist, maxDist;
 
         if (isNarrow) {
-            // 窄屏：垂直滑动
             const centerY = rect.top + rect.height / 2;
             const dy = clientY - centerY;
             maxDist = rect.height / 2 - 20;
@@ -148,7 +123,6 @@ const RCDemoPage = () => {
             directionRef.current = dir;
             setDirectionDisplay(dir);
         } else {
-            // 宽屏：水平滑动
             const centerX = rect.left + rect.width / 2;
             const dx = clientX - centerX;
             maxDist = rect.width / 2 - 20;
@@ -158,7 +132,6 @@ const RCDemoPage = () => {
             setDirectionDisplay(dir);
         }
 
-        // 只要有输入就启动控制
         if (directionRef.current !== 0 && !directionActiveRef.current) {
             directionActiveRef.current = true;
             startControl();
@@ -168,17 +141,14 @@ const RCDemoPage = () => {
     const handleDirectionEnd = useCallback(() => {
         directionRef.current = 0;
         setDirectionDisplay(0);
-        // 不停止，继续发送复合速度
     }, []);
 
-    // 返回
     const handleBack = () => {
         stopControl();
-        navigator.sendBeacon("/api/camera", new Blob([JSON.stringify({action: "close"})], {type: "application/json"}));
+        navigator.sendBeacon("/api/camera/close");
         window.location.href = "/";
     };
 
-    // 刹车
     const handleBrake = () => {
         throttleRef.current = 0;
         directionRef.current = 0;
@@ -189,7 +159,6 @@ const RCDemoPage = () => {
         stopControl();
     };
 
-    // 尺寸
     const stickSize = 55;
     const throttleW = isNarrow ? 160 : 70;
     const throttleH = isNarrow ? 70 : 160;
@@ -218,7 +187,7 @@ const RCDemoPage = () => {
                 overflow: "hidden",
             }}
         >
-                        <div style={{display: "flex", flexDirection: "column", alignItems: "center", flex: 1}}>
+            <div style={{display: "flex", flexDirection: "column", alignItems: "center", flex: 1}}>
                 <div style={{fontSize: "12px", opacity: 0.6, marginBottom: "8px", transform: isNarrow ? "rotate(90deg)" : "none"}}>油门</div>
                 <div
                     ref={throttleRefEl}
@@ -236,7 +205,6 @@ const RCDemoPage = () => {
                         touchAction: "none",
                     }}
                 >
-                    {/* 中线 */}
                     <div style={{
                         position: "absolute",
                         left: "50%",
@@ -246,7 +214,6 @@ const RCDemoPage = () => {
                         height: isNarrow ? "30px" : "2px",
                         background: "#475569",
                     }}/>
-                    {/* 滑块 */}
                     <div style={{
                         position: "absolute",
                         width: `${stickSize}px`,
@@ -277,20 +244,13 @@ const RCDemoPage = () => {
                 transition: "transform 0.2s",
                 position: "relative",
             }}>
-                {/* 摄像头开关 - 区域内右上角 */}
+                {/* 摄像头开关 */}
                 <div style={{position: "absolute", top: "0", right: "0", display: "flex", alignItems: "center", gap: "6px"}}>
                     <span style={{fontSize: "11px", opacity: 0.6}}>摄像头</span>
                     <div
                         onClick={() => {
-                            const action = cameraOn ? "close" : "open";
-                            fetch("/api/camera", {
-                                method: "POST",
-                                headers: {"Content-Type": "application/json"},
-                                body: JSON.stringify({action}),
-                            })
-                                .then(res => res.json())
-                                .then(data => setCameraOn(data.camera_on))
-                                .catch(() => {});
+                            const req = cameraOn ? api.camera.close() : api.camera.open();
+                            req.then(data => setCameraOn(data.camera_on)).catch(() => {});
                         }}
                         style={{
                             width: "44px",
@@ -326,7 +286,7 @@ const RCDemoPage = () => {
                 >
                     {cameraOn ? (
                         <img
-                            src="/api/video_stream"
+                            src="/api/camera/stream"
                             alt="Camera"
                             style={{
                                 width: `${videoW}px`,
@@ -353,7 +313,7 @@ const RCDemoPage = () => {
                     )}
                 </div>
 
-                
+
                 {/* 速度显示 */}
                 <div style={{display: "flex", justifyContent: "center", gap: "20px", fontSize: "13px", marginTop: "10px"}}>
                     <div>左 <span style={{color: "#4ade80", fontWeight: "bold"}}>{leftSpeed > 0 ? "+" : ""}{leftSpeed.toFixed(2)}</span></div>
@@ -415,7 +375,6 @@ const RCDemoPage = () => {
                         touchAction: "none",
                     }}
                 >
-                    {/* 中线 */}
                     <div style={{
                         position: "absolute",
                         left: "50%",
@@ -425,7 +384,6 @@ const RCDemoPage = () => {
                         height: isNarrow ? "2px" : "30px",
                         background: "#475569",
                     }}/>
-                    {/* 滑块 */}
                     <div style={{
                         position: "absolute",
                         width: `${stickSize}px`,

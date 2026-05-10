@@ -1,4 +1,5 @@
 import {useEffect, useRef, useState} from "react";
+import {api} from "../api";
 
 interface ArmAnglesZP10S {
     servo0_prepare: number;
@@ -87,8 +88,7 @@ const ArmAnglesPage = () => {
 
     const loadConfig = async () => {
         try {
-            const r = await fetch("/api/arm_angles");
-            const data = await r.json() as ArmAnglesResponse<ArmAnglesZP10S | ArmAnglesSTS>;
+            const data = await api.arm.angles() as ArmAnglesResponse<ArmAnglesZP10S | ArmAnglesSTS>;
             if (data.driver === "zp10s") {
                 setZp10s(data.angles as ArmAnglesZP10S);
                 setDriver(data.driver);
@@ -103,8 +103,7 @@ const ArmAnglesPage = () => {
 
     const loadBasePwmChannels = async () => {
         try {
-            const r = await fetch("/api/base_pwm_channels");
-            const data = await r.json() as {pwm_channels: BasePwmChannels};
+            const data = await api.base.pwmChannels() as {pwm_channels: BasePwmChannels};
             if (data.pwm_channels) {
                 setBasePwmChannels(data.pwm_channels);
             }
@@ -117,15 +116,8 @@ const ArmAnglesPage = () => {
         setSaving(true);
         setStatus("");
         try {
-            const r = await fetch("/api/arm_angles", {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({
-                    driver,
-                    angles: currentAngles,
-                }),
-            });
-            if (r.ok) {
+            const r = await api.arm.saveAngles(driver, currentAngles);
+            if (r.ok !== false) {
                 setStatus("保存成功");
                 setTimeout(() => setStatus(""), 2000);
             } else {
@@ -142,12 +134,8 @@ const ArmAnglesPage = () => {
         setSavingPwm(true);
         setPwmStatus("");
         try {
-            const r = await fetch("/api/base_pwm_channels", {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({pwm_channels: basePwmChannels}),
-            });
-            if (r.ok) {
+            const r = await api.base.savePwmChannels(basePwmChannels);
+            if (r.ok !== false) {
                 setPwmStatus("PWM 通道已保存并生效");
                 setTimeout(() => setPwmStatus(""), 2000);
             } else {
@@ -170,18 +158,9 @@ const ArmAnglesPage = () => {
             const requestId = ++requestIdRef.current;
             setSaving(true);
             try {
-                const r = await fetch("/api/arm_angles/preview", {
-                    method: "POST",
-                    headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({
-                        driver,
-                        key,
-                        value,
-                        angles: nextAngles,
-                    }),
-                });
-                if (!r.ok) {
-                    throw new Error(await r.text());
+                const r = await api.arm.preview(driver, key, value, nextAngles);
+                if (!r || r.error) {
+                    throw new Error(r?.error ?? "unknown error");
                 }
                 if (requestId === requestIdRef.current) {
                     setStatus(`已同步并预览 ${key}: ${value}`);
