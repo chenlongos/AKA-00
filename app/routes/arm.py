@@ -57,6 +57,8 @@ def arm_angles_preview():
 
     if not isinstance(key, str):
         return jsonify({"error": "key is required"}), 400
+    if value is None:
+        return jsonify({"error": "value is required"}), 400
     if not isinstance(angles_payload, dict):
         return jsonify({"error": "angles is required"}), 400
 

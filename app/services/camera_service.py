@@ -33,7 +33,6 @@ class CameraService:
             get_state_collector().set_camera(self._camera)
 
     def is_available(self) -> bool:
-        self._ensure_camera()
         return self._camera is not None and self._camera.is_available()
 
     def read(self):
