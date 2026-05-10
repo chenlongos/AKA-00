@@ -8,8 +8,8 @@ class RobotStatus:
     """小车状态 - 用于ACT训练"""
     left_speed: float = 0.0
     right_speed: float = 0.0
-    left_action: float = 0
-    right_action: float = 0
+    left_target: float = 0
+    right_target: float = 0
     timestamp_ms: int = 0
 
 
@@ -44,18 +44,18 @@ class StateCollector:
     def set_motor_pair(self, motor_pair):
         self._motor_pair = motor_pair
 
-    def set_action(self, left: int, right: int):
+    def set_target_speed(self, left: int, right: int):
         with self._data_lock:
-            self._status.left_action = left
-            self._status.right_action = right
+            self._status.left_target = left
+            self._status.right_target = right
 
     def get_status(self) -> RobotStatus:
         with self._data_lock:
             return RobotStatus(
                 left_speed=self._status.left_speed,
                 right_speed=self._status.right_speed,
-                left_action=self._status.left_action,
-                right_action=self._status.right_action,
+                left_target=self._status.left_target,
+                right_target=self._status.right_target,
                 timestamp_ms=self._status.timestamp_ms,
             )
 

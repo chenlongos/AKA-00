@@ -23,7 +23,7 @@ def motor_direct():
 
     try:
         result = get_control_service().run_motor(left, right, duration)
-        get_state_collector().set_action(left, right)
+        get_state_collector().set_target_speed(left, right)
         status = get_state_collector().get_status()
         result["left_speed"] = status.left_speed
         result["right_speed"] = status.right_speed
