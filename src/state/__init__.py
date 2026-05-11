@@ -55,14 +55,13 @@ class StateCollector:
             self._status.right_target = right
 
     def get_status(self) -> RobotStatus:
-        with self._data_lock:
-            return RobotStatus(
-                left_speed=self._status.left_speed,
-                right_speed=self._status.right_speed,
-                left_target=self._status.left_target,
-                right_target=self._status.right_target,
-                timestamp_ms=self._status.timestamp_ms,
-            )
+        return RobotStatus(
+            left_speed=self._status.left_speed,
+            right_speed=self._status.right_speed,
+            left_target=self._status.left_target,
+            right_target=self._status.right_target,
+            timestamp_ms=int(time.time() * 1000),
+        )
 
     def get_image(self):
         if self._camera is not None:
@@ -77,15 +76,16 @@ class StateCollector:
 
             left_speed, right_speed = 0.0, 0.0
             if self._motor_pair is not None:
-                left_rpm, right_rpm = self._motor_pair.get_speeds()
-                left_speed = round(left_rpm * _WHEEL_CIRCUMFERENCE / 60.0, 2)
-                right_speed = round(right_rpm * _WHEEL_CIRCUMFERENCE / 60.0, 2)
+                try:
+                    left_rpm, right_rpm = self._motor_pair.get_speeds()
+                    left_speed = round(left_rpm * _WHEEL_CIRCUMFERENCE / 60.0, 2)
+                    right_speed = round(right_rpm * _WHEEL_CIRCUMFERENCE / 60.0, 2)
+                except Exception:
+                    pass
 
-            current_ms = int(time.time() * 1000)
             with self._data_lock:
                 self._status.left_speed = left_speed
                 self._status.right_speed = right_speed
-                self._status.timestamp_ms = current_ms
 
             elapsed = time.time() - start
             sleep_time = interval - elapsed
