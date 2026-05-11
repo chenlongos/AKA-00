@@ -2,6 +2,8 @@ from dataclasses import dataclass
 import threading
 import time
 
+import cv2
+
 _WHEEL_CIRCUMFERENCE = 3.1415926535 * 0.065  # 轮子周长 (m)
 
 
@@ -31,6 +33,12 @@ class StateCollector:
         # 相机和电机引用（延迟注入）
         self._camera = None
         self._motor_pair = None
+
+        # JPEG 缓存（避免每次请求都编码）
+        self._jpg_cache = None
+        self._jpg_cache_time = 0.0
+        self._jpg_lock = threading.Lock()
+        self._encode_interval = 1.0 / 15  # 编码频率上限 10fps
 
     @classmethod
     def get_instance(cls) -> "StateCollector":
@@ -64,12 +72,12 @@ class StateCollector:
         )
 
     def get_image(self):
-        if self._camera is not None:
-            return self._camera.read()[1]
-        return None
+        """返回缓存的 JPEG 图像（bytes），避免每次请求都编码"""
+        with self._jpg_lock:
+            return self._jpg_cache
 
     def _loop(self):
-        """10fps 状态更新"""
+        """10fps 状态更新 + 图像编码"""
         interval = 1.0 / 10
         while self._running:
             start = time.time()
@@ -86,6 +94,17 @@ class StateCollector:
             with self._data_lock:
                 self._status.left_speed = left_speed
                 self._status.right_speed = right_speed
+
+            # 图像编码（降低频率，避免每次请求都编码）
+            now = time.time()
+            if self._camera is not None and now - self._jpg_cache_time > self._encode_interval:
+                ret, frame = self._camera.read()
+                if ret and frame is not None:
+                    ret, jpg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 20])
+                    if ret:
+                        with self._jpg_lock:
+                            self._jpg_cache = jpg.tobytes()
+                            self._jpg_cache_time = now
 
             elapsed = time.time() - start
             sleep_time = interval - elapsed
