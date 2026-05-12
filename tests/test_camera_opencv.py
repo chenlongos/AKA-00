@@ -1,4 +1,4 @@
-"""测试 OpenCV 摄像头视频流，带分辨率和帧大小标记。
+"""测试 OpenCV 摄像头视频流，带分辨率、帧大小和时间戳标记。
 
 用法:
     python test_camera_opencv.py --device 0 --width 640 --height 480 --port 5000
@@ -9,6 +9,7 @@
 """
 import argparse
 import sys
+import time
 
 
 def main():
@@ -67,7 +68,7 @@ def main():
         print(f"Error: Cannot open camera device {args.device}")
         sys.exit(1)
 
-    frame_count = [0]  # 使用列表以便在闭包中修改
+    frame_count = [0]
 
     def generate_frames():
         while True:
@@ -78,8 +79,12 @@ def main():
             frame_count[0] += 1
             h, w = frame.shape[:2]
             frame_size = frame.nbytes
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            ms = int((time.time() % 1) * 1000)
+            full_timestamp = f"{timestamp}.{ms:03d}"
+            print(f"[Frame #{frame_count[0]}] {w}x{h} | {frame_size} bytes | {full_timestamp}")
 
-            info_text = f"OpenCV | {w}x{h} | {frame_size} bytes | #{frame_count[0]}"
+            info_text = f"OpenCV | {w}x{h} | {frame_size} bytes | #{frame_count[0]} | {full_timestamp}"
             cv2.putText(frame, info_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 2)
 
             ret, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
@@ -118,6 +123,5 @@ def main():
 
 
 if __name__ == "__main__":
-    # 默认配置：设备 0，分辨率 224x224，端口 5001
     sys.argv = ["test_camera_opencv.py", "--device", "0", "--width", "320", "--height", "240", "--port", "5001"]
     main()
