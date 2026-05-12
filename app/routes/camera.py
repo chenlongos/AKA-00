@@ -58,6 +58,7 @@ def video_stream():
 
     response = make_response(generate())
     response.headers['Content-Type'] = 'multipart/x-mixed-replace; boundary=frame'
+    response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'

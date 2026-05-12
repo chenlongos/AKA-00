@@ -117,7 +117,7 @@ class ControlService:
         with self._duration_timer_lock:
             self._duration_timer = None
 
-    TURN_SPEED_RATIO = 0.4  # 转弯速度比例
+    TURN_SPEED_RATIO = 0.3  # 转弯速度比例
 
     def _apply_base_action(self, action: str, speed: int) -> bool:
         if action == "up":
