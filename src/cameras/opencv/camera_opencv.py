@@ -46,7 +46,6 @@ class Camera:
     def _open(self) -> bool:
         """打开摄像头"""
         if not _HAS_CV2:
-            print("[Camera] OpenCV not available")
             return False
         self._cap = cv2.VideoCapture(self._device)
         if self._cap.isOpened():
@@ -55,9 +54,7 @@ class Camera:
             self._cap.set(cv2.CAP_PROP_FPS, self._fps)
             w = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             h = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            print(f"[Camera] Opened: {w}x{h} @ {self._fps}fps")
             return True
-        print(f"[Camera] Failed to open device {self._device}")
         self._cap = None
         return False
 

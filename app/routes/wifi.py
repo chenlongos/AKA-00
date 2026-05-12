@@ -28,7 +28,6 @@ def ensure_wpa_env():
 
     socket_file = f"{WIFI_CTRL_PATH}/{WIFI_INTERFACE}"
     if not os.path.exists(socket_file):
-        print(f"--- 正在重新初始化 {WIFI_INTERFACE} 接口 ---")
         os.system("killall -9 wpa_supplicant 2>/dev/null")
         time.sleep(0.5)
         os.system(f"rm -rf {socket_file}")
@@ -39,7 +38,6 @@ def ensure_wpa_env():
         os.system(cmd)
         for _ in range(10):
             if os.path.exists(socket_file):
-                print(f"--- {WIFI_INTERFACE} 初始化成功 ---")
                 return True
             time.sleep(0.5)
         return False

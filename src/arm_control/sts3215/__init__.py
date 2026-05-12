@@ -90,7 +90,6 @@ class STS3215:
             position = int.from_bytes(position_data, byteorder='little')
             return position
         else:
-            print(f"无法读取舵机 {servo_id} 的位置")
             return None
 
     def move_angle(self, servo_id, angle):
