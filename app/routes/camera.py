@@ -64,6 +64,20 @@ def video_stream():
     return response
 
 
+@camera_bp.route("/speed")
+def speed_status():
+    """只获取左右轮速度和目标值"""
+    collector = get_state_collector()
+    status = collector.get_status()
+    return jsonify({
+        "left_speed": status.left_speed,
+        "right_speed": status.right_speed,
+        "left_target": status.left_target,
+        "right_target": status.right_target,
+        "timestamp_ms": status.timestamp_ms,
+    })
+
+
 @camera_bp.route("/all_status")
 def all_status():
     collector = get_state_collector()
