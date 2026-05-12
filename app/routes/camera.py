@@ -1,6 +1,6 @@
-import cv2
 from flask import Blueprint, request, jsonify, make_response
 import base64
+import cv2
 import time
 
 from src.state import get_state_collector
@@ -72,7 +72,9 @@ def all_status():
 
     image_data = None
     if image is not None:
-        image_data = base64.b64encode(image).decode('ascii')
+        ret, jpg = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 25])
+        if ret:
+            image_data = base64.b64encode(jpg.tobytes()).decode('ascii')
 
     return jsonify({
         "timestamp": request.args.get("timestamp"),
