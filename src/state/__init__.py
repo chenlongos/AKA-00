@@ -12,6 +12,8 @@ class RobotStatus:
     right_speed: float = 0.0
     left_target: float = 0
     right_target: float = 0
+    gripper_status: str = "open"  # "open", "closed", "moving", "unknown"
+    gripper_target: int = 0  # 0=释放, 1=夹取
     timestamp_ms: int = 0
 
 
@@ -54,12 +56,24 @@ class StateCollector:
             self._status.left_target = left
             self._status.right_target = right
 
+    def set_gripper_status(self, status: str):
+        """设置夹爪状态"""
+        with self._data_lock:
+            self._status.gripper_status = status
+
+    def set_gripper_target(self, target: int):
+        """设置夹爪目标 0=释放, 1=夹取"""
+        with self._data_lock:
+            self._status.gripper_target = target
+
     def get_status(self) -> RobotStatus:
         return RobotStatus(
             left_speed=self._status.left_speed,
             right_speed=self._status.right_speed,
             left_target=self._status.left_target,
             right_target=self._status.right_target,
+            gripper_status=self._status.gripper_status,
+            gripper_target=self._status.gripper_target,
             timestamp_ms=int(time.time() * 1000),
         )
 

@@ -67,7 +67,7 @@ def grab(servo):
     servo.set_angle(2, servo._angle("servo2_approach", 150))
     time.sleep(1)
     servo.set_angle(2,servo.id2_angle_close)
-    time.sleep(1)
+    time.sleep(2)
     servo.set_angle(0, servo._angle("servo0_lift", 200))
     servo.set_angle(1, servo._angle("servo1_lift", 180))
     servo.set_angle(2, servo._angle("servo2_lift", 90))

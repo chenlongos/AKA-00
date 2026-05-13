@@ -117,7 +117,7 @@ class ControlService:
         with self._duration_timer_lock:
             self._duration_timer = None
 
-    TURN_SPEED_RATIO = 0.3  # 转弯速度比例
+    TURN_SPEED_RATIO = 0.4  # 转弯速度比例
 
     def _apply_base_action(self, action: str, speed: int) -> bool:
         if action == "up":
@@ -144,10 +144,16 @@ class ControlService:
         return True
 
     def _apply_arm_action(self, action: str) -> bool:
+        collector = get_state_collector()
         if action == "grab":
+            collector.set_gripper_target(1)
             self._gripper.close()
+            # 动作执行完立即变0（只是脉冲信号）
+            collector.set_gripper_target(0)
+            collector.set_gripper_status("closed")
         elif action == "release":
             self._gripper.open()
+            # release 状态不变，保持原状态
         else:
             return False
         return True

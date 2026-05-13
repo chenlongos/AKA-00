@@ -12,6 +12,10 @@ def motor_status():
     return jsonify({
         "left_speed": status.left_speed,
         "right_speed": status.right_speed,
+        "left_target": status.left_target,
+        "right_target": status.right_target,
+        "gripper_status": status.gripper_status,
+        "gripper_target": status.gripper_target,
     })
 
 
