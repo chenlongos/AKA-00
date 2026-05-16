@@ -128,24 +128,10 @@ class TtPidChassis:
     def set_speed(self, left: int, right: int) -> None:
         """设置左右轮速度（-100 ~ 100）。
 
-        输入 0-100 -> PWM 153-255（3V-5V，对应60%-100%）
+        直接以百分比 PWM 值传输。
         """
-        left = max(-100, min(100, left))
-        right = max(-100, min(100, right))
-
-        if left == 0:
-            left_pwm = 0
-        else:
-            left_pwm = int(153 + 102 * abs(left) / 100)
-            if left < 0:
-                left_pwm = -left_pwm
-
-        if right == 0:
-            right_pwm = 0
-        else:
-            right_pwm = int(153 + 102 * abs(right) / 100)
-            if right < 0:
-                right_pwm = -right_pwm
+        left_pwm = max(-100, min(100, left))
+        right_pwm = max(-100, min(100, right))
 
         self._set_speeds(left_pwm, right_pwm)
 
