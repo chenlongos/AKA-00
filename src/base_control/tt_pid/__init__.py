@@ -53,6 +53,8 @@ class TtPidChassis:
         ppr: int = 4680,
         pwm_freq: int = 20000,
     ) -> None:
+        self._ppr = ppr
+        self._pwm_freq = pwm_freq
         self.ser = serial.Serial(
             port=port,
             baudrate=baudrate,
@@ -119,6 +121,10 @@ class TtPidChassis:
     def _init(self) -> bool:
         rsp = self._send_cmd(CMD_INIT)
         return rsp is not None and rsp["cmd"] == RSP_ACK
+
+    def reinitialize(self) -> bool:
+        """重新初始化 ESP32，将 PWM 清零并重置 PID 状态。"""
+        return self._send_cmd(CMD_INIT) is not None and self._send_cmd(CMD_CONFIG, struct.pack(">HH", self._ppr, self._pwm_freq)) is not None
 
     def _config(self, ppr: int, pwm_freq: int) -> bool:
         payload = struct.pack(">HH", ppr, pwm_freq)

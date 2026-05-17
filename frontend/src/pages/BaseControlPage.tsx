@@ -60,6 +60,9 @@ const BaseControlPage = () => {
         api.base.pwmChannels().then(data =>
             api.base.savePwmChannels(data.pwm_channels).catch(() => {})
         );
+
+        // 重新初始化底盘（用于切换回来时重置 ESP32 状态）
+        api.base.reinitialize().catch(() => {});
     }, []);
 
     const send = async (action: string) => {

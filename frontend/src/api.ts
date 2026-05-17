@@ -40,6 +40,7 @@ export const base = {
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({pwm_channels}),
         }),
+    reinitialize: () => fetch("/api/base/reinitialize", {method: "POST"}).then(r => r.json()),
 };
 
 // 摄像头

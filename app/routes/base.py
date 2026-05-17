@@ -6,6 +6,10 @@ from src.base_control.pwm_channel_config import save_pwm_channels
 base_bp = Blueprint("base", __name__, url_prefix="/api/base")
 
 
+@base_bp.route("/reinitialize", methods=["POST"])
+def base_reinitialize():
+    return jsonify(get_control_service().reinitialize_motor_pair())
+
 @base_bp.route("/pwm_channels", methods=["GET", "POST"])
 def base_pwm_channels():
     if request.method == "GET":

@@ -43,6 +43,10 @@ class MotorPairProtocol(Protocol):
     def close(self) -> None:
         ...
 
+    def reinitialize(self) -> bool:
+        """重新初始化硬件（TT PID 用于重置 ESP32 状态）。若无此方法则为空操作。"""
+        ...
+
 
 class MotorPairAdapter:
     """N20 双轮适配器。"""
@@ -78,6 +82,9 @@ class MotorPairAdapter:
         self._left.close()
         self._right.close()
 
+    def reinitialize(self) -> bool:
+        return True
+
 
 class MockMotorPair:
     """Mock 双轮底盘，用于 Windows/macOS 开发。"""
@@ -106,6 +113,9 @@ class MockMotorPair:
 
     def close(self) -> None:
         pass
+
+    def reinitialize(self) -> bool:
+        return True
 
 
 def create_motor_pair(

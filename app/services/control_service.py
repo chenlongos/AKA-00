@@ -88,6 +88,14 @@ class ControlService:
     def get_pwm_channels(self) -> dict[str, int]:
         return self._pwm_channels.copy()
 
+    def reinitialize_motor_pair(self) -> dict[str, object]:
+        """重新初始化电机底盘（用于 tt_pid 等需要重置 ESP32 状态的场景）。"""
+        reinit = getattr(self._motor_pair, "reinitialize", None)
+        if reinit is not None:
+            result = reinit()
+            return {"status": "success", "reinitialize": result}
+        return {"status": "success", "reinitialize": "not_supported"}
+
     def update_pwm_channels(self, pwm_channels: dict[str, int]) -> dict[str, object]:
         self._cancel_pending_stop()
         self._motor_pair.sleep()
@@ -117,7 +125,7 @@ class ControlService:
         with self._duration_timer_lock:
             self._duration_timer = None
 
-    TURN_SPEED_RATIO = 0.4  # 转弯速度比例
+    TURN_SPEED_RATIO = 0.5  # 转弯速度比例
 
     def _apply_base_action(self, action: str, speed: int) -> bool:
         if action == "up":
