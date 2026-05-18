@@ -125,8 +125,6 @@ class ControlService:
         with self._duration_timer_lock:
             self._duration_timer = None
 
-    TURN_SPEED_RATIO = 0.5  # 转弯速度比例
-
     def _apply_base_action(self, action: str, speed: int) -> bool:
         if action == "up":
             self._motor_pair.set_speed(speed, speed)
@@ -135,13 +133,13 @@ class ControlService:
             self._motor_pair.set_speed(-speed, -speed)
             get_state_collector().set_target_speed(-speed, -speed)
         elif action == "left":
-            left = -int(speed * self.TURN_SPEED_RATIO)
-            right = int(speed * self.TURN_SPEED_RATIO)
+            left = -int(speed)
+            right = int(speed)
             self._motor_pair.set_speed(left, right)
             get_state_collector().set_target_speed(left, right)
         elif action == "right":
-            left = int(speed * self.TURN_SPEED_RATIO)
-            right = -int(speed * self.TURN_SPEED_RATIO)
+            left = int(speed)
+            right = -int(speed)
             self._motor_pair.set_speed(left, right)
             get_state_collector().set_target_speed(left, right)
         elif action == "stop":

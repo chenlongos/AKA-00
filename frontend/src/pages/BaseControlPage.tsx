@@ -65,10 +65,10 @@ const BaseControlPage = () => {
         api.base.reinitialize().catch(() => {});
     }, []);
 
-    const send = async (action: string) => {
+    const send = async (action: string, speed: number = 50) => {
         setStatus("执行: " + action);
         try {
-            const text = await api.motor.action(action);
+            const text = await api.motor.action(action, speed);
             if (text) {
                 try {
                     console.log(JSON.parse(text));
@@ -81,9 +81,9 @@ const BaseControlPage = () => {
         }
     };
 
-    const handlePressStart = (action: string) => {
+    const handlePressStart = (action: string, speed?: number) => {
         currentActionRef.current = action;
-        send(action);
+        send(action, speed);
     };
 
     const handlePressEnd = () => {
@@ -145,7 +145,7 @@ const BaseControlPage = () => {
                 </ControlButton>
                 <div style={{display: 'flex', gap: "10px"}}>
                     <ControlButton
-                        onPressStart={() => handlePressStart("left")}
+                        onPressStart={() => handlePressStart("left", 25)}
                         onPressEnd={() => handlePressEnd()}
                     >
                         左转
@@ -158,7 +158,7 @@ const BaseControlPage = () => {
                         停止
                     </ControlButton>
                     <ControlButton
-                        onPressStart={() => handlePressStart("right")}
+                        onPressStart={() => handlePressStart("right", 25)}
                         onPressEnd={() => handlePressEnd()}
                     >
                         右转
