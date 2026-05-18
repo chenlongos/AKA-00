@@ -4,7 +4,6 @@ import WiFiConfigPage from "./pages/WiFiConfigPage.tsx";
 import ArmAnglesPage from "./pages/ArmAnglesPage.tsx";
 import DemoPage from "./pages/DemoPage.tsx";
 import RCDemoPage from "./pages/RCDemoPage.tsx";
-import ModelServerPage from "./pages/ModelServerPage.tsx";
 
 function App() {
     return (
@@ -14,7 +13,6 @@ function App() {
             <Route path="/arm-angles" element={<ArmAnglesPage/>}/>
             <Route path="/demo" element={<DemoPage/>}/>
             <Route path="/rc" element={<RCDemoPage/>}/>
-            <Route path="/models" element={<ModelServerPage/>}/>
         </Routes>
     )
 }
