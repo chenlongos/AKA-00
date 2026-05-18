@@ -1,5 +1,7 @@
 import os
 import signal
+import urllib.request
+import threading
 from flask import Blueprint, request, jsonify
 
 demo_bp = Blueprint("demo", __name__, url_prefix="/api/demo")
@@ -82,3 +84,123 @@ def demo_stop():
         "status": "stopped",
         "pid": pid,
     })
+
+
+@demo_bp.route("/download_model", methods=["POST"])
+def demo_download_model():
+    """从 demo-server 下载模型到 demo/<name>/ 目录"""
+    payload = request.get_json(silent=True)
+    if not payload:
+        return jsonify({"error": "json body is required"}), 400
+
+    demo_name = payload.get("demo_name")
+    model_name = payload.get("model_name")
+    demo_server = payload.get("demo_server", "http://localhost:8888")
+
+    if not demo_name or not model_name:
+        return jsonify({"error": "demo_name and model_name are required"}), 400
+
+    base_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "demo")
+    demo_dir = os.path.join(base_dir, demo_name)
+
+    if not os.path.isdir(demo_dir):
+        return jsonify({"error": f"demo '{demo_name}' not found"}), 404
+
+    file_path = os.path.join(demo_dir, model_name)
+    url = f"{demo_server}/api/models/{model_name}"
+
+    try:
+        with urllib.request.urlopen(url) as response:
+            total_size = int(response.headers.get("Content-Length", 0))
+            downloaded = 0
+
+            with open(file_path, 'wb') as f:
+                while True:
+                    chunk = response.read(8192)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    downloaded += len(chunk)
+
+        return jsonify({
+            "status": "downloaded",
+            "demo_name": demo_name,
+            "model_name": model_name,
+            "path": file_path,
+            "size": total_size,
+        })
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+# 存储下载进度的全局字典
+_download_progress = {}
+
+
+def _do_download(task_id, url, file_path):
+    """后台下载线程"""
+    try:
+        with urllib.request.urlopen(url) as response:
+            total_size = int(response.headers.get("Content-Length", 0))
+            downloaded = 0
+
+            with open(file_path, 'wb') as f:
+                while True:
+                    chunk = response.read(8192)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total_size > 0:
+                        _download_progress[task_id]["progress"] = int(downloaded * 100 / total_size)
+
+        _download_progress[task_id]["progress"] = 100
+        _download_progress[task_id]["status"] = "done"
+    except Exception as exc:
+        _download_progress[task_id]["status"] = "error"
+        _download_progress[task_id]["error"] = str(exc)
+
+
+@demo_bp.route("/download_model_with_progress", methods=["POST"])
+def demo_download_model_with_progress():
+    """带进度的下载，客户端轮询进度"""
+    payload = request.get_json(silent=True)
+    if not payload:
+        return jsonify({"error": "json body is required"}), 400
+
+    demo_name = payload.get("demo_name")
+    model_name = payload.get("model_name")
+    demo_server = payload.get("demo_server", "http://localhost:8888")
+
+    if not demo_name or not model_name:
+        return jsonify({"error": "demo_name and model_name are required"}), 400
+
+    base_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "demo")
+    demo_dir = os.path.join(base_dir, demo_name)
+
+    if not os.path.isdir(demo_dir):
+        return jsonify({"error": f"demo '{demo_name}' not found"}), 404
+
+    task_id = f"{demo_name}_{model_name}"
+    file_path = os.path.join(demo_dir, model_name)
+    url = f"{demo_server}/api/models/{model_name}"
+
+    _download_progress[task_id] = {"progress": 0, "status": "downloading", "error": None}
+
+    # 后台线程下载
+    thread = threading.Thread(target=_do_download, args=(task_id, url, file_path))
+    thread.daemon = True
+    thread.start()
+
+    return jsonify({
+        "status": "started",
+        "task_id": task_id,
+    })
+
+
+@demo_bp.route("/download_progress/<task_id>", methods=["GET"])
+def demo_get_download_progress(task_id):
+    """获取下载进度"""
+    if task_id in _download_progress:
+        return jsonify(_download_progress[task_id])
+    return jsonify({"progress": 0, "status": "not_found"})

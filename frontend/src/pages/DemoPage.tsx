@@ -101,6 +101,12 @@ const DemoPage = () => {
                 >
                     返回
                 </ControlButton>
+                <ControlButton
+                    variant="secondary"
+                    onClick={() => window.location.href = "/models"}
+                >
+                    模型下载
+                </ControlButton>
             </div>
 
             {output && (
