@@ -4,6 +4,7 @@ import shutil
 import urllib.request
 import threading
 from flask import Blueprint, request, jsonify
+from app.config import config
 
 demo_bp = Blueprint("demo", __name__, url_prefix="/api/demo")
 
@@ -152,7 +153,7 @@ def demo_download_model_with_progress():
         return jsonify({"error": "json body is required"}), 400
 
     model_name = payload.get("model_name")
-    demo_server = payload.get("demo_server", "http://localhost:8888")
+    demo_server = payload.get("demo_server", config.demo_server_url)
 
     if not model_name:
         return jsonify({"error": "model_name is required"}), 400

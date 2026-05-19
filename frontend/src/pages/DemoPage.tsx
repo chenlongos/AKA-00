@@ -9,7 +9,7 @@ interface Model {
     type: string;
 }
 
-const DEMO_SERVER_URL = "http://localhost:8888";
+const DEMO_SERVER_URL = import.meta.env.VITE_DEMO_SERVER_URL || "http://localhost:8888";
 
 const DemoPage = () => {
     // 本地 Demo（名称从后端动态获取）

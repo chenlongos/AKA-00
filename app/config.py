@@ -14,5 +14,6 @@ class HardwareConfig:
     base_left_chip: int = 4
     base_right_chip: int = 4
 
+    demo_server_url: str = "http://124.222.162.228:8888"
 
 config = HardwareConfig()
