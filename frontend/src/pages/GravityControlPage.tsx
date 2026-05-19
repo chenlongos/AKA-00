@@ -9,17 +9,21 @@ const cmdLabel: Record<string, string> = {
 };
 
 const GravityControlPage = () => {
+    const isSecure = typeof window !== "undefined" && window.isSecureContext;
+    const httpsUrl = typeof window !== "undefined"
+        ? window.location.href.replace(/^http:/, "https:").replace(/:80(\/|$)/, ":443$1")
+        : "";
     const [pitch, setPitch] = useState(0);
     const [roll, setRoll] = useState(0);
     const [cmd, setCmd] = useState("stop");
     const [active, setActive] = useState(false);
     const [permissionNeeded, setPermissionNeeded] = useState(false);
+    const [showNonSecure, setShowNonSecure] = useState(!isSecure);
     const [speedFB, setSpeedFB] = useState(50);
     const cmdRef = useRef("stop");
     const speedFBRef = useRef(50);
     const dpadActiveRef = useRef(false);
     const wakeLockRef = useRef<any>(null);
-    const isSecure = typeof window !== "undefined" && window.isSecureContext;
 
     useEffect(() => { speedFBRef.current = speedFB; }, [speedFB]);
 
@@ -84,7 +88,10 @@ const GravityControlPage = () => {
     }, [active, sendCmd]);
 
     const startGravity = async () => {
-        if (!isSecure) return;
+        if (!isSecure) {
+            setShowNonSecure(true);
+            return;
+        }
         if (typeof (DeviceOrientationEvent as any).requestPermission === "function") {
             try {
                 const perm = await (DeviceOrientationEvent as any).requestPermission();
@@ -142,7 +149,7 @@ const GravityControlPage = () => {
             padding: "16px", paddingBottom: "48px",
         }}>
             {/* 非安全上下文遮罩 */}
-            {!isSecure && (
+            {!isSecure && showNonSecure && (
                 <div style={{
                     position: "fixed", inset: 0, background: "rgba(2,6,23,0.95)", zIndex: 60,
                     display: "flex", alignItems: "center", justifyContent: "center",
@@ -152,13 +159,66 @@ const GravityControlPage = () => {
                         background: "#0f172a", border: "1px solid #334155",
                         padding: "32px", borderRadius: "24px",
                         display: "flex", flexDirection: "column", gap: "16px",
+                        maxWidth: "320px",
                     }}>
                         <div style={{fontSize: "48px"}}>&#128683;</div>
-                        <h2 style={{fontSize: "20px", fontWeight: 700}}>环境限制</h2>
+                        <h2 style={{fontSize: "20px", fontWeight: 700}}>需要 HTTPS 环境</h2>
                         <p style={{fontSize: "14px", color: "#94a3b8", lineHeight: 1.6}}>
-                            Chrome 需要 <b>HTTPS</b> 协议或 <b>Localhost</b> 才能开启重力感应。手动操作按键仍可正常使用。
+                            iOS / Android 均要求 <b>HTTPS</b> 加密连接才能启用陀螺仪重力感应。
                         </p>
+                        <button
+                            onClick={() => { window.location.href = httpsUrl; }}
+                            style={{
+                                background: "#2563eb", color: "#fff", border: "none",
+                                padding: "12px 24px", borderRadius: "12px",
+                                fontSize: "16px", fontWeight: 700,
+                                cursor: "pointer", touchAction: "manipulation",
+                                WebkitTapHighlightColor: "transparent",
+                            }}
+                        >
+                            切换到 HTTPS
+                        </button>
+                        <button
+                            onClick={() => setShowNonSecure(false)}
+                            style={{
+                                background: "transparent", color: "#94a3b8",
+                                border: "1px solid #334155",
+                                padding: "10px 24px", borderRadius: "12px",
+                                fontSize: "14px", cursor: "pointer",
+                                touchAction: "manipulation",
+                                WebkitTapHighlightColor: "transparent",
+                            }}
+                        >
+                            继续使用手动操作
+                        </button>
                     </div>
+                </div>
+            )}
+            {/* 非安全上下文提示条 */}
+            {!isSecure && !showNonSecure && (
+                <div style={{
+                    width: "100%", maxWidth: "512px",
+                    background: "rgba(234,88,12,0.15)", border: "1px solid rgba(234,88,12,0.3)",
+                    borderRadius: "12px", padding: "10px 16px",
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    gap: "12px", marginBottom: "8px",
+                }}>
+                    <span style={{fontSize: "11px", color: "#fb923c", flex: 1}}>
+                        非 HTTPS 环境，无法使用重力感应
+                    </span>
+                    <button
+                        onClick={() => setShowNonSecure(true)}
+                        style={{
+                            background: "transparent", color: "#60a5fa",
+                            border: "1px solid #3b82f6", borderRadius: "6px",
+                            padding: "4px 10px", fontSize: "11px", fontWeight: 600,
+                            cursor: "pointer", whiteSpace: "nowrap",
+                            touchAction: "manipulation",
+                            WebkitTapHighlightColor: "transparent",
+                        }}
+                    >
+                        切换 HTTPS
+                    </button>
                 </div>
             )}
 
