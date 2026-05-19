@@ -164,7 +164,7 @@ const DemoPage = () => {
                 fontFamily: "system-ui, sans-serif",
                 background: "#0f172a",
                 color: "white",
-                minHeight: "100dvh",
+                height: "100dvh",
                 padding: "10px",
                 textAlign: "center",
                 overflowY: "auto",
