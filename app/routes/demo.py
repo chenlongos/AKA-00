@@ -67,9 +67,8 @@ def demo_init():
         proc = subprocess.Popen(
             [init_script],
             cwd=demo_dir,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
         demo_init._process = proc
