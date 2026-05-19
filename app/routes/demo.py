@@ -1,10 +1,33 @@
 import os
 import signal
+import shutil
 import urllib.request
 import threading
 from flask import Blueprint, request, jsonify
 
 demo_bp = Blueprint("demo", __name__, url_prefix="/api/demo")
+
+
+def _get_base_dir():
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "demo")
+
+
+def _find_current_demo():
+    """找到 demo/ 下唯一的 demo 目录（含 init.sh），返回目录名或 None"""
+    base_dir = _get_base_dir()
+    if not os.path.isdir(base_dir):
+        return None
+    for name in sorted(os.listdir(base_dir)):
+        demo_dir = os.path.join(base_dir, name)
+        if os.path.isdir(demo_dir) and os.path.isfile(os.path.join(demo_dir, "init.sh")):
+            return name
+    return None
+
+
+@demo_bp.route("/name", methods=["GET"])
+def demo_name():
+    """返回当前本地 demo 名称"""
+    return jsonify({"name": _find_current_demo()})
 
 
 @demo_bp.route("/init", methods=["POST"])
@@ -13,11 +36,11 @@ def demo_init():
     if not isinstance(payload, dict):
         return jsonify({"error": "json body is required"}), 400
 
-    demo_name = payload.get("name")
-    if not isinstance(demo_name, str) or not demo_name:
-        return jsonify({"error": "name is required"}), 400
+    demo_name = payload.get("name") or _find_current_demo()
+    if not demo_name:
+        return jsonify({"error": "no demo found"}), 404
 
-    base_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "demo")
+    base_dir = _get_base_dir()
     demo_dir = os.path.join(base_dir, demo_name)
     init_script = os.path.join(demo_dir, "init.sh")
 
@@ -86,60 +109,20 @@ def demo_stop():
     })
 
 
-@demo_bp.route("/download_model", methods=["POST"])
-def demo_download_model():
-    """从 demo-server 下载模型到 demo/<name>/ 目录"""
-    payload = request.get_json(silent=True)
-    if not payload:
-        return jsonify({"error": "json body is required"}), 400
-
-    demo_name = payload.get("demo_name")
-    model_name = payload.get("model_name")
-    demo_server = payload.get("demo_server", "http://localhost:8888")
-
-    if not demo_name or not model_name:
-        return jsonify({"error": "demo_name and model_name are required"}), 400
-
-    base_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "demo")
-    demo_dir = os.path.join(base_dir, demo_name)
-
-    if not os.path.isdir(demo_dir):
-        return jsonify({"error": f"demo '{demo_name}' not found"}), 404
-
-    file_path = os.path.join(demo_dir, model_name)
-    url = f"{demo_server}/api/models/{model_name}"
-
-    try:
-        with urllib.request.urlopen(url) as response:
-            total_size = int(response.headers.get("Content-Length", 0))
-            downloaded = 0
-
-            with open(file_path, 'wb') as f:
-                while True:
-                    chunk = response.read(8192)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    downloaded += len(chunk)
-
-        return jsonify({
-            "status": "downloaded",
-            "demo_name": demo_name,
-            "model_name": model_name,
-            "path": file_path,
-            "size": total_size,
-        })
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
-
-
 # 存储下载进度的全局字典
 _download_progress = {}
 
 
-def _do_download(task_id, url, file_path):
-    """后台下载线程"""
+def _do_download(task_id, url, file_path, new_demo_dir, old_demo_dir):
+    """后台下载线程：下载模型，必要时先重命名目录"""
     try:
+        # 如果新 demo 名称不同，先重命名目录
+        if new_demo_dir != old_demo_dir and os.path.isdir(old_demo_dir):
+            # 如果目标已存在（下载过同样的模型），先删掉旧的
+            if os.path.isdir(new_demo_dir):
+                shutil.rmtree(new_demo_dir)
+            os.rename(old_demo_dir, new_demo_dir)
+
         with urllib.request.urlopen(url) as response:
             total_size = int(response.headers.get("Content-Length", 0))
             downloaded = 0
@@ -163,38 +146,40 @@ def _do_download(task_id, url, file_path):
 
 @demo_bp.route("/download_model_with_progress", methods=["POST"])
 def demo_download_model_with_progress():
-    """带进度的下载，客户端轮询进度"""
+    """下载模型到当前 demo 目录，必要时重命名目录以匹配模型名称"""
     payload = request.get_json(silent=True)
     if not payload:
         return jsonify({"error": "json body is required"}), 400
 
-    demo_name = payload.get("demo_name")
     model_name = payload.get("model_name")
     demo_server = payload.get("demo_server", "http://localhost:8888")
 
-    if not demo_name or not model_name:
-        return jsonify({"error": "demo_name and model_name are required"}), 400
+    if not model_name:
+        return jsonify({"error": "model_name is required"}), 400
 
-    base_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "demo")
-    demo_dir = os.path.join(base_dir, demo_name)
+    current_name = _find_current_demo()
+    if not current_name:
+        return jsonify({"error": "no local demo found"}), 404
 
-    if not os.path.isdir(demo_dir):
-        return jsonify({"error": f"demo '{demo_name}' not found"}), 404
+    base_dir = _get_base_dir()
+    old_dir = os.path.join(base_dir, current_name)
+    new_dir = os.path.join(base_dir, model_name)
 
-    task_id = f"{demo_name}_{model_name}"
-    file_path = os.path.join(demo_dir, model_name)
+    # 下载的模型文件统一命名为 yolo_model.cvimodel
+    file_path = os.path.join(new_dir if model_name != current_name else old_dir, "yolo_model.cvimodel")
     url = f"{demo_server}/api/models/{model_name}"
 
+    task_id = f"{current_name}_to_{model_name}"
     _download_progress[task_id] = {"progress": 0, "status": "downloading", "error": None}
 
-    # 后台线程下载
-    thread = threading.Thread(target=_do_download, args=(task_id, url, file_path))
+    thread = threading.Thread(target=_do_download, args=(task_id, url, file_path, new_dir, old_dir))
     thread.daemon = True
     thread.start()
 
     return jsonify({
         "status": "started",
         "task_id": task_id,
+        "new_name": model_name,
     })
 
 
