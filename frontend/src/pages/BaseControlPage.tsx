@@ -96,7 +96,7 @@ const BaseControlPage = () => {
         try {
             const data = await api.system.ip();
             if (!data?.ip) throw new Error("无IP数据");
-            window.location.replace(`https://ai.maodouketang.cn/?ip=${encodeURIComponent(data.ip)}`);
+            window.location.replace(`https://labs.chenlongrobot.com/?ip=${encodeURIComponent(data.ip)}`);
         } catch {
             setStatus("跳转失败");
             alert("无法获取IP，请稍后重试");
@@ -247,6 +247,13 @@ const BaseControlPage = () => {
                     onClick={() => window.location.href = "/demo"}
                 >
                     Demo
+                </ControlButton>
+                <ControlButton
+                    size="wide"
+                    variant="secondary"
+                    onClick={() => window.location.href = "/gravity"}
+                >
+                    重力遥控
                 </ControlButton>
                 <ControlButton
                     size="wide"

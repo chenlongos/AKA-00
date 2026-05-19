@@ -172,7 +172,7 @@ const RCDemoPage = () => {
                 color: "white",
                 minHeight: "100dvh",
                 padding: "10px",
-                paddingBottom: "calc(env(safe-area-inset-bottom) + 10px)",
+                paddingBottom: "calc(env(safe-area-inset-bottom) + 40px)",
                 textAlign: "center",
                 userSelect: "none",
                 touchAction: "none",

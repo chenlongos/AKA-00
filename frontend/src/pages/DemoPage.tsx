@@ -295,7 +295,7 @@ const DemoPage = () => {
             </div>
 
             {/* ---- 返回 ---- */}
-            <div style={{marginTop: "30px", marginBottom: "20px"}}>
+            <div style={{marginTop: "30px", paddingBottom: "40px"}}>
                 <ControlButton
                     variant="secondary"
                     onClick={() => window.location.href = "/"}
