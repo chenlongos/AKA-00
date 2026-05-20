@@ -12,6 +12,7 @@ class ControlService:
         self._arm_driver = config.arm_driver
         self._duration_timer: threading.Timer | None = None
         self._duration_timer_lock = threading.Lock()
+        self._arm_lock = threading.Lock()
         self._pwm_channels = load_pwm_channels(config)
         self._motor_pair = self._create_motor_pair()
         self._gripper = create_gripper(
@@ -153,13 +154,19 @@ class ControlService:
         collector = get_state_collector()
         if action == "grab":
             collector.set_gripper_target(1)
-            self._gripper.close()
-            # 动作执行完立即变0（只是脉冲信号）
-            collector.set_gripper_target(0)
             collector.set_gripper_status("closed")
+            threading.Thread(target=self._do_grab, daemon=True).start()
         elif action == "release":
-            self._gripper.open()
-            # release 状态不变，保持原状态
+            threading.Thread(target=self._do_release, daemon=True).start()
         else:
             return False
         return True
+
+    def _do_grab(self):
+        with self._arm_lock:
+            self._gripper.close()
+        get_state_collector().set_gripper_target(0)
+
+    def _do_release(self):
+        with self._arm_lock:
+            self._gripper.open()
