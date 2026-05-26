@@ -9,7 +9,10 @@ const RCDemoPage = () => {
     const [throttleDisplay, setThrottleDisplay] = useState(0);
     const [directionDisplay, setDirectionDisplay] = useState(0);
     const [isNarrow, setIsNarrow] = useState(false);
+    const FPS_OPTIONS = [30, 20, 10];
+    const FPS_LABELS = ["高清", "均衡", "省流"];
     const [cameraOn, setCameraOn] = useState(false);
+    const [fpsIndex, setFpsIndex] = useState(0);
     const [wsConnected, setWsConnected] = useState(false);
 
     useEffect(() => {
@@ -242,8 +245,24 @@ const RCDemoPage = () => {
                 transition: "transform 0.2s",
                 position: "relative",
             }}>
-                {/* 摄像头开关 */}
+                {/* 摄像头开关 + 低带宽模式 */}
                 <div style={{position: "absolute", top: "0", right: "0", display: "flex", alignItems: "center", gap: "6px"}}>
+                    {cameraOn && (
+                        <button
+                            onClick={() => setFpsIndex((fpsIndex + 1) % 3)}
+                            style={{
+                                background: fpsIndex > 0 ? "rgba(34,197,94,0.2)" : "rgba(255,255,255,0.1)",
+                                border: `1px solid ${fpsIndex > 0 ? "#22c55e" : "#334155"}`,
+                                color: "white",
+                                padding: "2px 8px",
+                                borderRadius: "4px",
+                                fontSize: "10px",
+                                cursor: "pointer",
+                            }}
+                        >
+                            {FPS_LABELS[fpsIndex]}
+                        </button>
+                    )}
                     <span style={{fontSize: "11px", opacity: 0.6}}>摄像头</span>
                     <CameraToggle onStatusChange={setCameraOn} />
                 </div>
@@ -258,7 +277,7 @@ const RCDemoPage = () => {
                 >
                     {cameraOn ? (
                         <img
-                            src="/api/camera/stream"
+                            src={`/api/camera/stream?fps=${FPS_OPTIONS[fpsIndex]}`}
                             alt="Camera"
                             style={{
                                 width: `${videoW}px`,

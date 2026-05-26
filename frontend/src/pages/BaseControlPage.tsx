@@ -228,6 +228,13 @@ const BaseControlPage = () => {
             >
                 <ControlButton
                     size="wide"
+                    variant="primary"
+                    onClick={() => window.location.href = "/rc"}
+                >
+                    摇杆驾驶
+                </ControlButton>
+                <ControlButton
+                    size="wide"
                     variant="secondary"
                     onClick={() => window.location.href = "/wifi"}
                 >

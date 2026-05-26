@@ -28,6 +28,9 @@ class MJPEGStreamHandler(tornado.web.RequestHandler):
             self.write({"error": "camera not available"})
             return
 
+        fps = int(self.get_argument("fps", "30"))
+        interval = 1.0 / max(1, min(fps, 30))
+
         self.set_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
         self.set_header("Access-Control-Allow-Origin", "*")
         self.set_header("Cache-Control", "no-cache, no-store, must-revalidate")
@@ -52,7 +55,7 @@ class MJPEGStreamHandler(tornado.web.RequestHandler):
             except tornado.iostream.StreamClosedError:
                 break
 
-            await tornado.gen.sleep(0.03)
+            await tornado.gen.sleep(interval)
 
     @staticmethod
     def _read_and_encode(collector):
