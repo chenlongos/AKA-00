@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from "react";
-import {api} from "../api";
+import {api, controlSocket} from "../api";
 import ControlButton from "../components/ControlButton.tsx";
 import CameraToggle from "../components/CameraToggle";
 
@@ -9,22 +9,16 @@ const BaseControlPage = () => {
     const [status, setStatus] = useState("准备就绪");
     const [leftSpeed, setLeftSpeed] = useState(0);
     const [rightSpeed, setRightSpeed] = useState(0);
+    const [wsConnected, setWsConnected] = useState(false);
 
     const currentActionRef = useRef<string | null>(null);
 
-    // 定时获取电机实时速度
     useEffect(() => {
-        const fetchSpeed = async () => {
-            try {
-                const data = await api.motor.status();
-                setLeftSpeed(data.left_speed ?? 0);
-                setRightSpeed(data.right_speed ?? 0);
-            } catch {}
-        };
-
-        fetchSpeed();
-        const interval = setInterval(fetchSpeed, 500);
-        return () => clearInterval(interval);
+        controlSocket.connect(setWsConnected, (s) => {
+            setLeftSpeed(s.left);
+            setRightSpeed(s.right);
+        });
+        return () => { controlSocket.close(); };
     }, []);
 
     // URL哈希命令监听
@@ -67,17 +61,22 @@ const BaseControlPage = () => {
 
     const send = async (action: string, speed: number = 50) => {
         setStatus("执行: " + action);
-        try {
-            const text = await api.motor.action(action, speed);
-            if (text) {
-                try {
-                    console.log(JSON.parse(text));
-                } catch {
-                    console.log(text);
-                }
+        if (action === "stop") {
+            controlSocket.sendJoystick(0, 0);
+        } else if (action === "up") {
+            controlSocket.sendJoystick(0, speed);
+        } else if (action === "down") {
+            controlSocket.sendJoystick(0, -speed);
+        } else if (action === "left") {
+            controlSocket.sendJoystick(-speed, 0);
+        } else if (action === "right") {
+            controlSocket.sendJoystick(speed, 0);
+        } else {
+            try {
+                await api.motor.action(action, speed);
+            } catch (err) {
+                setStatus("错误: " + err);
             }
-        } catch (err) {
-            setStatus("错误: " + err);
         }
     };
 
@@ -265,6 +264,11 @@ const BaseControlPage = () => {
             </div>
 
             <div style={{marginTop: "20px", opacity: 0.5, fontSize: "13px"}}>
+                <span style={{
+                    width: "6px", height: "6px", borderRadius: "50%",
+                    background: wsConnected ? "#22c55e" : "#ef4444",
+                    display: "inline-block", marginRight: "6px",
+                }}/>
                 {status}
             </div>
         </div>

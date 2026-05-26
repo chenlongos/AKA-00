@@ -1,13 +1,17 @@
+#!/usr/bin/env python3
 import os
+import struct
 import subprocess
 
 import cv2
 import tornado.ioloop
 import tornado.web
 import tornado.httpserver
+import tornado.websocket
 import tornado.wsgi
 
 from app import create_app
+from app.services import get_control_service
 from src.state import get_state_collector
 
 app = create_app()
@@ -62,10 +66,59 @@ class MJPEGStreamHandler(tornado.web.RequestHandler):
         return jpg.tobytes()
 
 
+class ControlWebSocket(tornado.websocket.WebSocketHandler):
+    def check_origin(self, origin):
+        return True
+
+    def open(self):
+        self.set_nodelay(True)
+        self._last_left = 0
+        self._last_right = 0
+        self._status_ticks = 0
+        self._status_timer = tornado.ioloop.PeriodicCallback(
+            self._push_status, 200
+        )
+        self._status_timer.start()
+
+    def on_message(self, message):
+        if not isinstance(message, bytes) or len(message) < 3:
+            return
+        if message[0] != 0xAA:
+            return
+        x = message[1] if message[1] < 128 else message[1] - 256
+        y = message[2] if message[2] < 128 else message[2] - 256
+        left = max(-100, min(100, y + x))
+        right = max(-100, min(100, y - x))
+        get_control_service().run_motor(left, right)
+
+    def on_close(self):
+        self._status_timer.stop()
+        get_control_service().run_motor(0, 0)
+
+    def _push_status(self):
+        collector = get_state_collector()
+        left = int(collector._status.left_speed * 1000)
+        right = int(collector._status.right_speed * 1000)
+        self._status_ticks += 1
+        # only push if speed changed or every 2s heartbeat
+        if (left == self._last_left and right == self._last_right
+                and self._status_ticks < 10):
+            return
+        self._status_ticks = 0
+        self._last_left = left
+        self._last_right = right
+        buf = struct.pack("<Bhh", 0xBB, left, right)
+        try:
+            self.write_message(buf, binary=True)
+        except tornado.websocket.WebSocketClosedError:
+            pass
+
+
 def make_app():
     return tornado.web.Application(
         [
             (r"/api/camera/stream", MJPEGStreamHandler),
+            (r"/ws/control", ControlWebSocket),
             (r".*", tornado.web.FallbackHandler, dict(fallback=wsgi_container)),
         ]
     )

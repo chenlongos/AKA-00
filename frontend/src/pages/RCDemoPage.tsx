@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useRef, useState} from "react";
-import {api} from "../api";
+import {controlSocket} from "../api";
 import CameraToggle from "../components/CameraToggle";
 
 
@@ -10,6 +10,15 @@ const RCDemoPage = () => {
     const [directionDisplay, setDirectionDisplay] = useState(0);
     const [isNarrow, setIsNarrow] = useState(false);
     const [cameraOn, setCameraOn] = useState(false);
+    const [wsConnected, setWsConnected] = useState(false);
+
+    useEffect(() => {
+        controlSocket.connect(setWsConnected, (s) => {
+            setLeftSpeed(s.left);
+            setRightSpeed(s.right);
+        });
+        return () => { controlSocket.close(); };
+    }, []);
 
     useEffect(() => {
         const check = () => setIsNarrow(window.innerWidth < window.innerHeight);
@@ -21,9 +30,9 @@ const RCDemoPage = () => {
     const throttleRef = useRef(0);
     const directionRef = useRef(0);
     const motorIntervalRef = useRef<number | null>(null);
-    const lastCommandRef = useRef<{left: number, right: number} | null>(null);
+    const lastCommandRef = useRef<{x: number, y: number} | null>(null);
 
-    const sendCommand = useCallback(async () => {
+    const sendCommand = useCallback(() => {
         const thr = throttleRef.current;
         const dir = directionRef.current;
 
@@ -31,29 +40,20 @@ const RCDemoPage = () => {
         const thrZero = Math.abs(thr) < deadZone ? 0 : thr;
         const dirZero = Math.abs(dir) < deadZone ? 0 : dir;
 
-        const base = thrZero;
-        const turn = dirZero * 0.5;
-        const left = Math.max(-100, Math.min(100, base - turn));
-        const right = Math.max(-100, Math.min(100, base + turn));
-
         if (lastCommandRef.current &&
-            Math.abs(lastCommandRef.current.left - left) < 5 &&
-            Math.abs(lastCommandRef.current.right - right) < 5) {
+            Math.abs(lastCommandRef.current.x - dirZero) < 5 &&
+            Math.abs(lastCommandRef.current.y - thrZero) < 5) {
             return;
         }
-        lastCommandRef.current = {left, right};
+        lastCommandRef.current = {x: dirZero, y: thrZero};
 
-        try {
-            const data = await api.motor.direct(left, right);
-            setLeftSpeed(data.left_speed ?? 0);
-            setRightSpeed(data.right_speed ?? 0);
-        } catch {}
+        controlSocket.sendJoystick(Math.round(dirZero * 0.5), thrZero);
     }, []);
 
     const startControl = useCallback(() => {
         if (motorIntervalRef.current !== null) return;
         sendCommand();
-        motorIntervalRef.current = window.setInterval(sendCommand, 200);
+        motorIntervalRef.current = window.setInterval(sendCommand, 30);
     }, [sendCommand]);
 
     const stopControl = useCallback(() => {
@@ -61,7 +61,7 @@ const RCDemoPage = () => {
             clearInterval(motorIntervalRef.current);
             motorIntervalRef.current = null;
         }
-        api.motor.direct(0, 0).catch(() => {});
+        controlSocket.sendJoystick(0, 0);
         setLeftSpeed(0);
         setRightSpeed(0);
     }, []);
@@ -142,6 +142,7 @@ const RCDemoPage = () => {
 
     const handleBack = () => {
         stopControl();
+        controlSocket.close();
         navigator.sendBeacon("/api/camera/close");
         window.location.href = "/";
     };
@@ -157,10 +158,10 @@ const RCDemoPage = () => {
     };
 
     const stickSize = 55;
-    const throttleW = isNarrow ? 160 : 70;
-    const throttleH = isNarrow ? 70 : 160;
-    const directionW = isNarrow ? 70 : 160;
-    const directionH = isNarrow ? 160 : 70;
+    const throttleW = isNarrow ? 200 : 80;
+    const throttleH = isNarrow ? 80 : 200;
+    const directionW = isNarrow ? 80 : 200;
+    const directionH = isNarrow ? 200 : 80;
     const videoW = isNarrow ? Math.min(window.innerWidth - 60, 320) : Math.min(window.innerWidth - 100, 480);
     const videoH = isNarrow ? videoW * 0.75 : videoW * 0.5;
 
@@ -291,11 +292,21 @@ const RCDemoPage = () => {
                     <div>右 <span style={{color: "#4ade80", fontWeight: "bold"}}>{rightSpeed > 0 ? "+" : ""}{rightSpeed.toFixed(2)}</span></div>
                 </div>
 
-                {/* 刹车按钮 */}
+                {/* WebSocket 状态 + 刹车 */}
+                <div style={{display: "flex", alignItems: "center", gap: "10px", marginTop: "10px"}}>
+                    <span style={{
+                        width: "8px", height: "8px", borderRadius: "50%",
+                        background: wsConnected ? "#22c55e" : "#ef4444",
+                        display: "inline-block",
+                    }}/>
+                    <span style={{fontSize: "11px", opacity: 0.6}}>
+                        {wsConnected ? "WS已连接" : "WS断开"}
+                    </span>
+                </div>
                 <button
                     onClick={handleBrake}
                     style={{
-                        marginTop: "10px",
+                        marginTop: "6px",
                         background: "rgba(239,68,68,0.3)",
                         border: "1px solid #ef4444",
                         color: "white",

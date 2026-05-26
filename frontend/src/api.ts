@@ -65,3 +65,68 @@ export const demo = {
 };
 
 export const api = { system, motor, arm, base, camera, demo };
+
+export type MotorStatus = { left: number; right: number };
+
+// WebSocket 实时控制通道
+export class ControlSocket {
+    private ws: WebSocket | null = null;
+    private reconnectTimer: number | null = null;
+    private onStatusChange: ((connected: boolean) => void) | null = null;
+    private onMotorStatus: ((status: MotorStatus) => void) | null = null;
+
+    connect(onStatus?: (connected: boolean) => void, onMotorStatus?: (status: MotorStatus) => void) {
+        this.onStatusChange = onStatus ?? null;
+        this.onMotorStatus = onMotorStatus ?? null;
+        this._doConnect();
+    }
+
+    private _doConnect() {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
+        const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+        const url = `${protocol}//${location.host}/ws/control`;
+        this.ws = new WebSocket(url);
+        this.ws.binaryType = "arraybuffer";
+
+        this.ws.onopen = () => {
+            this.onStatusChange?.(true);
+            if (this.reconnectTimer) { clearInterval(this.reconnectTimer); this.reconnectTimer = null; }
+        };
+
+        this.ws.onmessage = (e) => {
+            if (!(e.data instanceof ArrayBuffer) || e.data.byteLength < 5) return;
+            const dv = new DataView(e.data);
+            if (dv.getUint8(0) !== 0xBB) return;
+            const left = dv.getInt16(1, true) / 1000;
+            const right = dv.getInt16(3, true) / 1000;
+            this.onMotorStatus?.({ left, right });
+        };
+
+        this.ws.onclose = () => {
+            this.onStatusChange?.(false);
+            if (!this.reconnectTimer) {
+                this.reconnectTimer = window.setInterval(() => this._doConnect(), 2000);
+            }
+        };
+
+        this.ws.onerror = () => { this.ws?.close(); };
+    }
+
+    sendJoystick(x: number, y: number) {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+        const buf = new ArrayBuffer(3);
+        const dv = new DataView(buf);
+        dv.setUint8(0, 0xAA);
+        dv.setInt8(1, Math.max(-128, Math.min(127, x)));
+        dv.setInt8(2, Math.max(-128, Math.min(127, y)));
+        this.ws.send(buf);
+    }
+
+    close() {
+        if (this.reconnectTimer) { clearInterval(this.reconnectTimer); this.reconnectTimer = null; }
+        this.ws?.close();
+        this.ws = null;
+    }
+}
+
+export const controlSocket = new ControlSocket();
