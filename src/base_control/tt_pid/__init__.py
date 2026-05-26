@@ -174,7 +174,7 @@ class TtPidChassis:
                     right = rpm
                 elif mid == 1:
                     left = rpm
-        return RpmData(left=-left, right=right)
+        return RpmData(left=left, right=right)
 
     def reset(self) -> bool:
         """重置控制器。"""
