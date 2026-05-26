@@ -46,6 +46,48 @@ QQ群：901307286
 2. 🔨 组装：[组装文档/视频链接]
 3. 💻 软件课程，请报名训练营学习：[训练营课程链接]
 
+## 📦 部署
+
+将项目打包为单个可执行文件，直接拷贝到 SG2002 控制板上运行。
+
+```bash
+# 构建（在开发机上执行）
+./build_release.sh              # 使用已有前端
+./build_release.sh --rebuild    # 重新构建前端后打包
+
+# 输出: dist/aka-server (约 9MB 自解压可执行文件)
+```
+
+### 首次部署
+
+```bash
+# 1. 拷贝 aka-server 到控制板
+scp dist/aka-server root@<robot>:/usr/local/bin/
+
+# 2. SSH 到控制板，运行热点初始化脚本（仅首次）
+ssh root@<robot>
+chmod +x init_ap_web.sh && ./init_ap_web.sh
+
+# 3. 启动服务
+aka-server
+```
+
+开机自启由 `init_ap_web.sh` 自动配置（S99webstart），之后每次开机自动运行 `aka-server`。
+
+### 更新部署
+
+```bash
+# 重新构建并拷贝，然后清除旧数据重启
+scp dist/aka-server root@<robot>:/usr/local/bin/
+ssh root@<robot> 'rm -rf /root/AKA-00 && aka-server'
+```
+
+### 热点信息
+
+- SSID: `chenlong-robot-xxxxx`（基于设备 MAC 地址生成）
+- 网关: `192.168.4.1`
+- 连接热点后浏览器访问 `http://192.168.4.1` 即可控制
+
 ## 目前功能
 
 ### ✅ 已完成
@@ -61,12 +103,14 @@ QQ群：901307286
 
 ```
 AKA-00/
-├── run.py              # Web 服务器入口
-├── tennis_hunter.py    # 机器人主程序
-├── app/                # Flask Web 应用
-├── src/                # 硬件控制模块（机械臂、电机、摄像头）
-├── frontend/           # React 前端
-└── models/            # YOLOv8 模型文件
+├── run.py                # Web 服务器入口
+├── build_release.sh      # 打包为单文件可执行程序
+├── init_ap_web.sh        # 热点 + 自启配置脚本
+├── tennis_hunter.py      # 机器人主程序
+├── app/                  # Flask Web 应用
+├── src/                  # 硬件控制模块（机械臂、电机、摄像头）
+├── frontend/             # React 前端
+└── models/               # YOLOv8 模型文件
 
 详细说明见 [文档](./docs/src/06-development/structure.md)
 ```

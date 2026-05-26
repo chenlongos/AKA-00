@@ -36,27 +36,46 @@ python run.py
 
 本地对于硬件调用的接口进行了隔离，所以可以直接启动
 
-## 代码修改完成后部署到控制板
+## 打包部署到控制板
 
-修改完代码后先在本地查看修改和调用，确认无误后可以通过scp命令进行传输，要将修改了的文件替换主控上对应的文件。
-```
-scp 本地文件 root@<ip>：
-```
+使用 `build_release.sh` 将整个项目打包为单个自解压可执行文件 `aka-server`，然后拷贝到 SG2002 控制板即可运行。
 
-之后通过 ps 命令确认当前是否有服务启动占用80和443端口，如果有会返回pid
-```
-ps | grep python*
-```
+```bash
+# 构建（在开发机上执行）
+./build_release.sh              # 使用已有静态文件
+./build_release.sh --rebuild    # 自动构建前端后打包
 
-并用 kill 关闭目标进程
-```
-kill -9 <pid>
+# 输出: dist/aka-server (约 9MB)
 ```
 
+### 首次部署
 
-之后再通过
-```
-python run.py
+```bash
+# 1. 拷贝 aka-server 到控制板
+scp dist/aka-server root@<robot>:/usr/local/bin/
+
+# 2. SSH 到控制板，运行初始化脚本（配置热点 + 开机自启）
+ssh root@<robot>
+chmod +x init_ap_web.sh && ./init_ap_web.sh
+
+# 3. 启动服务
+aka-server
 ```
 
-在主控板上启动项目进行调试
+### 更新部署
+
+重新构建后覆盖即可，需要清除旧数据目录：
+
+```bash
+scp dist/aka-server root@<robot>:/usr/local/bin/
+ssh root@<robot> 'rm -rf /root/AKA-00 && aka-server'
+```
+
+### 工作原理
+
+`aka-server` 是一个自解压程序：
+1. 首次运行时自动解压项目文件到 `${AKA_HOME:-/root/AKA-00}`
+2. 执行 `uart_init.sh` 初始化串口（如果存在）
+3. 启动 `python3 run.py` 运行 Web 服务
+
+后续运行时跳过解压步骤，直接启动服务。

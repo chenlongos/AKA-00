@@ -11,35 +11,46 @@
 1. 连接电源，等待控制板指示灯亮起
 2. 等待 60 秒，网络模块启动
 3. 连接机器人热点（格式：`chenlong-robot-xxxxx`）
-4. 浏览器访问 `192.168.4.1`，进入配置 遥控器
+4. 浏览器访问 `192.168.4.1`，进入控制界面
 5. 之后可以通过手机上的遥控器控制小车
 
-如果需要自定义启动流程需要初始化的详细步骤见 [机器人连接](./04-setup/connection.md)
+## 3. 部署（首次/更新）
 
-## 3. 修改代码常用命令
+项目以单文件 `aka-server` 分发，拷贝到控制板即可运行：
+
+```bash
+# 打包（在开发机上）
+./build_release.sh              # 使用已有静态文件
+./build_release.sh --rebuild    # 自动构建前端后打包
+
+# 拷贝到控制板
+scp dist/aka-server root@<robot>:/usr/local/bin/
+
+# SSH 到控制板，首次部署需运行初始化脚本
+ssh root@<robot>
+./init_ap_web.sh   # 配置热点 + 开机自启（仅首次）
+aka-server         # 启动服务
+```
+
+更新部署时清除旧数据后重新运行：
+```bash
+ssh root@<robot> 'rm -rf /root/AKA-00 && aka-server'
+```
+
+## 4. 修改代码常用命令
 
 ```bash
 # SSH 登录控制板
-# 在同一局域网下用ssh连接
 ssh root@<机器人IP>
 
-# 通过scp将修改的代码上传到主控上
-scp 本地目录文件 root@<机器人IP>:
+# 本地修改代码后，重新打包并部署
+./build_release.sh && scp dist/aka-server root@<robot>:/usr/local/bin/
 
-# 或者在主控上用vim进行修改
-vim 目标文件
-
-# 找到并杀死当前占用线程
-ps ｜ grep python*
-kill -9 pid
-
-# 启动服务
-python run.py
+# 在控制板上重启服务
+ssh root@<robot> 'rm -rf /root/AKA-00 && aka-server'
 ```
 
-详细部署见 [软件部署](./04-setup/software.md)
-
-## 4. 使用
+## 5. 使用
 
 启动后通过以下方式控制：
 
