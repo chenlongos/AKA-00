@@ -81,7 +81,6 @@ sleep 30
 
 if ! iw dev | grep -q "wlan1"; then
     echo "Creating wlan1 interface..."
-    # 注意：某些驱动要求先关闭 wlan0 才能添加虚拟接口
     ip link set wlan0 down
     iw phy phy0 interface add wlan1 type managed
     sleep 2

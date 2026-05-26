@@ -4,3 +4,4 @@ static
 output/
 checkpoints/
 dora
+dist/
