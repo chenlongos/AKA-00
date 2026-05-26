@@ -16,7 +16,7 @@
 
 ## 3. 部署（首次/更新）
 
-项目以单文件 `aka-server` 分发，拷贝到控制板即可运行：
+项目以单文件 `aka-server` 分发，拷贝到控制板：
 
 ```bash
 # 打包（在开发机上）
@@ -24,12 +24,13 @@
 ./build_release.sh --rebuild    # 自动构建前端后打包
 
 # 拷贝到控制板
-scp dist/aka-server root@<robot>:/usr/local/bin/
+scp dist/aka-server root@<robot>:
 
-# SSH 到控制板，首次部署需运行初始化脚本
-ssh root@<robot>
-./init_ap_web.sh   # 配置热点 + 开机自启（仅首次）
-aka-server         # 启动服务
+# 首次部署：一键初始化（解压 + 热点 + 自启）
+ssh root@<robot> 'aka-server --init'
+
+# 之后每次开机自动启动，也可手动运行
+ssh root@<robot> 'aka-server'
 ```
 
 更新部署时清除旧数据后重新运行：

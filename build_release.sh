@@ -20,7 +20,9 @@ if [ "$1" = "--rebuild" ] || [ ! -d "$SCRIPT_DIR/static" ] || [ -z "$(ls -A "$SC
 fi
 
 # Create the self-extracting executable.
-# The header script extracts payload on first run, then executes the server.
+# Supports two modes:
+#   aka-server          — normal run (extract if first time, then start server)
+#   aka-server --init   — first-time setup (extract + AP hotspot + DHCP + auto-start)
 cat > "$OUTPUT" <<'HEADER'
 #!/bin/sh
 # AKA-00 Server
@@ -28,27 +30,40 @@ set -e
 
 APP_DIR="${AKA_HOME:-/root/AKA-00}"
 
-# First run: extract payload
-if [ ! -f "$APP_DIR/run.py" ]; then
+extract_payload() {
     echo "Installing AKA-00 to $APP_DIR ..."
     mkdir -p "$APP_DIR"
     sed -n '/^#__PAYLOAD_BELOW__$/,$p' "$0" | tail -n +2 | python3 -c "
-import base64, sys, tarfile, io
-data = base64.b64decode(sys.stdin.buffer.read())
-tarfile.open(fileobj=io.BytesIO(data), mode='r:gz').extractall(path='$APP_DIR')
+import base64, sys, tarfile, tempfile, os
+tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.tar.gz')
+try:
+    tmp.write(base64.b64decode(sys.stdin.buffer.read()))
+    tmp.close()
+    tarfile.open(tmp.name, mode='r:gz').extractall(path='$APP_DIR')
+finally:
+    os.unlink(tmp.name)
 "
     chmod +x "$APP_DIR"/*.sh 2>/dev/null || true
     echo "Install done."
+}
+
+# ── --init: first-time setup ──────────────────────────────────────────
+if [ "$1" = "--init" ]; then
+    echo "=== AKA-00 First-Time Setup ==="
+    extract_payload
+    "$APP_DIR/init_ap_web.sh"
+    echo ""
+    echo "Setup complete."
+    echo "  Service will auto-start on next boot."
+    exit 0
 fi
 
-# Hardware init
-if [ -f "$APP_DIR/uart_init.sh" ]; then
-    "$APP_DIR/uart_init.sh"
+# ── Normal run ─────────────────────────────────────────────────────────
+if [ ! -f "$APP_DIR/run.py" ]; then
+    extract_payload
 fi
-
-# Run
 cd "$APP_DIR"
-exec python3 run.py
+exec ./init.sh
 #__PAYLOAD_BELOW__
 HEADER
 
@@ -79,8 +94,9 @@ chmod +x "$OUTPUT"
 echo "Done: $OUTPUT ($(du -h "$OUTPUT" | cut -f1))"
 echo ""
 echo "Deploy:"
-echo "  scp $OUTPUT root@<robot>:/root/AKA-00/"
-echo "  ssh root@<robot> 'aka-server'"
+echo "  scp $OUTPUT root@<robot>:/usr/local/bin/"
+echo "  ssh root@<robot> 'aka-server --init'   # first time only"
+echo "  ssh root@<robot> 'aka-server'          # normal run"
 echo ""
 echo "Update:"
 echo "  ssh root@<robot> 'rm -rf /root/AKA-00'  # then copy and run again"

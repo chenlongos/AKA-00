@@ -54,20 +54,16 @@ python run.py
 # 1. 拷贝 aka-server 到控制板
 scp dist/aka-server root@<robot>:/usr/local/bin/
 
-# 2. SSH 到控制板，运行初始化脚本（配置热点 + 开机自启）
-ssh root@<robot>
-chmod +x init_ap_web.sh && ./init_ap_web.sh
-
-# 3. 启动服务
-aka-server
+# 2. 一键初始化（解压 + 热点 + 开机自启）
+ssh root@<robot> 'aka-server --init'
 ```
 
 ### 更新部署
 
-重新构建后覆盖即可，需要清除旧数据目录：
+清除旧数据后重新运行：
 
 ```bash
-scp dist/aka-server root@<robot>:/usr/local/bin/
+scp dist/aka-server root@<robot>:
 ssh root@<robot> 'rm -rf /root/AKA-00 && aka-server'
 ```
 

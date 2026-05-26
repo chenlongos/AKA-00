@@ -15,27 +15,24 @@
 
 ## 部署 aka-server
 
-将 `aka-server` 拷贝到控制板并配置热点和自启：
+将 `aka-server` 拷贝到控制板，一条命令完成初始化：
 
 ```shell
-# 1. 拷贝单文件可执行程序到控制板
+# 1. 拷贝到控制板
 scp dist/aka-server root@<robot>:/usr/local/bin/
 
-# 2. SSH 到控制板，运行初始化脚本（首次部署需要）
-ssh root@<robot>
-chmod +x init_ap_web.sh
-./init_ap_web.sh
-
-# 3. 启动服务
-aka-server
+# 2. 一键初始化（解压 + AP 热点 + DHCP + 开机自启）
+ssh root@<robot> 'aka-server --init'
 ```
 
-`init_ap_web.sh` 做了以下事情：
-- 创建 AP 热点（SSID: `chenlong-robot-xxxxx`，基于 MAC 地址唯一）
+`--init` 自动完成：
+- 解压项目文件到 `/root/AKA-00`
+- 配置 AP 热点（SSID: `chenlong-robot-xxxxx`，基于 MAC 地址唯一）
 - 配置 DHCP（192.168.4.100-200）
-- 添加 S99webstart 自启脚本，开机自动启动 `aka-server`
+- 写入 S98apstart / S99webstart 自启脚本
+- 立即启动热点
 
-之后每次开机都会自动运行。如需手动更新：
+之后每次开机自动运行 `aka-server`。如需手动更新：
 
 ```shell
 scp dist/aka-server root@<robot>:/usr/local/bin/

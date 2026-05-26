@@ -64,15 +64,15 @@ QQ群：901307286
 # 1. 拷贝 aka-server 到控制板
 scp dist/aka-server root@<robot>:/usr/local/bin/
 
-# 2. SSH 到控制板，运行热点初始化脚本（仅首次）
-ssh root@<robot>
-chmod +x init_ap_web.sh && ./init_ap_web.sh
-
-# 3. 启动服务
-aka-server
+# 2. 运行首次初始化（解压 + 配置热点 + 开机自启）
+ssh root@<robot> 'aka-server --init'
 ```
 
-开机自启由 `init_ap_web.sh` 自动配置（S99webstart），之后每次开机自动运行 `aka-server`。
+`--init` 会自动完成：
+- 解压项目文件到 `/root/AKA-00`
+- 配置 AP 热点（SSID 基于 MAC 地址唯一生成）
+- 配置 DHCP + 写入 S98apstart / S99webstart 自启脚本
+- 立即启动热点
 
 ### 更新部署
 
