@@ -115,6 +115,7 @@ const RCDemoPage = () => {
         let dist, maxDist;
 
         if (isNarrow) {
+            // 窄屏：竖向条 80×200，上下推，上=正=右转
             const centerY = rect.top + rect.height / 2;
             const dy = clientY - centerY;
             maxDist = rect.height / 2 - 20;
