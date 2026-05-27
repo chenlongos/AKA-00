@@ -115,12 +115,12 @@ const RCDemoPage = () => {
         let dist, maxDist;
 
         if (isNarrow) {
-            // 窄屏：竖向条 80×200，上下推，上=正=右转
+            // 窄屏：竖向条 80×200，下推=右转
             const centerY = rect.top + rect.height / 2;
             const dy = clientY - centerY;
             maxDist = rect.height / 2 - 20;
             dist = Math.max(-maxDist, Math.min(maxDist, dy));
-            const dir = Math.round((-dist / maxDist) * 100);
+            const dir = Math.round((dist / maxDist) * 100);
             directionRef.current = dir;
             setDirectionDisplay(dir);
         } else {
@@ -396,7 +396,7 @@ const RCDemoPage = () => {
                         left: "50%",
                         top: "50%",
                         transform: isNarrow
-                            ? `translate(-50%, calc(-50% - ${directionDisplay * 0.5}px))`
+                            ? `translate(-50%, calc(-50% + ${directionDisplay * 0.5}px))`
                             : `translate(calc(-50% + ${directionDisplay * 0.5}px), -50%)`,
                         boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
                     }}/>
