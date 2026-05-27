@@ -85,7 +85,7 @@ class ControlWebSocket(tornado.websocket.WebSocketHandler):
         )
         self._status_timer.start()
 
-    def on_message(self, message):
+    async def on_message(self, message):
         if not isinstance(message, bytes) or len(message) < 3:
             return
         if message[0] != 0xAA:
@@ -94,11 +94,20 @@ class ControlWebSocket(tornado.websocket.WebSocketHandler):
         y = message[2] if message[2] < 128 else message[2] - 256
         left = max(-100, min(100, y + x))
         right = max(-100, min(100, y - x))
-        get_control_service().run_motor(left, right)
+        await tornado.ioloop.IOLoop.current().run_in_executor(
+            None, get_control_service().run_motor, left, right
+        )
 
     def on_close(self):
         self._status_timer.stop()
-        get_control_service().run_motor(0, 0)
+        tornado.ioloop.IOLoop.current().add_callback(
+            self._stop_motor_async
+        )
+
+    async def _stop_motor_async(self):
+        await tornado.ioloop.IOLoop.current().run_in_executor(
+            None, get_control_service().run_motor, 0, 0
+        )
 
     def _push_status(self):
         collector = get_state_collector()
