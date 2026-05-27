@@ -60,6 +60,8 @@ class MJPEGStreamHandler(tornado.web.RequestHandler):
     @staticmethod
     def _read_and_encode(collector):
         """在 thread pool 中执行 camera read + JPEG 编码"""
+        if collector._camera is None:
+            return None
         ret, frame = collector._camera.read()
         if not ret or frame is None:
             return None
