@@ -2,6 +2,7 @@
 import os
 import struct
 import subprocess
+import time
 
 import cv2
 import tornado.ioloop
@@ -64,6 +65,10 @@ class MJPEGStreamHandler(tornado.web.RequestHandler):
             return None
         ret, frame = collector._camera.read()
         if not ret or frame is None:
+            return None
+        # skip frames older than 2s (camera may have stalled)
+        frame_age = time.monotonic() - collector._camera._frame_ts
+        if frame_age > 2.0:
             return None
         ret, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 40])
         if not ret:

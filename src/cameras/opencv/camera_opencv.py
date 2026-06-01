@@ -26,6 +26,7 @@ class Camera:
         self._height = height
         self._fps = fps
         self._frame = None
+        self._frame_ts = 0.0
         self._frame_lock = threading.Lock()
         self._frame_ready = threading.Event()
         self._running = False
@@ -67,18 +68,24 @@ class Camera:
         self._thread.start()
 
     def _capture_loop(self):
-        """独立采集线程，只保留最新帧，采集完通知等待者"""
+        """独立采集线程，只保留最新帧"""
+        interval = 1.0 / max(1, self._fps)
         while self._running:
+            loop_start = time.monotonic()
             if self._cap is None or not self._cap.isOpened():
                 time.sleep(0.1)
                 continue
             ret, frame = self._cap.read()
-            if not ret:
+            if not ret or frame is None:
                 time.sleep(0.01)
                 continue
             with self._frame_lock:
-                self._frame = frame
+                self._frame = frame.copy()
+                self._frame_ts = time.monotonic()
             self._frame_ready.set()
+            elapsed = time.monotonic() - loop_start
+            if elapsed < interval:
+                time.sleep(interval - elapsed)
 
     def is_available(self) -> bool:
         """检查摄像头是否可用"""
