@@ -183,6 +183,32 @@ def demo_download_model_with_progress():
     })
 
 
+@demo_bp.route("/upload_model", methods=["POST"])
+def demo_upload_model():
+    """直接接收模型文件上传（前端转发，无需 demo_server URL）"""
+    if 'file' not in request.files:
+        return jsonify({"error": "file is required"}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "empty filename"}), 400
+
+    current_name = _find_current_demo()
+    if not current_name:
+        return jsonify({"error": "no local demo found"}), 404
+
+    base_dir = _get_base_dir()
+    demo_dir = os.path.join(base_dir, current_name)
+    file_path = os.path.join(demo_dir, "yolo_model.cvimodel")
+
+    try:
+        file.save(file_path)
+        file_size = os.path.getsize(file_path)
+        return jsonify({"status": "uploaded", "size": file_size, "name": current_name})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 @demo_bp.route("/download_progress/<task_id>", methods=["GET"])
 def demo_get_download_progress(task_id):
     """获取下载进度"""
