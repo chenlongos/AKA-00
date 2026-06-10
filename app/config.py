@@ -16,4 +16,8 @@ class HardwareConfig:
 
     demo_server_url: str = "http://124.222.162.228:8888"
 
+    # 距离标定: D = m / P + c
+    calib_m: float = 2671.82
+    calib_c: float = -2.82
+
 config = HardwareConfig()
