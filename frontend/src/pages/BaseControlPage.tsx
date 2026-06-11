@@ -59,7 +59,7 @@ const BaseControlPage = () => {
         api.base.reinitialize().catch(() => {});
     }, []);
 
-    const send = async (action: string, speed: number = 40) => {
+    const send = async (action: string, speed: number = 50) => {
         setStatus("执行: " + action);
         if (action === "stop") {
             controlSocket.sendJoystick(0, 0);

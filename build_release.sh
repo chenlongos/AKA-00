@@ -71,6 +71,7 @@ HEADER
 echo "Packaging project..."
 cd "$SCRIPT_DIR"
 COPYFILE_DISABLE=1 tar cz \
+    --exclude='dora' \
     --exclude='frontend' \
     --exclude='node_modules' \
     --exclude='dist' \
@@ -88,6 +89,7 @@ COPYFILE_DISABLE=1 tar cz \
     --exclude='.vscode' \
     --exclude='.idea' \
     --exclude='build_release.sh' \
+    --exclude='hardware' \
     . | base64 >> "$OUTPUT"
 
 chmod +x "$OUTPUT"
