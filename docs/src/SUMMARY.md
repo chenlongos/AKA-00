@@ -23,6 +23,7 @@
 - [Web 界面](./05-usage/web-ui.md)
 - [WebSocket 控制接口](./05-usage/websocket.md)
 - [API 文档](./05-usage/api.md)
+- [距离标定](./05-usage/dist-calibration.md)
 
 ## 开发
 
