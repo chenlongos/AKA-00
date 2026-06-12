@@ -2,9 +2,11 @@ import {useEffect, useRef, useState} from "react";
 import {api, controlSocket} from "../api";
 import ControlButton from "../components/ControlButton.tsx";
 import CameraToggle from "../components/CameraToggle";
+import {useViewportScale} from "../hooks/useViewportScale";
 
 
 const BaseControlPage = () => {
+    const {scalePx} = useViewportScale();
     const [ip, setIp] = useState("获取中...");
     const [status, setStatus] = useState("准备就绪");
     const [leftSpeed, setLeftSpeed] = useState(0);
@@ -109,7 +111,7 @@ const BaseControlPage = () => {
                 background: "#0f172a",
                 color: "white",
                 minHeight: "100dvh",
-                padding: "10px",
+                padding: scalePx(10),
                 textAlign: "center",
                 overflow: "hidden",
                 touchAction: "none",
@@ -122,7 +124,7 @@ const BaseControlPage = () => {
             <div
                 style={{
                     display: "flex",
-                    gap: "10px",
+                    gap: scalePx(10),
                     justifyItems: "center",
                     flexDirection: "column",
                     alignItems: "center",
@@ -130,8 +132,8 @@ const BaseControlPage = () => {
                 }}
             >
                 {/* 摄像头开关 */}
-                <div style={{position: "absolute", top: "0", right: "0", display: "flex", alignItems: "center", gap: "6px"}}>
-                    <span style={{fontSize: "11px", opacity: 0.6}}>摄像头</span>
+                <div style={{position: "absolute", top: "0", right: "0", display: "flex", alignItems: "center", gap: scalePx(6)}}>
+                    <span style={{fontSize: scalePx(11), opacity: 0.6}}>摄像头</span>
                     <CameraToggle />
                 </div>
 
@@ -142,7 +144,7 @@ const BaseControlPage = () => {
                 >
                     前进
                 </ControlButton>
-                <div style={{display: 'flex', gap: "10px"}}>
+                <div style={{display: 'flex', gap: scalePx(10)}}>
                     <ControlButton
                         onPressStart={() => handlePressStart("left", 25)}
                         onPressEnd={() => handlePressEnd()}
@@ -177,13 +179,13 @@ const BaseControlPage = () => {
             {/* 电机实时速度显示 */}
             <div
                 style={{
-                    marginBottom: "20px",
-                    padding: "10px",
+                    marginBottom: scalePx(20),
+                    padding: scalePx(10),
                     background: "rgba(255,255,255,0.1)",
-                    borderRadius: "8px",
+                    borderRadius: scalePx(8),
                     display: "inline-flex",
-                    gap: "30px",
-                    fontSize: "14px",
+                    gap: scalePx(30),
+                    fontSize: scalePx(14),
                 }}
             >
                 <div>左轮: <span style={{color: "#4ade80"}}>{leftSpeed}</span> m/s</div>
@@ -196,7 +198,7 @@ const BaseControlPage = () => {
                 style={{
                     display: "flex",
                     justifyContent: "center",
-                    gap: "10px",
+                    gap: scalePx(10),
                     flexWrap: "wrap",
                 }}
             >
@@ -221,8 +223,8 @@ const BaseControlPage = () => {
                 style={{
                     display: "flex",
                     justifyContent: "center",
-                    marginTop: "10px",
-                    gap: "10px",
+                    marginTop: scalePx(10),
+                    gap: scalePx(10),
                     flexWrap: "wrap",
                 }}
             >
@@ -270,11 +272,11 @@ const BaseControlPage = () => {
                 </ControlButton>
             </div>
 
-            <div style={{marginTop: "20px", opacity: 0.5, fontSize: "13px"}}>
+            <div style={{marginTop: scalePx(20), opacity: 0.5, fontSize: scalePx(13)}}>
                 <span style={{
                     width: "6px", height: "6px", borderRadius: "50%",
                     background: wsConnected ? "#22c55e" : "#ef4444",
-                    display: "inline-block", marginRight: "6px",
+                    display: "inline-block", marginRight: scalePx(6),
                 }}/>
                 {status}
             </div>

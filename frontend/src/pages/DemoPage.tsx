@@ -1,6 +1,7 @@
 import {useState, useRef, useEffect, useCallback} from "react";
 import {api} from "../api";
 import ControlButton from "../components/ControlButton.tsx";
+import {useViewportScale} from "../hooks/useViewportScale";
 
 interface Model {
     name: string;
@@ -12,11 +13,11 @@ interface Model {
 const DEMO_SERVER_URL = import.meta.env.VITE_DEMO_SERVER_URL || "http://localhost:8888";
 
 const DemoPage = () => {
-    // 本地 Demo（名称从后端动态获取）
-    const [demoName, setDemoName] = useState("");
+    const {scalePx} = useViewportScale();
+    // 本地 Demo 列表
+    const [demos, setDemos] = useState<string[]>([]);
     const [demoStatus, setDemoStatus] = useState("准备就绪");
     const [runningDemo, setRunningDemo] = useState<string | null>(null);
-    const [conflictDemo, setConflictDemo] = useState(false);
     const [demoLoading, setDemoLoading] = useState(false);
     const runningDemoRef = useRef<string | null>(null);
 
@@ -27,9 +28,9 @@ const DemoPage = () => {
     const [downloading, setDownloading] = useState<string | null>(null);
     const [progress, setProgress] = useState<number>(0);
 
-    const fetchDemoName = useCallback(() => {
-        fetch("/api/demo/name").then(r => r.json()).then(data => {
-            if (data.name) setDemoName(data.name);
+    const fetchDemoList = useCallback(() => {
+        api.demo.list().then(data => {
+            setDemos(data.demos || []);
         }).catch(() => {});
     }, []);
 
@@ -48,14 +49,13 @@ const DemoPage = () => {
     }, []);
 
     useEffect(() => {
-        fetchDemoName();
+        fetchDemoList();
         fetchModels();
-    }, [fetchDemoName, fetchModels]);
+    }, [fetchDemoList, fetchModels]);
 
     // --- 本地 Demo 操作 ---
-    const runDemo = async () => {
-        if (!demoName) return;
-
+    const runDemo = async (name: string) => {
+        // 如果已有运行中的 demo，先停止
         if (runningDemoRef.current !== null) {
             setDemoLoading(true);
             try { await api.demo.stop(); } catch {}
@@ -63,21 +63,21 @@ const DemoPage = () => {
             setDemoStatus(`${runningDemoRef.current} 已停止`);
             setRunningDemo(null);
             runningDemoRef.current = null;
-            setConflictDemo(false);
-            return;
+            // 如果点的是正在运行的 demo，只停止不启动
+            if (runningDemoRef.current === name || runningDemo === name) {
+                return;
+            }
         }
 
-        setDemoStatus(`执行中: ${demoName}...`);
-        setConflictDemo(false);
-        setRunningDemo(demoName);
-        runningDemoRef.current = demoName;
+        setDemoStatus(`执行中: ${name}...`);
+        setRunningDemo(name);
+        runningDemoRef.current = name;
 
         try {
-            const data = await api.demo.init(demoName);
+            const data = await api.demo.init(name);
             if (data.error) {
                 if (data.pid) {
                     setDemoStatus("demo is already running");
-                    setConflictDemo(true);
                 } else {
                     setDemoStatus(`错误: ${data.error}`);
                     setRunningDemo(null);
@@ -129,7 +129,7 @@ const DemoPage = () => {
                         clearInterval(pollInterval);
                         setDownloading(null);
                         // 刷新 demo 名称（目录可能已被重命名）
-                        fetchDemoName();
+                        fetchDemoList();
                     } else if (progressData.status === "error") {
                         setListStatus(`下载失败: ${progressData.error}`);
                         clearInterval(pollInterval);
@@ -156,7 +156,7 @@ const DemoPage = () => {
         return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
     };
 
-    const displayName = demoName ? demoName.charAt(0).toUpperCase() + demoName.slice(1) : "...";
+    const displayName = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
 
     return (
         <div
@@ -165,7 +165,7 @@ const DemoPage = () => {
                 background: "#0f172a",
                 color: "white",
                 height: "100dvh",
-                padding: "10px",
+                padding: scalePx(10),
                 textAlign: "center",
                 overflowY: "auto",
                 overscrollBehavior: "contain",
@@ -173,31 +173,36 @@ const DemoPage = () => {
         >
             <h2>Demo 控制台</h2>
 
-            {/* ---- 本地 Demo 启动 ---- */}
-            <div style={{marginTop: "20px"}}>
-                {!demoName ? (
+            {/* ---- 本地 Demo 列表 ---- */}
+            <div style={{marginTop: scalePx(20)}}>
+                {demos.length === 0 ? (
                     <div style={{opacity: 0.5}}>未找到本地 Demo</div>
                 ) : (
-                    <ControlButton
-                        size="wide"
-                        variant={runningDemo === demoName || conflictDemo ? "danger" : "success"}
-                        onClick={runDemo}
-                        disabled={demoLoading}
-                        loading={demoLoading}
-                    >
-                        {runningDemo === demoName ? `停止 ${displayName}` : `${displayName} Demo`}
-                    </ControlButton>
+                    <div style={{display: "flex", flexDirection: "column", alignItems: "center", gap: scalePx(10)}}>
+                        {demos.map(name => (
+                            <ControlButton
+                                key={name}
+                                size="wide"
+                                variant={runningDemo === name ? "danger" : "success"}
+                                onClick={() => runDemo(name)}
+                                disabled={demoLoading && runningDemo !== name}
+                                loading={demoLoading && runningDemo === name}
+                            >
+                                {runningDemo === name ? `停止 ${displayName(name)}` : `${displayName(name)} Demo`}
+                            </ControlButton>
+                        ))}
+                    </div>
                 )}
             </div>
 
-            <div style={{marginTop: "10px", opacity: 0.5, fontSize: "13px"}}>
+            <div style={{marginTop: scalePx(10), opacity: 0.5, fontSize: scalePx(13)}}>
                 {demoStatus}
             </div>
 
             {/* ---- 分割线 ---- */}
             <hr
                 style={{
-                    maxWidth: "500px",
+                    maxWidth: scalePx(500),
                     margin: "30px auto",
                     borderColor: "#334155",
                     borderStyle: "solid",
@@ -206,11 +211,11 @@ const DemoPage = () => {
 
             {/* ---- 远端模型下载 ---- */}
             <h3 style={{marginTop: "0"}}>模型下载</h3>
-            <div style={{fontSize: "13px", opacity: 0.7}}>
+            <div style={{fontSize: scalePx(13), opacity: 0.7}}>
                 下载模型将替换本地 Demo 行为
             </div>
 
-            <div style={{marginTop: "16px"}}>
+            <div style={{marginTop: scalePx(16)}}>
                 <ControlButton
                     variant="secondary"
                     onClick={fetchModels}
@@ -220,7 +225,7 @@ const DemoPage = () => {
                 </ControlButton>
             </div>
 
-            <div style={{marginTop: "12px", opacity: 0.5, fontSize: "13px"}}>
+            <div style={{marginTop: scalePx(12), opacity: 0.5, fontSize: scalePx(13)}}>
                 {listStatus}
                 {downloading && progress > 0 && progress < 100 && (
                     <span> {progress}%</span>
@@ -231,10 +236,10 @@ const DemoPage = () => {
                 <div
                     style={{
                         width: "80%",
-                        maxWidth: "400px",
-                        height: "8px",
+                        maxWidth: scalePx(400),
+                        height: scalePx(8),
                         background: "#1e293b",
-                        borderRadius: "4px",
+                        borderRadius: scalePx(4),
                         margin: "10px auto",
                         overflow: "hidden",
                     }}
@@ -252,13 +257,13 @@ const DemoPage = () => {
 
             <div
                 style={{
-                    maxWidth: "500px",
+                    maxWidth: scalePx(500),
                     margin: "20px auto",
                     textAlign: "left",
                 }}
             >
                 {models.length === 0 && !listLoading && (
-                    <div style={{textAlign: "center", opacity: 0.5, padding: "40px"}}>
+                    <div style={{textAlign: "center", opacity: 0.5, padding: scalePx(40)}}>
                         暂无模型
                     </div>
                 )}
@@ -270,15 +275,15 @@ const DemoPage = () => {
                             display: "flex",
                             justifyContent: "space-between",
                             alignItems: "center",
-                            padding: "12px 16px",
+                            padding: `${scalePx(12)} ${scalePx(16)}`,
                             background: "#1e293b",
-                            borderRadius: "8px",
-                            marginBottom: "8px",
+                            borderRadius: scalePx(8),
+                            marginBottom: scalePx(8),
                         }}
                     >
                         <div>
                             <div style={{fontWeight: 500}}>{model.name}</div>
-                            <div style={{fontSize: "12px", opacity: 0.6, marginTop: "4px"}}>
+                            <div style={{fontSize: scalePx(12), opacity: 0.6, marginTop: scalePx(4)}}>
                                 {model.file} • {formatSize(model.size)} • {model.type.toUpperCase()}
                             </div>
                         </div>
@@ -295,7 +300,7 @@ const DemoPage = () => {
             </div>
 
             {/* ---- 返回 ---- */}
-            <div style={{marginTop: "30px", paddingBottom: "40px"}}>
+            <div style={{marginTop: scalePx(30), paddingBottom: scalePx(40)}}>
                 <ControlButton
                     variant="secondary"
                     onClick={() => window.location.href = "/"}

@@ -43,8 +43,10 @@ html {
 
 body {
     overscroll-behavior: contain;
+    overflow-x: hidden;
     overflow-y: auto;
     width: 100%;
+    max-width: 100vw;
     height: 100%;
     height: 100dvh;
     margin: 0;
@@ -52,7 +54,9 @@ body {
 
 #root {
     width: 100%;
+    max-width: 100vw;
     min-height: 100dvh;
+    overflow-x: hidden;
 }
 
 h1 {

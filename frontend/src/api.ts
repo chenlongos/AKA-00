@@ -52,6 +52,7 @@ export const camera = {
 
 // Demo
 export const demo = {
+    list: () => fetch("/api/demo/list").then(r => r.json()),
     init: (name: string) => fetch("/api/demo/init", {
         method: "POST",
         headers: {"Content-Type": "application/json"},

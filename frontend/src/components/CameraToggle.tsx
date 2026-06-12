@@ -1,5 +1,6 @@
 import {useEffect, useState} from "react";
 import {api} from "../api";
+import {useViewportScale} from "../hooks/useViewportScale";
 
 interface CameraToggleProps {
     onStatusChange?: (on: boolean) => void;
@@ -7,6 +8,7 @@ interface CameraToggleProps {
 
 const CameraToggle = ({onStatusChange}: CameraToggleProps) => {
     const [on, setOn] = useState(false);
+    const {scalePx} = useViewportScale();
 
     useEffect(() => {
         api.camera.status().then(data => {
@@ -27,9 +29,9 @@ const CameraToggle = ({onStatusChange}: CameraToggleProps) => {
         <div
             onClick={toggle}
             style={{
-                width: "44px",
-                height: "22px",
-                borderRadius: "11px",
+                width: scalePx(44),
+                height: scalePx(22),
+                borderRadius: scalePx(11),
                 background: on ? "#22c55e" : "#334155",
                 border: `1px solid ${on ? "#22c55e" : "#475569"}`,
                 cursor: "pointer",
@@ -39,10 +41,10 @@ const CameraToggle = ({onStatusChange}: CameraToggleProps) => {
         >
             <div style={{
                 position: "absolute",
-                top: "2px",
-                left: on ? "23px" : "2px",
-                width: "16px",
-                height: "16px",
+                top: scalePx(2),
+                left: on ? scalePx(23) : scalePx(2),
+                width: scalePx(16),
+                height: scalePx(16),
                 borderRadius: "50%",
                 background: "white",
                 transition: "left 0.2s",

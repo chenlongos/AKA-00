@@ -1,4 +1,5 @@
 import {useEffect, useRef, useState} from "react";
+import {useViewportScale} from "../hooks/useViewportScale";
 import {api} from "../api";
 
 interface ArmAnglesZP10S {
@@ -38,6 +39,7 @@ interface BasePwmChannels {
 }
 
 const ArmAnglesPage = () => {
+    const {scalePx} = useViewportScale();
     const [driver, setDriver] = useState<string>("zp10s");
     const [zp10s, setZp10s] = useState<ArmAnglesZP10S>({
         servo0_prepare: 245,
@@ -237,7 +239,7 @@ const ArmAnglesPage = () => {
             <div
                 style={{
                     background: "#fff",
-                    padding: "16px 20px",
+                    padding: `${scalePx(16)} ${scalePx(20)}`,
                     borderBottom: "0.5px solid #c6c6c8",
                     display: "flex",
                     justifyContent: "space-between",
@@ -248,8 +250,8 @@ const ArmAnglesPage = () => {
                 }}
             >
                 <div style={{display: "flex", flexDirection: "column"}}>
-                    <h1 style={{fontSize: 17, margin: 0, fontWeight: 600}}>舵机角度配置</h1>
-                    <div style={{fontSize: 12, color: "#8e8e93", marginTop: 2}}>
+                    <h1 style={{fontSize: scalePx(17), margin: 0, fontWeight: 600}}>舵机角度配置</h1>
+                    <div style={{fontSize: scalePx(12), color: "#8e8e93", marginTop: 2}}>
                         当前驱动: <b>{driver}</b>
                     </div>
                 </div>
@@ -258,7 +260,7 @@ const ArmAnglesPage = () => {
                     disabled={saving}
                     style={{
                         color: saving ? "#8e8e93" : "#007aff",
-                        fontSize: 15,
+                        fontSize: scalePx(15),
                         cursor: saving ? "not-allowed" : "pointer",
                         background: "none",
                         border: "none",
@@ -274,7 +276,7 @@ const ArmAnglesPage = () => {
                 <div
                     style={{
                         textAlign: "center",
-                        padding: 10,
+                        padding: scalePx(10),
                         background: status.includes("成功") ? "#d4edda" : "#f8d7da",
                         color: status.includes("成功") ? "#155724" : "#721c24",
                     }}
@@ -289,19 +291,19 @@ const ArmAnglesPage = () => {
                     <div
                         style={{
                             background: "#fff",
-                            borderRadius: 10,
-                            padding: 16,
+                            borderRadius: scalePx(10),
+                            padding: scalePx(16),
                             boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
                         }}
                     >
-                        <h3 style={{fontSize: 15, fontWeight: 600, marginBottom: 16}}>ZP10S 抓取序列</h3>
+                        <h3 style={{fontSize: scalePx(15), fontWeight: 600, marginBottom: 16}}>ZP10S 抓取序列</h3>
 
                         <div style={{marginBottom: 20}}>
-                            <div style={{fontSize: 13, fontWeight: 600, color: "#8e8e93", marginBottom: 12}}>夹取阶段</div>
+                            <div style={{fontSize: scalePx(13), fontWeight: 600, color: "#8e8e93", marginBottom: 12}}>夹取阶段</div>
                             <div style={{marginBottom: 16}}>
                                 <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
                                     <span style={{fontSize: 14}}>舵机0 夹取角度</span>
-                                    <span style={{fontSize: 14, fontWeight: 600, color: "#007aff"}}>{zp10s.servo0_prepare}°</span>
+                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{zp10s.servo0_prepare}°</span>
                                 </div>
                                 <input
                                     type="range"
@@ -316,7 +318,7 @@ const ArmAnglesPage = () => {
                             <div style={{marginBottom: 16}}>
                                 <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
                                     <span style={{fontSize: 14}}>舵机1 夹取角度</span>
-                                    <span style={{fontSize: 14, fontWeight: 600, color: "#007aff"}}>{zp10s.servo1_prepare}°</span>
+                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{zp10s.servo1_prepare}°</span>
                                 </div>
                                 <input
                                     type="range"
@@ -331,7 +333,7 @@ const ArmAnglesPage = () => {
                             <div>
                                 <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
                                     <span style={{fontSize: 14}}>夹爪张开角度</span>
-                                    <span style={{fontSize: 14, fontWeight: 600, color: "#007aff"}}>{zp10s.servo2_prepare}°</span>
+                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{zp10s.servo2_prepare}°</span>
                                 </div>
                                 <input
                                     type="range"
@@ -345,11 +347,11 @@ const ArmAnglesPage = () => {
                         </div>
 
                         <div style={{marginBottom: 20}}>
-                            <div style={{fontSize: 13, fontWeight: 600, color: "#8e8e93", marginBottom: 12}}>进入阶段</div>
+                            <div style={{fontSize: scalePx(13), fontWeight: 600, color: "#8e8e93", marginBottom: 12}}>进入阶段</div>
                             <div>
                                 <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
                                     <span style={{fontSize: 14}}>夹爪夹取过程角度 (保持张开)</span>
-                                    <span style={{fontSize: 14, fontWeight: 600, color: "#007aff"}}>{zp10s.servo2_approach}°</span>
+                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{zp10s.servo2_approach}°</span>
                                 </div>
                                 <input
                                     type="range"
@@ -363,7 +365,7 @@ const ArmAnglesPage = () => {
                             <div>
                                 <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
                                     <span style={{fontSize: 14}}>夹爪闭合角度</span>
-                                    <span style={{fontSize: 14, fontWeight: 600, color: "#007aff"}}>{zp10s.servo2_grab}°</span>
+                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{zp10s.servo2_grab}°</span>
                                 </div>
                                 <input
                                     type="range"
@@ -377,11 +379,11 @@ const ArmAnglesPage = () => {
                         </div>
 
                         <div>
-                            <div style={{fontSize: 13, fontWeight: 600, color: "#8e8e93", marginBottom: 12}}>抬起阶段</div>
+                            <div style={{fontSize: scalePx(13), fontWeight: 600, color: "#8e8e93", marginBottom: 12}}>抬起阶段</div>
                             <div style={{marginBottom: 16}}>
                                 <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
                                     <span style={{fontSize: 14}}>舵机0 抬起角度</span>
-                                    <span style={{fontSize: 14, fontWeight: 600, color: "#007aff"}}>{zp10s.servo0_lift}°</span>
+                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{zp10s.servo0_lift}°</span>
                                 </div>
                                 <input
                                     type="range"
@@ -396,7 +398,7 @@ const ArmAnglesPage = () => {
                             <div style={{marginBottom: 16}}>
                                 <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
                                     <span style={{fontSize: 14}}>舵机1 抬起角度</span>
-                                    <span style={{fontSize: 14, fontWeight: 600, color: "#007aff"}}>{zp10s.servo1_lift}°</span>
+                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{zp10s.servo1_lift}°</span>
                                 </div>
                                 <input
                                     type="range"
@@ -411,7 +413,7 @@ const ArmAnglesPage = () => {
                             <div>
                                 <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
                                     <span style={{fontSize: 14}}>舵机2 抬起角度</span>
-                                    <span style={{fontSize: 14, fontWeight: 600, color: "#007aff"}}>{zp10s.servo2_lift}°</span>
+                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{zp10s.servo2_lift}°</span>
                                 </div>
                                 <input
                                     type="range"
@@ -433,19 +435,19 @@ const ArmAnglesPage = () => {
                     <div
                         style={{
                             background: "#fff",
-                            borderRadius: 10,
-                            padding: 16,
+                            borderRadius: scalePx(10),
+                            padding: scalePx(16),
                             boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
                         }}
                     >
-                        <h3 style={{fontSize: 15, fontWeight: 600, marginBottom: 16}}>STS3215 抓取序列</h3>
+                        <h3 style={{fontSize: scalePx(15), fontWeight: 600, marginBottom: 16}}>STS3215 抓取序列</h3>
 
                         <div style={{marginBottom: 20}}>
-                            <div style={{fontSize: 13, fontWeight: 600, color: "#8e8e93", marginBottom: 12}}>准备阶段</div>
+                            <div style={{fontSize: scalePx(13), fontWeight: 600, color: "#8e8e93", marginBottom: 12}}>准备阶段</div>
                             <div style={{marginBottom: 16}}>
                                 <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
                                     <span style={{fontSize: 14}}>舵机1 准备角度</span>
-                                    <span style={{fontSize: 14, fontWeight: 600, color: "#007aff"}}>{sts.servo1_prepare}</span>
+                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{sts.servo1_prepare}</span>
                                 </div>
                                 <input
                                     type="range"
@@ -460,7 +462,7 @@ const ArmAnglesPage = () => {
                             <div style={{marginBottom: 16}}>
                                 <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
                                     <span style={{fontSize: 14}}>舵机2 准备角度</span>
-                                    <span style={{fontSize: 14, fontWeight: 600, color: "#007aff"}}>{sts.servo2_prepare}</span>
+                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{sts.servo2_prepare}</span>
                                 </div>
                                 <input
                                     type="range"
@@ -475,7 +477,7 @@ const ArmAnglesPage = () => {
                             <div>
                                 <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
                                     <span style={{fontSize: 14}}>舵机3 准备角度 (张开)</span>
-                                    <span style={{fontSize: 14, fontWeight: 600, color: "#007aff"}}>{sts.servo3_prepare}</span>
+                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{sts.servo3_prepare}</span>
                                 </div>
                                 <input
                                     type="range"
@@ -489,11 +491,11 @@ const ArmAnglesPage = () => {
                         </div>
 
                         <div style={{marginBottom: 20}}>
-                            <div style={{fontSize: 13, fontWeight: 600, color: "#8e8e93", marginBottom: 12}}>进入阶段</div>
+                            <div style={{fontSize: scalePx(13), fontWeight: 600, color: "#8e8e93", marginBottom: 12}}>进入阶段</div>
                             <div style={{marginBottom: 16}}>
                                 <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
                                     <span style={{fontSize: 14}}>舵机1 进入角度</span>
-                                    <span style={{fontSize: 14, fontWeight: 600, color: "#007aff"}}>{sts.servo1_enter}</span>
+                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{sts.servo1_enter}</span>
                                 </div>
                                 <input
                                     type="range"
@@ -508,7 +510,7 @@ const ArmAnglesPage = () => {
                             <div style={{marginBottom: 16}}>
                                 <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
                                     <span style={{fontSize: 14}}>舵机2 进入角度</span>
-                                    <span style={{fontSize: 14, fontWeight: 600, color: "#007aff"}}>{sts.servo2_enter}</span>
+                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{sts.servo2_enter}</span>
                                 </div>
                                 <input
                                     type="range"
@@ -523,7 +525,7 @@ const ArmAnglesPage = () => {
                             <div>
                                 <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
                                     <span style={{fontSize: 14}}>舵机3 进入角度 (保持张开)</span>
-                                    <span style={{fontSize: 14, fontWeight: 600, color: "#007aff"}}>{sts.servo3_enter}</span>
+                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{sts.servo3_enter}</span>
                                 </div>
                                 <input
                                     type="range"
@@ -537,11 +539,11 @@ const ArmAnglesPage = () => {
                         </div>
 
                         <div style={{marginBottom: 20}}>
-                            <div style={{fontSize: 13, fontWeight: 600, color: "#8e8e93", marginBottom: 12}}>抓取阶段</div>
+                            <div style={{fontSize: scalePx(13), fontWeight: 600, color: "#8e8e93", marginBottom: 12}}>抓取阶段</div>
                             <div>
                                 <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
                                     <span style={{fontSize: 14}}>舵机3 抓取角度 (闭合)</span>
-                                    <span style={{fontSize: 14, fontWeight: 600, color: "#007aff"}}>{sts.servo3_grab}</span>
+                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{sts.servo3_grab}</span>
                                 </div>
                                 <input
                                     type="range"
@@ -555,11 +557,11 @@ const ArmAnglesPage = () => {
                         </div>
 
                         <div>
-                            <div style={{fontSize: 13, fontWeight: 600, color: "#8e8e93", marginBottom: 12}}>抬起阶段</div>
+                            <div style={{fontSize: scalePx(13), fontWeight: 600, color: "#8e8e93", marginBottom: 12}}>抬起阶段</div>
                             <div style={{marginBottom: 16}}>
                                 <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
                                     <span style={{fontSize: 14}}>舵机1 抬起角度</span>
-                                    <span style={{fontSize: 14, fontWeight: 600, color: "#007aff"}}>{sts.servo1_lift}</span>
+                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{sts.servo1_lift}</span>
                                 </div>
                                 <input
                                     type="range"
@@ -574,7 +576,7 @@ const ArmAnglesPage = () => {
                             <div style={{marginBottom: 16}}>
                                 <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
                                     <span style={{fontSize: 14}}>舵机2 抬起角度</span>
-                                    <span style={{fontSize: 14, fontWeight: 600, color: "#007aff"}}>{sts.servo2_lift}</span>
+                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{sts.servo2_lift}</span>
                                 </div>
                                 <input
                                     type="range"
@@ -589,7 +591,7 @@ const ArmAnglesPage = () => {
                             <div>
                                 <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
                                     <span style={{fontSize: 14}}>舵机3 抬起角度</span>
-                                    <span style={{fontSize: 14, fontWeight: 600, color: "#007aff"}}>{sts.servo3_lift}</span>
+                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{sts.servo3_lift}</span>
                                 </div>
                                 <input
                                     type="range"
@@ -605,19 +607,19 @@ const ArmAnglesPage = () => {
                 </div>
             )}
 
-            <div style={{padding: 16, paddingTop: 0}}>
+            <div style={{padding: scalePx(16), paddingTop: scalePx(0)}}>
                 <div
                     style={{
                         background: "#fff",
-                        borderRadius: 10,
-                        padding: 16,
+                        borderRadius: scalePx(10),
+                        padding: scalePx(16),
                         boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
                     }}
                 >
                     <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16}}>
                         <div>
-                            <h3 style={{fontSize: 15, fontWeight: 600, margin: 0}}>底盘 PWM 通道</h3>
-                            <div style={{fontSize: 12, color: "#8e8e93", marginTop: 4}}>
+                            <h3 style={{fontSize: scalePx(15), fontWeight: 600, margin: 0}}>底盘 PWM 通道</h3>
+                            <div style={{fontSize: scalePx(12), color: "#8e8e93", marginTop: 4}}>
                                 配置文件保存到 `base_pwm_channels.json`
                             </div>
                         </div>
@@ -626,7 +628,7 @@ const ArmAnglesPage = () => {
                             disabled={savingPwm}
                             style={{
                                 color: savingPwm ? "#8e8e93" : "#007aff",
-                                fontSize: 15,
+                                fontSize: scalePx(15),
                                 cursor: savingPwm ? "not-allowed" : "pointer",
                                 background: "none",
                                 border: "none",
@@ -641,9 +643,9 @@ const ArmAnglesPage = () => {
                         <div
                             style={{
                                 textAlign: "center",
-                                padding: 10,
-                                marginBottom: 16,
-                                borderRadius: 8,
+                                padding: scalePx(10),
+                                marginBottom: scalePx(16),
+                                borderRadius: scalePx(8),
                                 background: pwmStatus.includes("成功") || pwmStatus.includes("生效") ? "#d4edda" : "#f8d7da",
                                 color: pwmStatus.includes("成功") || pwmStatus.includes("生效") ? "#155724" : "#721c24",
                             }}
@@ -652,22 +654,22 @@ const ArmAnglesPage = () => {
                         </div>
                     )}
 
-                    <div style={{display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10, marginBottom: 16}}>
+                    <div style={{display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: scalePx(10), marginBottom: 16}}>
                         <button
                             onClick={swapLeftRightWheels}
-                            style={{padding: "10px 12px", borderRadius: 8, border: "1px solid #d1d1d6", background: "#f7f7fa", cursor: "pointer", fontSize: 14}}
+                            style={{padding: "10px 12px", borderRadius: scalePx(8), border: "1px solid #d1d1d6", background: "#f7f7fa", cursor: "pointer", fontSize: 14}}
                         >
                             切换左右轮
                         </button>
                         <button
                             onClick={swapLeftWheelDirection}
-                            style={{padding: "10px 12px", borderRadius: 8, border: "1px solid #d1d1d6", background: "#f7f7fa", cursor: "pointer", fontSize: 14}}
+                            style={{padding: "10px 12px", borderRadius: scalePx(8), border: "1px solid #d1d1d6", background: "#f7f7fa", cursor: "pointer", fontSize: 14}}
                         >
                             左轮前后切换
                         </button>
                         <button
                             onClick={swapRightWheelDirection}
-                            style={{padding: "10px 12px", borderRadius: 8, border: "1px solid #d1d1d6", background: "#f7f7fa", cursor: "pointer", fontSize: 14}}
+                            style={{padding: "10px 12px", borderRadius: scalePx(8), border: "1px solid #d1d1d6", background: "#f7f7fa", cursor: "pointer", fontSize: 14}}
                         >
                             右轮前后切换
                         </button>
@@ -685,9 +687,9 @@ const ArmAnglesPage = () => {
                                 display: "flex",
                                 justifyContent: "space-between",
                                 alignItems: "center",
-                                padding: "12px 0",
+                                padding: `${scalePx(12)} 0`,
                                 borderTop: "1px solid #f2f2f7",
-                                gap: 12,
+                                gap: scalePx(12),
                             }}
                         >
                             <span style={{fontSize: 14}}>{item.label}</span>
@@ -698,11 +700,11 @@ const ArmAnglesPage = () => {
                                 value={basePwmChannels[item.key]}
                                 onChange={(e) => updateBasePwmChannels(item.key, parseInt(e.target.value || "0", 10))}
                                 style={{
-                                    width: 88,
+                                    width: scalePx(88),
                                     border: "1px solid #d1d1d6",
-                                    borderRadius: 8,
-                                    padding: "8px 10px",
-                                    fontSize: 14,
+                                    borderRadius: scalePx(8),
+                                    padding: `${scalePx(8)} ${scalePx(10)}`,
+                                    fontSize: scalePx(14),
                                 }}
                             />
                         </div>
@@ -711,17 +713,17 @@ const ArmAnglesPage = () => {
             </div>
 
             {/* Back button */}
-            <div style={{padding: "0 16px 30px"}}>
+            <div style={{padding: `0 ${scalePx(16)} ${scalePx(30)}`}}>
                 <button
                     onClick={() => window.history.back()}
                     style={{
                         width: "100%",
-                        padding: 14,
+                        padding: scalePx(14),
                         border: "none",
-                        borderRadius: 10,
+                        borderRadius: scalePx(10),
                         background: "#e5e5ea",
                         color: "#1c1c1e",
-                        fontSize: 16,
+                        fontSize: scalePx(16),
                         fontWeight: 600,
                         cursor: "pointer",
                     }}

@@ -1,4 +1,5 @@
 import {useState} from "react";
+import {useViewportScale} from "../hooks/useViewportScale";
 
 type ButtonProps = {
     children: React.ReactNode;
@@ -36,10 +37,11 @@ const ControlButton = ({
                            loading = false,
                        }: ButtonProps) => {
     const [isPressed, setIsPressed] = useState(false);
+    const {scalePx} = useViewportScale();
     const baseSize =
         size === "square"
-            ? {width: "22vw", height: "22vw", maxWidth: "110px", maxHeight: "110px"}
-            : {width: "40vw", height: "60px", maxWidth: "200px"};
+            ? {width: "22vw", height: "22vw", maxWidth: scalePx(110), maxHeight: scalePx(110)}
+            : {width: "40vw", height: scalePx(60), maxWidth: scalePx(200)};
 
     const handlePressStart = () => {
         setIsPressed(true);
@@ -64,12 +66,12 @@ const ControlButton = ({
             }}
             style={{
                 ...baseSize,
-                borderRadius: "18px",
+                borderRadius: scalePx(18),
                 border: "none",
                 background: isPressed ? pressedColorMap[variant] : colorMap[variant],
                 color: "white",
                 fontWeight: "bold",
-                fontSize: "16px",
+                fontSize: scalePx(16),
                 transition: "all 0.15s ease",
                 boxShadow: isPressed
                     ? "0 3px 8px rgba(0,0,0,0.4)"

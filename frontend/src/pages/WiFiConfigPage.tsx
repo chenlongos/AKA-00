@@ -1,3 +1,4 @@
+import {useViewportScale} from "../hooks/useViewportScale";
 import React, {useEffect, useState} from "react";
 
 interface WifiNetwork {
@@ -9,6 +10,7 @@ interface WifiNetwork {
 }
 
 const WiFiConfigPage = () => {
+    const {scalePx} = useViewportScale();
     const [networks, setNetworks] = useState<WifiNetwork[]>([]);
     const [connectionStatus, setConnectionStatus] = useState<React.ReactNode>("正在获取状态...");
     const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -29,15 +31,15 @@ const WiFiConfigPage = () => {
                 <div
                     key={i}
                     style={{
-                        width: 3,
+                        width: scalePx(3),
                         background: i <= level ? "#34c759" : "#e5e5ea",
-                        borderRadius: 0.5,
+                        borderRadius: scalePx(0.5),
                         height: `${i * 25}%`,
                     }}
                 />
             );
         }
-        return <div style={{display: "flex", alignItems: "flex-end", gap: 2, height: 12}}>{bars}</div>;
+        return <div style={{display: "flex", alignItems: "flex-end", gap: scalePx(2), height: 12}}>{bars}</div>;
     };
 
     const updateStatus = async () => {
@@ -136,7 +138,7 @@ const WiFiConfigPage = () => {
             <div
                 style={{
                     background: "#fff",
-                    padding: "16px 20px",
+                    padding: `${scalePx(16)} ${scalePx(20)}`,
                     borderBottom: "0.5px solid #c6c6c8",
                     display: "flex",
                     justifyContent: "space-between",
@@ -147,14 +149,14 @@ const WiFiConfigPage = () => {
                 }}
             >
                 <div style={{display: "flex", flexDirection: "column"}}>
-                    <h1 style={{fontSize: 17, margin: 0, fontWeight: 600}}>无线局域网</h1>
-                    <div style={{fontSize: 12, color: "#8e8e93", marginTop: 2}}>{connectionStatus}</div>
+                    <h1 style={{fontSize: scalePx(17), margin: 0, fontWeight: 600}}>无线局域网</h1>
+                    <div style={{fontSize: scalePx(12), color: "#8e8e93", marginTop: 2}}>{connectionStatus}</div>
                 </div>
                 <div
                     onClick={loadList}
                     style={{
                         color: scanning || connecting ? "#8e8e93" : "#007aff",
-                        fontSize: 15,
+                        fontSize: scalePx(15),
                         cursor: scanning || connecting ? "not-allowed" : "pointer",
                         userSelect: "none",
                     }}
@@ -166,7 +168,7 @@ const WiFiConfigPage = () => {
             {/* List */}
             <div style={{padding: 16}}>
                 {networks.length === 0 ? (
-                    <div style={{textAlign: "center", padding: 40, color: "#8e8e93"}}>
+                    <div style={{textAlign: "center", padding: scalePx(40), color: "#8e8e93"}}>
                         {scanning ? "正在扫描..." : "未发现网络"}
                     </div>
                 ) : (
@@ -175,8 +177,8 @@ const WiFiConfigPage = () => {
                             key={w.id}
                             style={{
                                 background: "#fff",
-                                borderRadius: 10,
-                                marginBottom: 12,
+                                borderRadius: scalePx(10),
+                                marginBottom: scalePx(12),
                                 boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
                                 overflow: "hidden",
                                 border: w.is_connected ? "2px solid #34c759" : "2px solid transparent",
@@ -185,7 +187,7 @@ const WiFiConfigPage = () => {
                             <div
                                 onClick={() => toggle(w.id)}
                                 style={{
-                                    padding: "14px 16px",
+                                    padding: `${scalePx(14)} ${scalePx(16)}`,
                                     display: "flex",
                                     justifyContent: "space-between",
                                     alignItems: "center",
@@ -193,16 +195,16 @@ const WiFiConfigPage = () => {
                                 }}
                             >
                                 <div style={{display: "flex", flexDirection: "column"}}>
-                                    <div style={{fontSize: 16, fontWeight: 500, display: "flex", alignItems: "center", gap: 6}}>
+                                    <div style={{fontSize: scalePx(16), fontWeight: 500, display: "flex", alignItems: "center", gap: 6}}>
                                         {w.ssid}
                                         {w.is_connected && (
                                             <span
                                                 style={{
                                                     background: "#34c759",
                                                     color: "#fff",
-                                                    fontSize: 10,
-                                                    padding: "2px 6px",
-                                                    borderRadius: 4,
+                                                    fontSize: scalePx(10),
+                                                    padding: `${scalePx(2)} ${scalePx(6)}`,
+                                                    borderRadius: scalePx(4),
                                                     fontWeight: 600,
                                                 }}
                                             >
@@ -210,7 +212,7 @@ const WiFiConfigPage = () => {
                                             </span>
                                         )}
                                     </div>
-                                    <div style={{fontSize: 12, color: "#8e8e93", marginTop: 2}}>
+                                    <div style={{fontSize: scalePx(12), color: "#8e8e93", marginTop: 2}}>
                                         {w.secured ? "🔒 安全" : "🔓 公开"} | {w.signal} dBm
                                     </div>
                                 </div>
@@ -221,7 +223,7 @@ const WiFiConfigPage = () => {
                             <div
                                 style={{
                                     display: expandedId === w.id ? "block" : "none",
-                                    padding: "0 16px 16px",
+                                    padding: `0 ${scalePx(16)} ${scalePx(16)}`,
                                     background: "#fdfdfd",
                                     borderTop: "0.5px solid #f2f2f7",
                                 }}
@@ -234,17 +236,17 @@ const WiFiConfigPage = () => {
                                         onChange={(e) => handlePasswordChange(w.id, e.target.value)}
                                         style={{
                                             width: "100%",
-                                            padding: 12,
+                                            padding: scalePx(12),
                                             border: "1px solid #d1d1d6",
-                                            borderRadius: 8,
-                                            margin: "12px 0",
-                                            fontSize: 16,
+                                            borderRadius: scalePx(8),
+                                            margin: `${scalePx(12)} 0`,
+                                            fontSize: scalePx(16),
                                             boxSizing: "border-box",
                                             outline: "none",
                                         }}
                                     />
                                 ) : (
-                                    <div style={{fontSize: 13, color: "#8e8e93", padding: "10px 0"}}>
+                                    <div style={{fontSize: scalePx(13), color: "#8e8e93", padding: `${scalePx(10)} 0`}}>
                                         此网络无需密码
                                     </div>
                                 )}
@@ -253,12 +255,12 @@ const WiFiConfigPage = () => {
                                     disabled={connecting}
                                     style={{
                                         width: "100%",
-                                        padding: 12,
+                                        padding: scalePx(12),
                                         border: "none",
-                                        borderRadius: 8,
+                                        borderRadius: scalePx(8),
                                         background: connecting ? "#aeaeb2" : "#007aff",
                                         color: "#fff",
-                                        fontSize: 16,
+                                        fontSize: scalePx(16),
                                         fontWeight: 600,
                                         cursor: connecting ? "not-allowed" : "pointer",
                                     }}
@@ -268,9 +270,9 @@ const WiFiConfigPage = () => {
                                 {messages[w.id] && (
                                     <div
                                         style={{
-                                            fontSize: 13,
+                                            fontSize: scalePx(13),
                                             textAlign: "center",
-                                            marginTop: 10,
+                                            marginTop: scalePx(10),
                                             color: messages[w.id].includes("成功") ? "#34c759" : "#ff3b30",
                                         }}
                                     >

@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useRef, useState} from "react";
-import {controlSocket} from "../api";
+import {api, controlSocket} from "../api";
 import CameraToggle from "../components/CameraToggle";
+import {useViewportScale} from "../hooks/useViewportScale";
 
 
 const RCDemoPage = () => {
@@ -69,18 +70,38 @@ const RCDemoPage = () => {
         setRightSpeed(0);
     }, []);
 
+    const {scale, scaleValue, scalePx} = useViewportScale();
+    const stickSize = scaleValue(42);
+    const baseThrottleW = isNarrow ? 140 : 56;
+    const baseThrottleH = isNarrow ? 56 : 140;
+    const throttleW = Math.round(baseThrottleW * scale);
+    const throttleH = Math.round(baseThrottleH * scale);
+    const baseDirectionW = isNarrow ? 56 : 130;
+    const baseDirectionH = isNarrow ? 130 : 56;
+    const directionW = Math.round(baseDirectionW * scale);
+    const directionH = Math.round(baseDirectionH * scale);
+    const videoW = isNarrow
+        ? Math.min(window.innerWidth - 60, scaleValue(500))
+        : Math.min(window.innerWidth * 0.45, scaleValue(700));
+    const videoH = isNarrow ? videoW * 0.75 : videoW * 0.5625;  // 16:9 比例
+
+    // 摇杆最大行程（轨道尺寸减去滑块半径和边距）
+    const throttleMaxDist = (isNarrow ? throttleW : throttleH) / 2 - stickSize / 2 - 4;
+    const directionMaxDist = (isNarrow ? directionH : directionW) / 2 - stickSize / 2 - 4;
+
     const throttleRefEl = useRef<HTMLDivElement>(null);
     const throttleActiveRef = useRef(false);
 
     const handleThrottleMove = useCallback((clientX: number, clientY: number) => {
         if (!throttleRefEl.current) return;
         const rect = throttleRefEl.current.getBoundingClientRect();
+        const margin = stickSize / 2 + 4;
         let dist, maxDist;
 
         if (isNarrow) {
             const centerX = rect.left + rect.width / 2;
             const dx = clientX - centerX;
-            maxDist = rect.width / 2 - 20;
+            maxDist = rect.width / 2 - margin;
             dist = Math.max(-maxDist, Math.min(maxDist, dx));
             const thr = Math.round((dist / maxDist) * 100);
             throttleRef.current = thr;
@@ -88,7 +109,7 @@ const RCDemoPage = () => {
         } else {
             const centerY = rect.top + rect.height / 2;
             const dy = clientY - centerY;
-            maxDist = rect.height / 2 - 20;
+            maxDist = rect.height / 2 - margin;
             dist = Math.max(-maxDist, Math.min(maxDist, dy));
             const thr = Math.round((-dist / maxDist) * 100);
             throttleRef.current = thr;
@@ -99,7 +120,7 @@ const RCDemoPage = () => {
             throttleActiveRef.current = true;
             startControl();
         }
-    }, [isNarrow, startControl]);
+    }, [isNarrow, startControl, stickSize]);
 
     const handleThrottleEnd = useCallback(() => {
         throttleRef.current = 0;
@@ -112,13 +133,13 @@ const RCDemoPage = () => {
     const handleDirectionMove = useCallback((clientX: number, clientY: number) => {
         if (!directionRefEl.current) return;
         const rect = directionRefEl.current.getBoundingClientRect();
+        const margin = stickSize / 2 + 4;
         let dist, maxDist;
 
         if (isNarrow) {
-            // 窄屏：竖向条 80×200，下推=右转
             const centerY = rect.top + rect.height / 2;
             const dy = clientY - centerY;
-            maxDist = rect.height / 2 - 20;
+            maxDist = rect.height / 2 - margin;
             dist = Math.max(-maxDist, Math.min(maxDist, dy));
             const dir = Math.round((dist / maxDist) * 100);
             directionRef.current = dir;
@@ -126,7 +147,7 @@ const RCDemoPage = () => {
         } else {
             const centerX = rect.left + rect.width / 2;
             const dx = clientX - centerX;
-            maxDist = rect.width / 2 - 20;
+            maxDist = rect.width / 2 - margin;
             dist = Math.max(-maxDist, Math.min(maxDist, dx));
             const dir = Math.round((dist / maxDist) * 100);
             directionRef.current = dir;
@@ -137,12 +158,20 @@ const RCDemoPage = () => {
             directionActiveRef.current = true;
             startControl();
         }
-    }, [isNarrow, startControl]);
+    }, [isNarrow, startControl, stickSize]);
 
     const handleDirectionEnd = useCallback(() => {
         directionRef.current = 0;
         setDirectionDisplay(0);
     }, []);
+
+    const handleArm = async (action: "grab" | "release") => {
+        try {
+            await api.motor.action(action);
+        } catch (err) {
+            console.error("机械臂操作失败:", err);
+        }
+    };
 
     const handleBack = () => {
         stopControl();
@@ -160,15 +189,6 @@ const RCDemoPage = () => {
         directionActiveRef.current = false;
         stopControl();
     };
-
-    const stickSize = 55;
-    const throttleW = isNarrow ? 200 : 80;
-    const throttleH = isNarrow ? 80 : 200;
-    const directionW = isNarrow ? 80 : 200;
-    const directionH = isNarrow ? 200 : 80;
-    const videoW = isNarrow ? Math.min(window.innerWidth - 60, 320) : Math.min(window.innerWidth - 100, 480);
-    const videoH = isNarrow ? videoW * 0.75 : videoW * 0.5;
-
     return (
         <div
             style={{
@@ -176,7 +196,8 @@ const RCDemoPage = () => {
                 background: "#0f172a",
                 color: "white",
                 minHeight: "100dvh",
-                padding: "10px",
+                maxWidth: "100vw",
+                padding: scalePx(6),
                 paddingBottom: "calc(env(safe-area-inset-bottom) + 40px)",
                 textAlign: "center",
                 userSelect: "none",
@@ -185,12 +206,13 @@ const RCDemoPage = () => {
                 flexDirection: isNarrow ? "column" : "row",
                 alignItems: "center",
                 justifyContent: "center",
-                gap: isNarrow ? "10px" : "20px",
+                gap: isNarrow ? scalePx(8) : scalePx(12),
                 overflow: "hidden",
+                boxSizing: "border-box",
             }}
         >
             <div style={{display: "flex", flexDirection: "column", alignItems: "center", flex: 1}}>
-                <div style={{fontSize: "12px", opacity: 0.6, marginBottom: "8px", transform: isNarrow ? "rotate(90deg)" : "none"}}>油门</div>
+                <div style={{fontSize: scalePx(12), opacity: 0.6, marginBottom: scalePx(8), transform: isNarrow ? "rotate(90deg)" : "none"}}>油门</div>
                 <div
                     ref={throttleRefEl}
                     onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); handleThrottleMove(e.clientX, e.clientY); }}
@@ -200,7 +222,7 @@ const RCDemoPage = () => {
                     style={{
                         width: `${throttleW}px`,
                         height: `${throttleH}px`,
-                        borderRadius: isNarrow ? "35px" : "40px",
+                        borderRadius: isNarrow ? scalePx(35) : scalePx(40),
                         background: "rgba(255,255,255,0.1)",
                         border: "2px solid #334155",
                         position: "relative",
@@ -226,12 +248,12 @@ const RCDemoPage = () => {
                         left: "50%",
                         top: "50%",
                         transform: isNarrow
-                            ? `translate(calc(-50% + ${throttleDisplay * 0.5}px), -50%)`
-                            : `translate(-50%, calc(-50% - ${throttleDisplay * 0.5}px))`,
+                            ? `translate(calc(-50% + ${throttleDisplay * throttleMaxDist / 100}px), -50%)`
+                            : `translate(-50%, calc(-50% - ${throttleDisplay * throttleMaxDist / 100}px))`,
                         boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
                     }}/>
                 </div>
-                <div style={{fontSize: "12px", marginTop: "8px", opacity: 0.6, transform: isNarrow ? "rotate(90deg)" : "none"}}>
+                <div style={{fontSize: scalePx(12), marginTop: scalePx(8), opacity: 0.6, transform: isNarrow ? "rotate(90deg)" : "none"}}>
                     {throttleDisplay > 0 ? "▲" : throttleDisplay < 0 ? "▼" : "·"} {Math.abs(throttleDisplay)}%
                 </div>
             </div>
@@ -247,7 +269,7 @@ const RCDemoPage = () => {
                 position: "relative",
             }}>
                 {/* 摄像头开关 + 低带宽模式 */}
-                <div style={{position: "absolute", top: "0", right: "0", display: "flex", alignItems: "center", gap: "6px"}}>
+                <div style={{position: "absolute", top: "0", right: "0", display: "flex", alignItems: "center", gap: scalePx(6)}}>
                     {cameraOn && (
                         <button
                             onClick={() => setFpsIndex((fpsIndex + 1) % 3)}
@@ -255,23 +277,23 @@ const RCDemoPage = () => {
                                 background: fpsIndex > 0 ? "rgba(34,197,94,0.2)" : "rgba(255,255,255,0.1)",
                                 border: `1px solid ${fpsIndex > 0 ? "#22c55e" : "#334155"}`,
                                 color: "white",
-                                padding: "2px 8px",
-                                borderRadius: "4px",
-                                fontSize: "10px",
+                                padding: `${scalePx(2)} ${scalePx(8)}`,
+                                borderRadius: scalePx(4),
+                                fontSize: scalePx(10),
                                 cursor: "pointer",
                             }}
                         >
                             {FPS_LABELS[fpsIndex]}
                         </button>
                     )}
-                    <span style={{fontSize: "11px", opacity: 0.6}}>摄像头</span>
+                    <span style={{fontSize: scalePx(11), opacity: 0.6}}>摄像头</span>
                     <CameraToggle onStatusChange={setCameraOn} />
                 </div>
 
                 {/* 视频流 */}
                 <div
                     style={{
-                        borderRadius: "12px",
+                        borderRadius: scalePx(12),
                         overflow: "hidden",
                         border: "2px solid #334155",
                     }}
@@ -297,7 +319,7 @@ const RCDemoPage = () => {
                                 alignItems: "center",
                                 justifyContent: "center",
                                 color: "#94a3b8",
-                                fontSize: "14px",
+                                fontSize: scalePx(14),
                             }}
                         >
                             摄像头已关闭
@@ -306,51 +328,87 @@ const RCDemoPage = () => {
                 </div>
 
 
-                {/* 速度显示 */}
-                <div style={{display: "flex", justifyContent: "center", gap: "20px", fontSize: "13px", marginTop: "10px"}}>
+                {/* 速度显示 + WS状态 */}
+                <div style={{display: "flex", justifyContent: "center", alignItems: "center", gap: scalePx(16), fontSize: scalePx(13), marginTop: scalePx(6)}}>
                     <div>左 <span style={{color: "#4ade80", fontWeight: "bold"}}>{leftSpeed > 0 ? "+" : ""}{leftSpeed.toFixed(2)}</span></div>
                     <div>右 <span style={{color: "#4ade80", fontWeight: "bold"}}>{rightSpeed > 0 ? "+" : ""}{rightSpeed.toFixed(2)}</span></div>
-                </div>
-
-                {/* WebSocket 状态 + 刹车 */}
-                <div style={{display: "flex", alignItems: "center", gap: "10px", marginTop: "10px"}}>
                     <span style={{
-                        width: "8px", height: "8px", borderRadius: "50%",
+                        width: "6px", height: "6px", borderRadius: "50%",
                         background: wsConnected ? "#22c55e" : "#ef4444",
                         display: "inline-block",
                     }}/>
-                    <span style={{fontSize: "11px", opacity: 0.6}}>
-                        {wsConnected ? "WS已连接" : "WS断开"}
-                    </span>
                 </div>
-                <button
-                    onClick={handleBrake}
-                    style={{
-                        marginTop: "6px",
-                        background: "rgba(239,68,68,0.3)",
-                        border: "1px solid #ef4444",
-                        color: "white",
-                        padding: "6px 16px",
-                        borderRadius: "6px",
-                        fontSize: "12px",
-                        cursor: "pointer",
-                    }}
-                >
-                    刹车
-                </button>
+
+                {/* 刹车 + 抓取/释放 紧凑排列 */}
+                <div style={{display: "flex", flexDirection: "column", gap: scalePx(6), marginTop: scalePx(6), width: "100%", maxWidth: `${videoW}px`}}>
+                    <button
+                        onClick={handleBrake}
+                        style={{
+                            width: "100%",
+                            background: "rgba(239,68,68,0.25)",
+                            border: "2px solid #ef4444",
+                            color: "#fca5a5",
+                            padding: `${scalePx(8)} ${scalePx(16)}`,
+                            borderRadius: scalePx(8),
+                            fontSize: `${Math.round(13 * scale)}px`,
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            letterSpacing: "1px",
+                        }}
+                    >
+                        ⏹ 刹车
+                    </button>
+                    <div style={{display: "flex", gap: scalePx(8)}}>
+                        <button
+                            onClick={() => handleArm("grab")}
+                            style={{
+                                flex: 1,
+                                background: "linear-gradient(135deg, #16a34a, #22c55e)",
+                                border: "none",
+                                color: "white",
+                                padding: `${scalePx(10)} ${scalePx(16)}`,
+                                borderRadius: scalePx(10),
+                                fontSize: `${Math.round(15 * scale)}px`,
+                                fontWeight: 700,
+                                cursor: "pointer",
+                                letterSpacing: "1px",
+                                boxShadow: "0 3px 8px rgba(34,197,94,0.35)",
+                            }}
+                        >
+                            ✋ 抓取
+                        </button>
+                        <button
+                            onClick={() => handleArm("release")}
+                            style={{
+                                flex: 1,
+                                background: "linear-gradient(135deg, #2563eb, #3b82f6)",
+                                border: "none",
+                                color: "white",
+                                padding: `${scalePx(10)} ${scalePx(16)}`,
+                                borderRadius: scalePx(10),
+                                fontSize: `${Math.round(15 * scale)}px`,
+                                fontWeight: 700,
+                                cursor: "pointer",
+                                letterSpacing: "1px",
+                                boxShadow: "0 3px 8px rgba(59,130,246,0.35)",
+                            }}
+                        >
+                            🤚 释放
+                        </button>
+                    </div>
+                </div>
 
                 {/* 返回按钮 */}
                 <button
                     onClick={handleBack}
                     style={{
-                        marginTop: "10px",
-                        marginLeft: "10px",
+                        marginTop: scalePx(6),
                         background: "rgba(255,255,255,0.1)",
                         border: "1px solid #334155",
                         color: "white",
-                        padding: "6px 16px",
-                        borderRadius: "6px",
-                        fontSize: "12px",
+                        padding: `${scalePx(5)} ${scalePx(14)}`,
+                        borderRadius: scalePx(5),
+                        fontSize: scalePx(12),
                         cursor: "pointer",
                     }}
                 >
@@ -360,7 +418,7 @@ const RCDemoPage = () => {
 
             {/* 方向摇杆 */}
             <div style={{display: "flex", flexDirection: "column", alignItems: "center", flex: 1}}>
-                <div style={{fontSize: "12px", opacity: 0.6, marginBottom: "8px", transform: isNarrow ? "rotate(90deg)" : "none"}}>方向</div>
+                <div style={{fontSize: scalePx(12), opacity: 0.6, marginBottom: "8px", transform: isNarrow ? "rotate(90deg)" : "none"}}>方向</div>
                 <div
                     ref={directionRefEl}
                     onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); handleDirectionMove(e.clientX, e.clientY); }}
@@ -370,7 +428,7 @@ const RCDemoPage = () => {
                     style={{
                         width: `${directionW}px`,
                         height: `${directionH}px`,
-                        borderRadius: isNarrow ? "35px" : "40px",
+                        borderRadius: isNarrow ? scalePx(35) : scalePx(40),
                         background: "rgba(255,255,255,0.1)",
                         border: "2px solid #334155",
                         position: "relative",
@@ -396,12 +454,12 @@ const RCDemoPage = () => {
                         left: "50%",
                         top: "50%",
                         transform: isNarrow
-                            ? `translate(-50%, calc(-50% + ${directionDisplay * 0.5}px))`
-                            : `translate(calc(-50% + ${directionDisplay * 0.5}px), -50%)`,
+                            ? `translate(-50%, calc(-50% + ${directionDisplay * directionMaxDist / 100}px))`
+                            : `translate(calc(-50% + ${directionDisplay * directionMaxDist / 100}px), -50%)`,
                         boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
                     }}/>
                 </div>
-                <div style={{fontSize: "12px", marginTop: "8px", opacity: 0.6, transform: isNarrow ? "rotate(90deg)" : "none"}}>
+                <div style={{fontSize: scalePx(12), marginTop: scalePx(8), opacity: 0.6, transform: isNarrow ? "rotate(90deg)" : "none"}}>
                     {directionDisplay > 0 ? "→" : directionDisplay < 0 ? "←" : "·"} {Math.abs(directionDisplay)}%
                 </div>
             </div>

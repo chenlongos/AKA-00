@@ -25,6 +25,25 @@ def _find_current_demo():
     return None
 
 
+def _list_all_demos():
+    """列出 demo/ 下所有包含 init.sh 的目录名"""
+    base_dir = _get_base_dir()
+    if not os.path.isdir(base_dir):
+        return []
+    demos = []
+    for name in sorted(os.listdir(base_dir)):
+        demo_dir = os.path.join(base_dir, name)
+        if os.path.isdir(demo_dir) and os.path.isfile(os.path.join(demo_dir, "init.sh")):
+            demos.append(name)
+    return demos
+
+
+@demo_bp.route("/list", methods=["GET"])
+def demo_list():
+    """返回所有可用的本地 demo 目录"""
+    return jsonify({"demos": _list_all_demos()})
+
+
 @demo_bp.route("/name", methods=["GET"])
 def demo_name():
     """返回当前本地 demo 名称"""
