@@ -32,6 +32,15 @@
 - [调试方法](./06-development/debug.md)
 - [镜像的制作](./06-development/image_creation.md)
 
+## 测试
+
+- [测试概述与策略](./08-testing/测试概述与策略.md)
+- [硬件测试](./08-testing/硬件测试.md)
+- [极限工况测试](./08-testing/极限工况测试.md)
+- [交互测试](./08-testing/交互测试.md)
+- [系统集成测试](./08-testing/系统集成测试.md)
+- [缺陷管理与测试报告](./08-testing/缺陷管理与测试报告.md)
+
 ## 其他
 
 - [常见问题](./07-faq.md)
