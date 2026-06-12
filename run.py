@@ -97,8 +97,8 @@ class ControlWebSocket(tornado.websocket.WebSocketHandler):
             return
         x = message[1] if message[1] < 128 else message[1] - 256
         y = message[2] if message[2] < 128 else message[2] - 256
-        left = max(-100, min(100, y + x))
-        right = max(-100, min(100, y - x))
+        left = max(-60, min(60, y + x))
+        right = max(-60, min(60, y - x))
         await tornado.ioloop.IOLoop.current().run_in_executor(
             None, get_control_service().run_motor, left, right
         )
