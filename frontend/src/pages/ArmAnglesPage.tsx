@@ -1,89 +1,49 @@
 import {useEffect, useRef, useState} from "react";
 import {useViewportScale} from "../hooks/useViewportScale";
 import {api} from "../api";
+import Header from "../components/Header";
+import Card from "../components/Card";
+import SliderRow from "../components/SliderRow";
 
 interface ArmAnglesZP10S {
-    servo0_prepare: number;
-    servo1_prepare: number;
-    servo2_prepare: number;
-    servo2_approach: number;
-    servo2_grab: number;
-    servo0_lift: number;
-    servo1_lift: number;
-    servo2_lift: number;
+    servo0_prepare: number; servo1_prepare: number; servo2_prepare: number;
+    servo2_approach: number; servo2_grab: number;
+    servo0_lift: number; servo1_lift: number; servo2_lift: number;
 }
-
 interface ArmAnglesSTS {
-    servo1_prepare: number;
-    servo2_prepare: number;
-    servo3_prepare: number;
-    servo1_enter: number;
-    servo2_enter: number;
-    servo3_enter: number;
+    servo1_prepare: number; servo2_prepare: number; servo3_prepare: number;
+    servo1_enter: number; servo2_enter: number; servo3_enter: number;
     servo3_grab: number;
-    servo1_lift: number;
-    servo2_lift: number;
-    servo3_lift: number;
+    servo1_lift: number; servo2_lift: number; servo3_lift: number;
 }
-
-interface ArmAnglesResponse<T> {
-    driver: string;
-    angles: T;
-}
-
-interface BasePwmChannels {
-    left_ch1: number;
-    left_ch2: number;
-    right_ch1: number;
-    right_ch2: number;
-}
+interface ArmAnglesResponse<T> { driver: string; angles: T; }
+interface BasePwmChannels { left_ch1: number; left_ch2: number; right_ch1: number; right_ch2: number; }
 
 const ArmAnglesPage = () => {
     const {scalePx} = useViewportScale();
-    const [driver, setDriver] = useState<string>("zp10s");
+    const [driver, setDriver] = useState("zp10s");
     const [zp10s, setZp10s] = useState<ArmAnglesZP10S>({
-        servo0_prepare: 245,
-        servo1_prepare: 180,
-        servo2_prepare: 150,
-        servo2_approach: 150,
-        servo2_grab: 90,
-        servo0_lift: 200,
-        servo1_lift: 180,
-        servo2_lift: 90,
+        servo0_prepare: 245, servo1_prepare: 180, servo2_prepare: 150,
+        servo2_approach: 150, servo2_grab: 90,
+        servo0_lift: 200, servo1_lift: 180, servo2_lift: 90,
     });
     const [sts, setSts] = useState<ArmAnglesSTS>({
-        servo1_prepare: 2300,
-        servo2_prepare: 2100,
-        servo3_prepare: 4000,
-        servo1_enter: 1850,
-        servo2_enter: 2650,
-        servo3_enter: 4000,
+        servo1_prepare: 2300, servo2_prepare: 2100, servo3_prepare: 4000,
+        servo1_enter: 1850, servo2_enter: 2650, servo3_enter: 4000,
         servo3_grab: 3000,
-        servo1_lift: 2300,
-        servo2_lift: 2100,
-        servo3_lift: 3000,
+        servo1_lift: 2300, servo2_lift: 2100, servo3_lift: 3000,
     });
-    const [basePwmChannels, setBasePwmChannels] = useState<BasePwmChannels>({
-        left_ch1: 0,
-        left_ch2: 1,
-        right_ch1: 2,
-        right_ch2: 3,
-    });
-    const [status, setStatus] = useState<string>("");
-    const [pwmStatus, setPwmStatus] = useState<string>("");
+    const [pwm, setPwm] = useState<BasePwmChannels>({left_ch1: 0, left_ch2: 1, right_ch1: 2, right_ch2: 3});
+    const [status, setStatus] = useState("");
+    const [pwmStatus, setPwmStatus] = useState("");
     const [saving, setSaving] = useState(false);
     const [savingPwm, setSavingPwm] = useState(false);
     const previewTimerRef = useRef<number | null>(null);
     const requestIdRef = useRef(0);
 
     useEffect(() => {
-        loadConfig();
-        loadBasePwmChannels();
-        return () => {
-            if (previewTimerRef.current !== null) {
-                window.clearTimeout(previewTimerRef.current);
-            }
-        };
+        loadConfig(); loadPwm();
+        return () => { if (previewTimerRef.current !== null) clearTimeout(previewTimerRef.current); };
     }, []);
 
     const currentAngles = driver === "zp10s" ? zp10s : sts;
@@ -91,645 +51,159 @@ const ArmAnglesPage = () => {
     const loadConfig = async () => {
         try {
             const data = await api.arm.angles() as ArmAnglesResponse<ArmAnglesZP10S | ArmAnglesSTS>;
-            if (data.driver === "zp10s") {
-                setZp10s(data.angles as ArmAnglesZP10S);
-                setDriver(data.driver);
-            } else if (data.driver === "sts3215") {
-                setSts(data.angles as ArmAnglesSTS);
-                setDriver(data.driver);
-            }
-        } catch (e) {
-            console.error("加载配置失败", e);
-        }
+            if (data.driver === "zp10s") { setZp10s(data.angles as ArmAnglesZP10S); setDriver(data.driver); }
+            else if (data.driver === "sts3215") { setSts(data.angles as ArmAnglesSTS); setDriver(data.driver); }
+        } catch {}
     };
-
-    const loadBasePwmChannels = async () => {
-        try {
-            const data = await api.base.pwmChannels() as {pwm_channels: BasePwmChannels};
-            if (data.pwm_channels) {
-                setBasePwmChannels(data.pwm_channels);
-            }
-        } catch (e) {
-            console.error("加载 PWM 通道配置失败", e);
-        }
+    const loadPwm = async () => {
+        try { const d = await api.base.pwmChannels() as {pwm_channels: BasePwmChannels}; if (d.pwm_channels) setPwm(d.pwm_channels); } catch {}
     };
 
     const saveConfig = async () => {
-        setSaving(true);
-        setStatus("");
-        try {
-            const r = await api.arm.saveAngles(driver, currentAngles) as {error?: string};
-            if (!r.error) {
-                setStatus("保存成功");
-                setTimeout(() => setStatus(""), 2000);
-            } else {
-                setStatus("保存失败");
-            }
-        } catch (e) {
-            setStatus("请求失败: " + e);
-        } finally {
-            setSaving(false);
-        }
+        setSaving(true); setStatus("");
+        try { const r = await api.arm.saveAngles(driver, currentAngles) as {error?: string}; setStatus(r.error ? "保存失败" : "保存成功"); if (!r.error) setTimeout(() => setStatus(""), 2000); }
+        catch (e) { setStatus("请求失败: " + e); }
+        finally { setSaving(false); }
+    };
+    const savePwm = async () => {
+        setSavingPwm(true); setPwmStatus("");
+        try { const r = await api.base.savePwmChannels(pwm) as {error?: string}; setPwmStatus(r.error ? "保存失败" : "PWM 通道已保存并生效"); if (!r.error) setTimeout(() => setPwmStatus(""), 2000); }
+        catch (e) { setPwmStatus("请求失败: " + e); }
+        finally { setSavingPwm(false); }
     };
 
-    const savePwmChannels = async () => {
-        setSavingPwm(true);
-        setPwmStatus("");
-        try {
-            const r = await api.base.savePwmChannels(basePwmChannels) as {error?: string};
-            if (!r.error) {
-                setPwmStatus("PWM 通道已保存并生效");
-                setTimeout(() => setPwmStatus(""), 2000);
-            } else {
-                setPwmStatus("保存失败");
-            }
-        } catch (e) {
-            setPwmStatus("请求失败: " + e);
-        } finally {
-            setSavingPwm(false);
-        }
-    };
-
-    const queuePreviewSave = (key: string, value: number, nextAngles: ArmAnglesZP10S | ArmAnglesSTS) => {
-        if (previewTimerRef.current !== null) {
-            window.clearTimeout(previewTimerRef.current);
-        }
-
+    const queuePreview = (key: string, value: number, nextAngles: ArmAnglesZP10S | ArmAnglesSTS) => {
+        if (previewTimerRef.current !== null) clearTimeout(previewTimerRef.current);
         setStatus(`已调整 ${key}: ${value}`);
         previewTimerRef.current = window.setTimeout(async () => {
-            const requestId = ++requestIdRef.current;
-            setSaving(true);
-            try {
-                const r = await api.arm.preview(driver, key, value, nextAngles);
-                if (!r || r.error) {
-                    throw new Error(r?.error ?? "unknown error");
-                }
-                if (requestId === requestIdRef.current) {
-                    setStatus(`已同步并预览 ${key}: ${value}`);
-                }
-            } catch (e) {
-                if (requestId === requestIdRef.current) {
-                    setStatus("同步失败: " + e);
-                }
-            } finally {
-                if (requestId === requestIdRef.current) {
-                    setSaving(false);
-                }
-            }
+            const reqId = ++requestIdRef.current; setSaving(true);
+            try { const r = await api.arm.preview(driver, key, value, nextAngles); if (r?.error) throw new Error(r.error); if (reqId === requestIdRef.current) setStatus(`已同步 ${key}: ${value}`); }
+            catch (e) { if (reqId === requestIdRef.current) setStatus("同步失败: " + e); }
+            finally { if (reqId === requestIdRef.current) setSaving(false); }
         }, 80);
     };
 
-    const updateZp10s = (key: keyof ArmAnglesZP10S, value: number) => {
-        setZp10s((prev) => {
-            const next = {...prev, [key]: value};
-            queuePreviewSave(key, value, next);
-            return next;
-        });
-    };
+    const updZ = (key: keyof ArmAnglesZP10S, v: number) => setZp10s(prev => { const n = {...prev, [key]: v}; queuePreview(key, v, n); return n; });
+    const updS = (key: keyof ArmAnglesSTS, v: number) => setSts(prev => { const n = {...prev, [key]: v}; queuePreview(key, v, n); return n; });
+    const updPwm = (key: keyof BasePwmChannels, v: number) => setPwm(prev => ({...prev, [key]: v}));
 
-    const updateSts = (key: keyof ArmAnglesSTS, value: number) => {
-        setSts((prev) => {
-            const next = {...prev, [key]: value};
-            queuePreviewSave(key, value, next);
-            return next;
-        });
-    };
+    const statusBg = (s: string) => s.includes("成功") || s.includes("生效") ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)";
+    const statusClr = (s: string) => s.includes("成功") || s.includes("生效") ? "var(--color-success)" : "var(--color-danger)";
 
-    const updateBasePwmChannels = (key: keyof BasePwmChannels, value: number) => {
-        setBasePwmChannels((prev) => ({...prev, [key]: value}));
-    };
+    const sectionTitle = (t: string) => (
+        <div style={{fontSize: scalePx(10), fontWeight: 700, color: "var(--color-text-dim)", textTransform: "uppercase", letterSpacing: "1px", marginBottom: scalePx(8), marginTop: scalePx(4)}}>{t}</div>
+    );
 
-    const swapLeftRightWheels = () => {
-        setBasePwmChannels((prev) => ({
-            left_ch1: prev.right_ch1,
-            left_ch2: prev.right_ch2,
-            right_ch1: prev.left_ch1,
-            right_ch2: prev.left_ch2,
-        }));
-    };
+    const pwmRow = (key: keyof BasePwmChannels, label: string) => (
+        <div key={key} style={{display: "flex", justifyContent: "space-between", alignItems: "center", padding: `${scalePx(9)} 0`, borderTop: "1px solid var(--color-border-light)", gap: scalePx(10)}}>
+            <span style={{fontSize: scalePx(13)}}>{label}</span>
+            <input type="number" min="0" step="1" value={pwm[key]}
+                   onChange={e => updPwm(key, parseInt(e.target.value || "0", 10))}
+                   style={{width: scalePx(68), border: "1px solid var(--color-border)", borderRadius: "var(--radius-sm)", padding: `${scalePx(5)} ${scalePx(7)}`, fontSize: scalePx(13), background: "var(--color-bg)", color: "var(--color-text)", outline: "none"}} />
+        </div>
+    );
 
-    const swapLeftWheelDirection = () => {
-        setBasePwmChannels((prev) => ({
-            ...prev,
-            left_ch1: prev.left_ch2,
-            left_ch2: prev.left_ch1,
-        }));
-    };
-
-    const swapRightWheelDirection = () => {
-        setBasePwmChannels((prev) => ({
-            ...prev,
-            right_ch1: prev.right_ch2,
-            right_ch2: prev.right_ch1,
-        }));
-    };
+    const swapBtn = (label: string, onClick: () => void) => (
+        <button onClick={onClick} style={{padding: `${scalePx(7)} ${scalePx(8)}`, borderRadius: "var(--radius-sm)", border: "1px solid var(--color-border)", background: "var(--color-bg)", color: "var(--color-text)", cursor: "pointer", fontSize: scalePx(11)}}>
+            {label}
+        </button>
+    );
 
     return (
-        <div
-            style={{
-                fontFamily: "-apple-system, sans-serif",
-                background: "#f2f2f7",
-                height: "100dvh",
-                color: "#1c1c1e",
-                overflowY: "auto",
-                overscrollBehavior: "contain",
-            }}
-        >
-            {/* Header */}
-            <div
-                style={{
-                    background: "#fff",
-                    padding: `${scalePx(16)} ${scalePx(20)}`,
-                    borderBottom: "0.5px solid #c6c6c8",
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    position: "sticky",
-                    top: 0,
-                    zIndex: 100,
-                }}
-            >
-                <div style={{display: "flex", flexDirection: "column"}}>
-                    <h1 style={{fontSize: scalePx(17), margin: 0, fontWeight: 600}}>舵机角度配置</h1>
-                    <div style={{fontSize: scalePx(12), color: "#8e8e93", marginTop: 2}}>
-                        当前驱动: <b>{driver}</b>
-                    </div>
-                </div>
-                <button
-                    onClick={saveConfig}
-                    disabled={saving}
-                    style={{
-                        color: saving ? "#8e8e93" : "#007aff",
-                        fontSize: scalePx(15),
-                        cursor: saving ? "not-allowed" : "pointer",
-                        background: "none",
-                        border: "none",
-                        fontWeight: 600,
-                    }}
-                >
-                    {saving ? "保存中..." : "保存"}
-                </button>
-            </div>
+        <div style={{
+            minHeight: "100dvh", overflowY: "auto",
+            // 恢复原始浅色主题（角度配置页原本是 iOS 风格浅色）
+            "--color-bg": "#f2f2f7",
+            "--color-bg-card": "#ffffff",
+            "--color-bg-elevated": "#e5e5ea",
+            "--color-text": "#1c1c1e",
+            "--color-text-dim": "#8e8e93",
+            "--color-text-muted": "#6e6e73",
+            "--color-border": "#d1d1d6",
+            "--color-border-light": "rgba(0,0,0,0.08)",
+            "--color-primary": "#007aff",
+            color: "#1c1c1e",
+            background: "#f2f2f7",
+        } as React.CSSProperties}>
+            <Header
+                title="舵机角度配置"
+                subtitle={<span>当前驱动: <b>{driver}</b></span>}
+                showClose
+                actions={
+                    <button onClick={saveConfig} disabled={saving}
+                            style={{color: saving ? "var(--color-text-dim)" : "var(--color-primary)", fontSize: scalePx(14), fontWeight: 600, background: "none", border: "none", cursor: saving ? "not-allowed" : "pointer"}}>
+                        {saving ? "保存中..." : "保存"}
+                    </button>
+                }
+            />
 
-            {/* Status */}
-            {status && (
-                <div
-                    style={{
-                        textAlign: "center",
-                        padding: scalePx(10),
-                        background: status.includes("成功") ? "#d4edda" : "#f8d7da",
-                        color: status.includes("成功") ? "#155724" : "#721c24",
-                    }}
-                >
-                    {status}
-                </div>
-            )}
+            {status && <div style={{textAlign: "center", padding: scalePx(8), background: statusBg(status), color: statusClr(status), fontSize: scalePx(12)}}>{status}</div>}
 
-            {/* ZP10S Config */}
-            {driver === "zp10s" && (
-                <div style={{padding: 16}}>
-                    <div
-                        style={{
-                            background: "#fff",
-                            borderRadius: scalePx(10),
-                            padding: scalePx(16),
-                            boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-                        }}
-                    >
-                        <h3 style={{fontSize: scalePx(15), fontWeight: 600, marginBottom: 16}}>ZP10S 抓取序列</h3>
+            <div style={{padding: scalePx(12)}}>
+                {/* 角度配置 */}
+                <Card marginBottom={12}>
+                    <h3 style={{fontSize: scalePx(14), fontWeight: 700, marginBottom: scalePx(10)}}>
+                        {driver === "zp10s" ? "ZP10S" : "STS3215"} 抓取序列
+                    </h3>
+                    {driver === "zp10s" ? (
+                        <>
+                            {sectionTitle("夹取阶段")}
+                            <SliderRow label="舵机0 夹取角度" value={zp10s.servo0_prepare} min={0} max={270} onChange={v => updZ("servo0_prepare", v)} suffix="°" />
+                            <SliderRow label="舵机1 夹取角度" value={zp10s.servo1_prepare} min={0} max={270} onChange={v => updZ("servo1_prepare", v)} suffix="°" />
+                            <SliderRow label="夹爪张开角度" value={zp10s.servo2_prepare} min={0} max={270} onChange={v => updZ("servo2_prepare", v)} suffix="°" />
+                            {sectionTitle("进入阶段")}
+                            <SliderRow label="夹爪进入角度" value={zp10s.servo2_approach} min={0} max={270} onChange={v => updZ("servo2_approach", v)} suffix="°" />
+                            <SliderRow label="夹爪闭合角度" value={zp10s.servo2_grab} min={0} max={270} onChange={v => updZ("servo2_grab", v)} suffix="°" />
+                            {sectionTitle("抬起阶段")}
+                            <SliderRow label="舵机0 抬起角度" value={zp10s.servo0_lift} min={0} max={270} onChange={v => updZ("servo0_lift", v)} suffix="°" />
+                            <SliderRow label="舵机1 抬起角度" value={zp10s.servo1_lift} min={0} max={270} onChange={v => updZ("servo1_lift", v)} suffix="°" />
+                            <SliderRow label="舵机2 抬起角度" value={zp10s.servo2_lift} min={0} max={270} onChange={v => updZ("servo2_lift", v)} suffix="°" />
+                        </>
+                    ) : (
+                        <>
+                            {sectionTitle("准备阶段")}
+                            <SliderRow label="舵机1 准备角度" value={sts.servo1_prepare} min={0} max={4095} onChange={v => updS("servo1_prepare", v)} />
+                            <SliderRow label="舵机2 准备角度" value={sts.servo2_prepare} min={0} max={4095} onChange={v => updS("servo2_prepare", v)} />
+                            <SliderRow label="舵机3 准备角度 (张开)" value={sts.servo3_prepare} min={0} max={4095} onChange={v => updS("servo3_prepare", v)} />
+                            {sectionTitle("进入阶段")}
+                            <SliderRow label="舵机1 进入角度" value={sts.servo1_enter} min={0} max={4095} onChange={v => updS("servo1_enter", v)} />
+                            <SliderRow label="舵机2 进入角度" value={sts.servo2_enter} min={0} max={4095} onChange={v => updS("servo2_enter", v)} />
+                            <SliderRow label="舵机3 进入角度" value={sts.servo3_enter} min={0} max={4095} onChange={v => updS("servo3_enter", v)} />
+                            {sectionTitle("抓取阶段")}
+                            <SliderRow label="舵机3 抓取角度 (闭合)" value={sts.servo3_grab} min={0} max={4095} onChange={v => updS("servo3_grab", v)} />
+                            {sectionTitle("抬起阶段")}
+                            <SliderRow label="舵机1 抬起角度" value={sts.servo1_lift} min={0} max={4095} onChange={v => updS("servo1_lift", v)} />
+                            <SliderRow label="舵机2 抬起角度" value={sts.servo2_lift} min={0} max={4095} onChange={v => updS("servo2_lift", v)} />
+                            <SliderRow label="舵机3 抬起角度" value={sts.servo3_lift} min={0} max={4095} onChange={v => updS("servo3_lift", v)} />
+                        </>
+                    )}
+                </Card>
 
-                        <div style={{marginBottom: 20}}>
-                            <div style={{fontSize: scalePx(13), fontWeight: 600, color: "#8e8e93", marginBottom: 12}}>夹取阶段</div>
-                            <div style={{marginBottom: 16}}>
-                                <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
-                                    <span style={{fontSize: 14}}>舵机0 夹取角度</span>
-                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{zp10s.servo0_prepare}°</span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min="0"
-                                    max="270"
-                                    value={zp10s.servo0_prepare}
-                                    onChange={(e) => updateZp10s("servo0_prepare", parseInt(e.target.value))}
-                                    style={{width: "100%"}}
-                                />
-                            </div>
-
-                            <div style={{marginBottom: 16}}>
-                                <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
-                                    <span style={{fontSize: 14}}>舵机1 夹取角度</span>
-                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{zp10s.servo1_prepare}°</span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min="0"
-                                    max="270"
-                                    value={zp10s.servo1_prepare}
-                                    onChange={(e) => updateZp10s("servo1_prepare", parseInt(e.target.value))}
-                                    style={{width: "100%"}}
-                                />
-                            </div>
-
-                            <div>
-                                <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
-                                    <span style={{fontSize: 14}}>夹爪张开角度</span>
-                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{zp10s.servo2_prepare}°</span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min="0"
-                                    max="270"
-                                    value={zp10s.servo2_prepare}
-                                    onChange={(e) => updateZp10s("servo2_prepare", parseInt(e.target.value))}
-                                    style={{width: "100%"}}
-                                />
-                            </div>
-                        </div>
-
-                        <div style={{marginBottom: 20}}>
-                            <div style={{fontSize: scalePx(13), fontWeight: 600, color: "#8e8e93", marginBottom: 12}}>进入阶段</div>
-                            <div>
-                                <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
-                                    <span style={{fontSize: 14}}>夹爪夹取过程角度 (保持张开)</span>
-                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{zp10s.servo2_approach}°</span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min="0"
-                                    max="270"
-                                    value={zp10s.servo2_approach}
-                                    onChange={(e) => updateZp10s("servo2_approach", parseInt(e.target.value))}
-                                    style={{width: "100%"}}
-                                />
-                            </div>
-                            <div>
-                                <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
-                                    <span style={{fontSize: 14}}>夹爪闭合角度</span>
-                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{zp10s.servo2_grab}°</span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min="0"
-                                    max="270"
-                                    value={zp10s.servo2_grab}
-                                    onChange={(e) => updateZp10s("servo2_grab", parseInt(e.target.value))}
-                                    style={{width: "100%"}}
-                                />
-                            </div>
-                        </div>
-
+                {/* PWM 通道（暂时隐藏） */}
+                {false && (
+                <Card marginBottom={0}>
+                    <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: scalePx(10)}}>
                         <div>
-                            <div style={{fontSize: scalePx(13), fontWeight: 600, color: "#8e8e93", marginBottom: 12}}>抬起阶段</div>
-                            <div style={{marginBottom: 16}}>
-                                <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
-                                    <span style={{fontSize: 14}}>舵机0 抬起角度</span>
-                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{zp10s.servo0_lift}°</span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min="0"
-                                    max="270"
-                                    value={zp10s.servo0_lift}
-                                    onChange={(e) => updateZp10s("servo0_lift", parseInt(e.target.value))}
-                                    style={{width: "100%"}}
-                                />
-                            </div>
-
-                            <div style={{marginBottom: 16}}>
-                                <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
-                                    <span style={{fontSize: 14}}>舵机1 抬起角度</span>
-                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{zp10s.servo1_lift}°</span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min="0"
-                                    max="270"
-                                    value={zp10s.servo1_lift}
-                                    onChange={(e) => updateZp10s("servo1_lift", parseInt(e.target.value))}
-                                    style={{width: "100%"}}
-                                />
-                            </div>
-
-                            <div>
-                                <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
-                                    <span style={{fontSize: 14}}>舵机2 抬起角度</span>
-                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{zp10s.servo2_lift}°</span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min="0"
-                                    max="270"
-                                    value={zp10s.servo2_lift}
-                                    onChange={(e) => updateZp10s("servo2_lift", parseInt(e.target.value))}
-                                    style={{width: "100%"}}
-                                />
-                            </div>
+                            <h3 style={{fontSize: scalePx(14), fontWeight: 700, margin: 0}}>底盘 PWM 通道</h3>
+                            <div style={{fontSize: scalePx(10), color: "var(--color-text-dim)", marginTop: 2}}>base_pwm_channels.json</div>
                         </div>
-                    </div>
-                </div>
-            )}
-
-            {/* STS3215 Config */}
-            {driver === "sts3215" && (
-                <div style={{padding: 16}}>
-                    <div
-                        style={{
-                            background: "#fff",
-                            borderRadius: scalePx(10),
-                            padding: scalePx(16),
-                            boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-                        }}
-                    >
-                        <h3 style={{fontSize: scalePx(15), fontWeight: 600, marginBottom: 16}}>STS3215 抓取序列</h3>
-
-                        <div style={{marginBottom: 20}}>
-                            <div style={{fontSize: scalePx(13), fontWeight: 600, color: "#8e8e93", marginBottom: 12}}>准备阶段</div>
-                            <div style={{marginBottom: 16}}>
-                                <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
-                                    <span style={{fontSize: 14}}>舵机1 准备角度</span>
-                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{sts.servo1_prepare}</span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min="0"
-                                    max="4095"
-                                    value={sts.servo1_prepare}
-                                    onChange={(e) => updateSts("servo1_prepare", parseInt(e.target.value))}
-                                    style={{width: "100%"}}
-                                />
-                            </div>
-
-                            <div style={{marginBottom: 16}}>
-                                <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
-                                    <span style={{fontSize: 14}}>舵机2 准备角度</span>
-                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{sts.servo2_prepare}</span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min="0"
-                                    max="4095"
-                                    value={sts.servo2_prepare}
-                                    onChange={(e) => updateSts("servo2_prepare", parseInt(e.target.value))}
-                                    style={{width: "100%"}}
-                                />
-                            </div>
-
-                            <div>
-                                <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
-                                    <span style={{fontSize: 14}}>舵机3 准备角度 (张开)</span>
-                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{sts.servo3_prepare}</span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min="0"
-                                    max="4095"
-                                    value={sts.servo3_prepare}
-                                    onChange={(e) => updateSts("servo3_prepare", parseInt(e.target.value))}
-                                    style={{width: "100%"}}
-                                />
-                            </div>
-                        </div>
-
-                        <div style={{marginBottom: 20}}>
-                            <div style={{fontSize: scalePx(13), fontWeight: 600, color: "#8e8e93", marginBottom: 12}}>进入阶段</div>
-                            <div style={{marginBottom: 16}}>
-                                <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
-                                    <span style={{fontSize: 14}}>舵机1 进入角度</span>
-                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{sts.servo1_enter}</span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min="0"
-                                    max="4095"
-                                    value={sts.servo1_enter}
-                                    onChange={(e) => updateSts("servo1_enter", parseInt(e.target.value))}
-                                    style={{width: "100%"}}
-                                />
-                            </div>
-
-                            <div style={{marginBottom: 16}}>
-                                <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
-                                    <span style={{fontSize: 14}}>舵机2 进入角度</span>
-                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{sts.servo2_enter}</span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min="0"
-                                    max="4095"
-                                    value={sts.servo2_enter}
-                                    onChange={(e) => updateSts("servo2_enter", parseInt(e.target.value))}
-                                    style={{width: "100%"}}
-                                />
-                            </div>
-
-                            <div>
-                                <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
-                                    <span style={{fontSize: 14}}>舵机3 进入角度 (保持张开)</span>
-                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{sts.servo3_enter}</span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min="0"
-                                    max="4095"
-                                    value={sts.servo3_enter}
-                                    onChange={(e) => updateSts("servo3_enter", parseInt(e.target.value))}
-                                    style={{width: "100%"}}
-                                />
-                            </div>
-                        </div>
-
-                        <div style={{marginBottom: 20}}>
-                            <div style={{fontSize: scalePx(13), fontWeight: 600, color: "#8e8e93", marginBottom: 12}}>抓取阶段</div>
-                            <div>
-                                <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
-                                    <span style={{fontSize: 14}}>舵机3 抓取角度 (闭合)</span>
-                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{sts.servo3_grab}</span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min="0"
-                                    max="4095"
-                                    value={sts.servo3_grab}
-                                    onChange={(e) => updateSts("servo3_grab", parseInt(e.target.value))}
-                                    style={{width: "100%"}}
-                                />
-                            </div>
-                        </div>
-
-                        <div>
-                            <div style={{fontSize: scalePx(13), fontWeight: 600, color: "#8e8e93", marginBottom: 12}}>抬起阶段</div>
-                            <div style={{marginBottom: 16}}>
-                                <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
-                                    <span style={{fontSize: 14}}>舵机1 抬起角度</span>
-                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{sts.servo1_lift}</span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min="0"
-                                    max="4095"
-                                    value={sts.servo1_lift}
-                                    onChange={(e) => updateSts("servo1_lift", parseInt(e.target.value))}
-                                    style={{width: "100%"}}
-                                />
-                            </div>
-
-                            <div style={{marginBottom: 16}}>
-                                <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
-                                    <span style={{fontSize: 14}}>舵机2 抬起角度</span>
-                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{sts.servo2_lift}</span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min="0"
-                                    max="4095"
-                                    value={sts.servo2_lift}
-                                    onChange={(e) => updateSts("servo2_lift", parseInt(e.target.value))}
-                                    style={{width: "100%"}}
-                                />
-                            </div>
-
-                            <div>
-                                <div style={{display: "flex", justifyContent: "space-between", marginBottom: 8}}>
-                                    <span style={{fontSize: 14}}>舵机3 抬起角度</span>
-                                    <span style={{fontSize: scalePx(14), fontWeight: 600, color: "#007aff"}}>{sts.servo3_lift}</span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min="0"
-                                    max="4095"
-                                    value={sts.servo3_lift}
-                                    onChange={(e) => updateSts("servo3_lift", parseInt(e.target.value))}
-                                    style={{width: "100%"}}
-                                />
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            <div style={{padding: scalePx(16), paddingTop: scalePx(0)}}>
-                <div
-                    style={{
-                        background: "#fff",
-                        borderRadius: scalePx(10),
-                        padding: scalePx(16),
-                        boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-                    }}
-                >
-                    <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16}}>
-                        <div>
-                            <h3 style={{fontSize: scalePx(15), fontWeight: 600, margin: 0}}>底盘 PWM 通道</h3>
-                            <div style={{fontSize: scalePx(12), color: "#8e8e93", marginTop: 4}}>
-                                配置文件保存到 `base_pwm_channels.json`
-                            </div>
-                        </div>
-                        <button
-                            onClick={savePwmChannels}
-                            disabled={savingPwm}
-                            style={{
-                                color: savingPwm ? "#8e8e93" : "#007aff",
-                                fontSize: scalePx(15),
-                                cursor: savingPwm ? "not-allowed" : "pointer",
-                                background: "none",
-                                border: "none",
-                                fontWeight: 600,
-                            }}
-                        >
+                        <button onClick={savePwm} disabled={savingPwm}
+                                style={{color: savingPwm ? "var(--color-text-dim)" : "var(--color-primary)", fontSize: scalePx(14), fontWeight: 600, background: "none", border: "none", cursor: savingPwm ? "not-allowed" : "pointer"}}>
                             {savingPwm ? "保存中..." : "保存 PWM"}
                         </button>
                     </div>
-
-                    {pwmStatus && (
-                        <div
-                            style={{
-                                textAlign: "center",
-                                padding: scalePx(10),
-                                marginBottom: scalePx(16),
-                                borderRadius: scalePx(8),
-                                background: pwmStatus.includes("成功") || pwmStatus.includes("生效") ? "#d4edda" : "#f8d7da",
-                                color: pwmStatus.includes("成功") || pwmStatus.includes("生效") ? "#155724" : "#721c24",
-                            }}
-                        >
-                            {pwmStatus}
-                        </div>
-                    )}
-
-                    <div style={{display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: scalePx(10), marginBottom: 16}}>
-                        <button
-                            onClick={swapLeftRightWheels}
-                            style={{padding: "10px 12px", borderRadius: scalePx(8), border: "1px solid #d1d1d6", background: "#f7f7fa", cursor: "pointer", fontSize: 14}}
-                        >
-                            切换左右轮
-                        </button>
-                        <button
-                            onClick={swapLeftWheelDirection}
-                            style={{padding: "10px 12px", borderRadius: scalePx(8), border: "1px solid #d1d1d6", background: "#f7f7fa", cursor: "pointer", fontSize: 14}}
-                        >
-                            左轮前后切换
-                        </button>
-                        <button
-                            onClick={swapRightWheelDirection}
-                            style={{padding: "10px 12px", borderRadius: scalePx(8), border: "1px solid #d1d1d6", background: "#f7f7fa", cursor: "pointer", fontSize: 14}}
-                        >
-                            右轮前后切换
-                        </button>
+                    {pwmStatus && <div style={{textAlign: "center", padding: scalePx(8), marginBottom: scalePx(8), borderRadius: "var(--radius-sm)", background: statusBg(pwmStatus), color: statusClr(pwmStatus), fontSize: scalePx(12)}}>{pwmStatus}</div>}
+                    <div style={{display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: scalePx(7), marginBottom: scalePx(10)}}>
+                        {swapBtn("切换左右轮", () => setPwm(prev => ({left_ch1: prev.right_ch1, left_ch2: prev.right_ch2, right_ch1: prev.left_ch1, right_ch2: prev.left_ch2})))}
+                        {swapBtn("左轮前后切换", () => setPwm(prev => ({...prev, left_ch1: prev.left_ch2, left_ch2: prev.left_ch1})))}
+                        {swapBtn("右轮前后切换", () => setPwm(prev => ({...prev, right_ch1: prev.right_ch2, right_ch2: prev.right_ch1})))}
                     </div>
-
-                    {[
-                        {key: "left_ch1" as const, label: "左轮前进 ch1"},
-                        {key: "left_ch2" as const, label: "左轮后退 ch2"},
-                        {key: "right_ch1" as const, label: "右轮前进 ch1"},
-                        {key: "right_ch2" as const, label: "右轮后退 ch2"},
-                    ].map((item) => (
-                        <div
-                            key={item.key}
-                            style={{
-                                display: "flex",
-                                justifyContent: "space-between",
-                                alignItems: "center",
-                                padding: `${scalePx(12)} 0`,
-                                borderTop: "1px solid #f2f2f7",
-                                gap: scalePx(12),
-                            }}
-                        >
-                            <span style={{fontSize: 14}}>{item.label}</span>
-                            <input
-                                type="number"
-                                min="0"
-                                step="1"
-                                value={basePwmChannels[item.key]}
-                                onChange={(e) => updateBasePwmChannels(item.key, parseInt(e.target.value || "0", 10))}
-                                style={{
-                                    width: scalePx(88),
-                                    border: "1px solid #d1d1d6",
-                                    borderRadius: scalePx(8),
-                                    padding: `${scalePx(8)} ${scalePx(10)}`,
-                                    fontSize: scalePx(14),
-                                }}
-                            />
-                        </div>
-                    ))}
-                </div>
-            </div>
-
-            {/* Back button */}
-            <div style={{padding: `0 ${scalePx(16)} ${scalePx(30)}`}}>
-                <button
-                    onClick={() => window.history.back()}
-                    style={{
-                        width: "100%",
-                        padding: scalePx(14),
-                        border: "none",
-                        borderRadius: scalePx(10),
-                        background: "#e5e5ea",
-                        color: "#1c1c1e",
-                        fontSize: scalePx(16),
-                        fontWeight: 600,
-                        cursor: "pointer",
-                    }}
-                >
-                    返回
-                </button>
+                    {pwmRow("left_ch1", "左轮前进 ch1")}
+                    {pwmRow("left_ch2", "左轮后退 ch2")}
+                    {pwmRow("right_ch1", "右轮前进 ch1")}
+                    {pwmRow("right_ch2", "右轮后退 ch2")}
+                </Card>
+                )}
             </div>
         </div>
     );

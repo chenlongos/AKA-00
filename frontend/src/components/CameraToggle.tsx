@@ -30,24 +30,26 @@ const CameraToggle = ({onStatusChange}: CameraToggleProps) => {
             onClick={toggle}
             style={{
                 width: scalePx(44),
-                height: scalePx(22),
-                borderRadius: scalePx(11),
-                background: on ? "#22c55e" : "#334155",
-                border: `1px solid ${on ? "#22c55e" : "#475569"}`,
+                height: scalePx(24),
+                borderRadius: scalePx(12),
+                background: on ? "var(--color-success)" : "var(--color-bg-elevated)",
                 cursor: "pointer",
                 position: "relative",
                 transition: "background 0.2s",
+                flexShrink: 0,
             }}
         >
             <div style={{
                 position: "absolute",
-                top: scalePx(2),
-                left: on ? scalePx(23) : scalePx(2),
-                width: scalePx(16),
-                height: scalePx(16),
+                top: "50%",
+                transform: "translateY(-50%)",
+                left: on ? scalePx(24) : scalePx(3),
+                width: scalePx(18),
+                height: scalePx(18),
                 borderRadius: "50%",
                 background: "white",
-                transition: "left 0.2s",
+                transition: "left 0.2s ease",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
             }}/>
         </div>
     );

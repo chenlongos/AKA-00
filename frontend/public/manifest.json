@@ -1,0 +1,17 @@
+{
+    "name": "AKA-00 智能控制",
+    "short_name": "AKA-00",
+    "description": "AKA-00 机器人控制面板",
+    "start_url": "/",
+    "display": "standalone",
+    "orientation": "portrait",
+    "background_color": "#0f172a",
+    "theme_color": "#0f172a",
+    "icons": [
+        {
+            "src": "/vite.svg",
+            "sizes": "any",
+            "type": "image/svg+xml"
+        }
+    ]
+}

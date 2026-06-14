@@ -2,28 +2,24 @@ import {useEffect, useRef, useState} from "react";
 import {api, controlSocket} from "../api";
 import ControlButton from "../components/ControlButton.tsx";
 import CameraToggle from "../components/CameraToggle";
+import Page from "../components/Page";
+import {S} from "../styles";
 import {useViewportScale} from "../hooks/useViewportScale";
 
-
 const BaseControlPage = () => {
-    const {scalePx} = useViewportScale();
+    const {scalePx, scale} = useViewportScale();
     const [ip, setIp] = useState("获取中...");
     const [status, setStatus] = useState("准备就绪");
     const [leftSpeed, setLeftSpeed] = useState(0);
     const [rightSpeed, setRightSpeed] = useState(0);
     const [wsConnected, setWsConnected] = useState(false);
-
     const currentActionRef = useRef<string | null>(null);
 
     useEffect(() => {
-        controlSocket.connect(setWsConnected, (s) => {
-            setLeftSpeed(s.left);
-            setRightSpeed(s.right);
-        });
+        controlSocket.connect(setWsConnected, (s) => { setLeftSpeed(s.left); setRightSpeed(s.right); });
         return () => { controlSocket.close(); };
     }, []);
 
-    // URL哈希命令监听
     useEffect(() => {
         const processHash = () => {
             const hash = window.location.hash;
@@ -32,256 +28,124 @@ const BaseControlPage = () => {
                 window.history.replaceState(null, document.title, window.location.pathname);
             }
         };
-
         processHash();
         window.addEventListener('hashchange', processHash);
         return () => window.removeEventListener('hashchange', processHash);
     }, []);
 
     useEffect(() => {
-        const getIp = async () => {
-            setStatus("获取 IP...");
-            try {
-                const data = await api.system.ip();
-                setIp("IP: " + data.ip);
-                setStatus("准备就绪");
-            } catch {
-                setStatus("获取 IP 失败");
-            }
-        };
-
-        getIp();
-
-        // 恢复PWM配置
-        api.base.pwmChannels().then(data =>
-            api.base.savePwmChannels(data.pwm_channels).catch(() => {})
-        );
-
-        // 重新初始化底盘（用于切换回来时重置 ESP32 状态）
+        api.system.ip().then(data => { setIp("IP: " + data.ip); setStatus("准备就绪"); }).catch(() => setStatus("获取 IP 失败"));
+        api.base.pwmChannels().then(data => api.base.savePwmChannels(data.pwm_channels).catch(() => {}));
         api.base.reinitialize().catch(() => {});
     }, []);
 
     const send = async (action: string, speed: number = 50) => {
         setStatus("执行: " + action);
-        if (action === "stop") {
-            controlSocket.sendJoystick(0, 0);
-        } else if (action === "up") {
-            controlSocket.sendJoystick(0, speed);
-        } else if (action === "down") {
-            controlSocket.sendJoystick(0, -speed);
-        } else if (action === "left") {
-            controlSocket.sendJoystick(-speed, 0);
-        } else if (action === "right") {
-            controlSocket.sendJoystick(speed, 0);
-        } else {
-            try {
-                await api.motor.action(action, speed);
-            } catch (err) {
-                setStatus("错误: " + err);
-            }
-        }
+        if (action === "stop") { controlSocket.sendJoystick(0, 0); }
+        else if (action === "up") { controlSocket.sendJoystick(0, speed); }
+        else if (action === "down") { controlSocket.sendJoystick(0, -speed); }
+        else if (action === "left") { controlSocket.sendJoystick(-speed, 0); }
+        else if (action === "right") { controlSocket.sendJoystick(speed, 0); }
+        else { try { await api.motor.action(action, speed); } catch (err) { setStatus("错误: " + err); } }
     };
 
-    const handlePressStart = (action: string, speed?: number) => {
-        currentActionRef.current = action;
-        send(action, speed);
-    };
-
-    const handlePressEnd = () => {
-        currentActionRef.current = null;
-        send("stop");
-    };
+    const handlePressStart = (action: string, speed?: number) => { currentActionRef.current = action; send(action, speed); };
+    const handlePressEnd = () => { currentActionRef.current = null; send("stop"); };
 
     const redirect = async () => {
-        setStatus("获取 IP...");
         try {
             const data = await api.system.ip();
             if (!data?.ip) throw new Error("无IP数据");
             window.location.replace(`https://labs.chenlongrobot.com/?ip=${encodeURIComponent(data.ip)}`);
-        } catch {
-            setStatus("跳转失败");
-            alert("无法获取IP，请稍后重试");
-        }
+        } catch { alert("无法获取IP，请稍后重试"); }
     };
 
-    return (
-        <div
+    // 十字方向键尺寸
+    const dpadSize = Math.min(window.innerWidth * 0.72, Math.round(280 * scale));
+    const dpadGap = Math.round(6 * scale);
+    const cellSize = Math.round((dpadSize - dpadGap * 2) / 3);
+    const btnFontSize = Math.round(16 * scale);
+
+    const dpadBtn = (dir: string, label: string, bgColor: string) => (
+        <button
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); handlePressStart(dir, dir === "left" || dir === "right" ? 25 : 50); }}
+            onPointerUp={(e) => { e.preventDefault(); handlePressEnd(); }}
+            onPointerLeave={handlePressEnd}
+            onPointerCancel={handlePressEnd}
             style={{
-                fontFamily: "system-ui, sans-serif",
-                background: "#0f172a",
-                color: "white",
-                minHeight: "100dvh",
-                padding: scalePx(10),
-                textAlign: "center",
-                overflow: "hidden",
+                width: cellSize, height: cellSize,
+                borderRadius: scalePx(18),  // 匹配原始 ControlButton 圆角
+                border: "none",
+                background: bgColor, color: "#fff",
+                fontWeight: "bold", fontSize: btnFontSize,
                 touchAction: "none",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                boxShadow: "0 6px 15px rgba(0,0,0,0.5)",  // 匹配原始 ControlButton 阴影
+                cursor: "pointer", outline: "none",
+                transition: "all 0.15s ease",
             }}
         >
-            <h3>AKA-00 控制台</h3>
-            <div style={{opacity: 0.6}}>{ip}</div>
+            {label}
+        </button>
+    );
 
-            {/* 方向区 */}
-            <div
-                style={{
-                    display: "flex",
-                    gap: scalePx(10),
-                    justifyItems: "center",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    position: "relative",
-                }}
-            >
-                {/* 摄像头开关 */}
-                <div style={{position: "absolute", top: "0", right: "0", display: "flex", alignItems: "center", gap: scalePx(6)}}>
-                    <span style={{fontSize: scalePx(11), opacity: 0.6}}>摄像头</span>
+    return (
+        <Page center padTop={10}>
+            {/* Header */}
+            <div style={{textAlign: "center", width: "100%"}}>
+                <h2 style={{fontSize: scalePx(17), fontWeight: 700, margin: 0}}>AKA-00 控制台</h2>
+                <div style={{
+                    fontSize: scalePx(15), fontWeight: 500,
+                    color: "var(--color-text-muted)", marginTop: scalePx(4),
+                    fontFamily: "monospace",
+                    userSelect: "text", WebkitUserSelect: "text",
+                    WebkitTouchCallout: "default",
+                }}>{ip}</div>
+            </div>
+
+            {/* 状态行 */}
+            <div style={{...S.rowBetween, width: "100%", maxWidth: dpadSize, marginTop: scalePx(4)}}>
+                <div style={{...S.row, gap: scalePx(6)}}>
+                    <span style={S.dot(wsConnected)} />
+                    <span style={S.muted}>{status}</span>
+                </div>
+                <div style={{...S.row, gap: scalePx(6)}}>
+                    <span style={S.muted}>摄像头</span>
                     <CameraToggle />
                 </div>
-
-                <div/>
-                <ControlButton
-                    onPressStart={() => handlePressStart("up")}
-                    onPressEnd={() => handlePressEnd()}
-                >
-                    前进
-                </ControlButton>
-                <div style={{display: 'flex', gap: scalePx(10)}}>
-                    <ControlButton
-                        onPressStart={() => handlePressStart("left", 25)}
-                        onPressEnd={() => handlePressEnd()}
-                    >
-                        左转
-                    </ControlButton>
-                    <ControlButton
-                        variant="danger"
-                        onPressStart={() => handlePressStart("stop")}
-                        onPressEnd={() => handlePressEnd()}
-                    >
-                        停止
-                    </ControlButton>
-                    <ControlButton
-                        onPressStart={() => handlePressStart("right", 25)}
-                        onPressEnd={() => handlePressEnd()}
-                    >
-                        右转
-                    </ControlButton>
-                </div>
-
-                <ControlButton
-                    onPressStart={() => handlePressStart("down")}
-                    onPressEnd={() => handlePressEnd()}
-                >
-                    后退
-                </ControlButton>
-                <div/>
             </div>
 
-
-            {/* 电机实时速度显示 */}
-            <div
-                style={{
-                    marginBottom: scalePx(20),
-                    padding: scalePx(10),
-                    background: "rgba(255,255,255,0.1)",
-                    borderRadius: scalePx(8),
-                    display: "inline-flex",
-                    gap: scalePx(30),
-                    fontSize: scalePx(14),
-                }}
-            >
-                <div>左轮: <span style={{color: "#4ade80"}}>{leftSpeed}</span> m/s</div>
-                <div>右轮: <span style={{color: "#4ade80"}}>{rightSpeed}</span> m/s</div>
+            {/* 十字方向键 3x3 */}
+            <div style={{display: "grid", gridTemplateColumns: `repeat(3, ${cellSize}px)`, gridTemplateRows: `repeat(3, ${cellSize}px)`, gap: dpadGap, width: dpadSize, height: dpadSize, marginTop: scalePx(4)}}>
+                <div />{dpadBtn("up", "▲", "#2563eb")}<div />
+                {dpadBtn("left", "◀", "#2563eb")}
+                <button onPointerDown={(e) => { e.preventDefault(); handlePressStart("stop"); }}
+                        style={{width: cellSize, height: cellSize, borderRadius: scalePx(18), border: "none", background: "#ef4444", color: "#fff", fontWeight: "bold", fontSize: Math.round(12 * scale), touchAction: "none", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 6px 15px rgba(0,0,0,0.5)", cursor: "pointer", outline: "none", letterSpacing: "1px", transition: "all 0.15s ease"}}>
+                    停止
+                </button>
+                {dpadBtn("right", "▶", "#2563eb")}
+                <div />{dpadBtn("down", "▼", "#2563eb")}<div />
             </div>
 
-
-            {/* 功能按钮 */}
-            <div
-                style={{
-                    display: "flex",
-                    justifyContent: "center",
-                    gap: scalePx(10),
-                    flexWrap: "wrap",
-                }}
-            >
-                <ControlButton
-                    variant="success"
-                    size="wide"
-                    onClick={() => send("grab")}
-                >
-                    抓取
-                </ControlButton>
-
-                <ControlButton
-                    variant="secondary"
-                    size="wide"
-                    onClick={() => send("release")}
-                >
-                    释放
-                </ControlButton>
+            {/* 速度 */}
+            <div style={{...S.row, gap: scalePx(20), padding: `${scalePx(6)} ${scalePx(16)}`, background: "var(--color-bg-card)", borderRadius: "var(--radius-full)", fontSize: scalePx(12), marginTop: scalePx(4)}}>
+                <span>左 <b style={S.success}>{leftSpeed.toFixed(1)}</b> m/s</span>
+                <span>右 <b style={S.success}>{rightSpeed.toFixed(1)}</b> m/s</span>
             </div>
 
-            <div
-                style={{
-                    display: "flex",
-                    justifyContent: "center",
-                    marginTop: scalePx(10),
-                    gap: scalePx(10),
-                    flexWrap: "wrap",
-                }}
-            >
-                <ControlButton
-                    size="wide"
-                    variant="primary"
-                    onClick={() => window.location.href = "/rc"}
-                >
-                    摇杆驾驶
-                </ControlButton>
-                <ControlButton
-                    size="wide"
-                    variant="secondary"
-                    onClick={() => window.location.href = "/wifi"}
-                >
-                    WiFi 配置
-                </ControlButton>
-                <ControlButton
-                    size="wide"
-                    variant="secondary"
-                    onClick={() => window.location.href = "/arm-angles"}
-                >
-                    角度配置
-                </ControlButton>
-                <ControlButton
-                    size="wide"
-                    variant="secondary"
-                    onClick={() => window.location.href = "/demo"}
-                >
-                    Demo
-                </ControlButton>
-                <ControlButton
-                    size="wide"
-                    variant="secondary"
-                    onClick={() => window.location.href = "/gravity"}
-                >
-                    重力遥控
-                </ControlButton>
-                <ControlButton
-                    size="wide"
-                    variant="secondary"
-                    onClick={() => redirect()}
-                >
-                    进入试验平台
-                </ControlButton>
+            {/* 抓取/释放 */}
+            <div style={{display: "flex", gap: scalePx(10), width: "100%", maxWidth: dpadSize, marginTop: scalePx(4)}}>
+                <ControlButton variant="success" size="full" onClick={() => send("grab")}>🤏 抓取</ControlButton>
+                <ControlButton variant="secondary" size="full" onClick={() => send("release")}>👐 释放</ControlButton>
             </div>
 
-            <div style={{marginTop: scalePx(20), opacity: 0.5, fontSize: scalePx(13)}}>
-                <span style={{
-                    width: "6px", height: "6px", borderRadius: "50%",
-                    background: wsConnected ? "#22c55e" : "#ef4444",
-                    display: "inline-block", marginRight: scalePx(6),
-                }}/>
-                {status}
+            {/* 辅助入口 */}
+            <div style={{display: "flex", gap: scalePx(10), flexWrap: "wrap", justifyContent: "center", maxWidth: dpadSize, marginTop: scalePx(16)}}>
+                <ControlButton size="wide" variant="primary" onClick={() => window.location.href = "/gravity"}>📱 重力遥控</ControlButton>
+                <ControlButton size="wide" variant="secondary" onClick={() => redirect()}>🧪 试验平台</ControlButton>
             </div>
-        </div>
+        </Page>
     );
-}
+};
 
 export default BaseControlPage;

@@ -7,7 +7,7 @@ type ButtonProps = {
     onPressEnd?: () => void;
     onClick?: () => void;
     variant?: "primary" | "danger" | "success" | "secondary";
-    size?: "square" | "wide";
+    size?: "square" | "wide" | "full" | "small";
     disabled?: boolean;
     loading?: boolean;
 };
@@ -27,21 +27,26 @@ const pressedColorMap = {
 };
 
 const ControlButton = ({
-                           children,
-                           variant = "primary",
-                           size = "square",
-                           onPressStart,
-                           onPressEnd,
-                           onClick,
-                           disabled = false,
-                           loading = false,
-                       }: ButtonProps) => {
+    children,
+    variant = "primary",
+    size = "square",
+    onPressStart,
+    onPressEnd,
+    onClick,
+    disabled = false,
+    loading = false,
+}: ButtonProps) => {
     const [isPressed, setIsPressed] = useState(false);
     const {scalePx} = useViewportScale();
+
     const baseSize =
         size === "square"
             ? {width: "22vw", height: "22vw", maxWidth: scalePx(110), maxHeight: scalePx(110)}
-            : {width: "40vw", height: scalePx(60), maxWidth: scalePx(200)};
+            : size === "wide"
+            ? {width: "40vw", height: scalePx(60), maxWidth: scalePx(200)}
+            : size === "full"
+            ? {flex: 1, height: scalePx(52), width: "100%"}
+            : {padding: `${scalePx(7)} ${scalePx(14)}`, fontSize: scalePx(11), height: scalePx(36)};
 
     const handlePressStart = () => {
         setIsPressed(true);
@@ -61,7 +66,7 @@ const ControlButton = ({
             onPointerCancel={handlePressEnd}
             onContextMenu={(e) => e.preventDefault()}
             onClick={(e) => {
-                e.preventDefault(); // 防止默认行为（如表单提交）
+                e.preventDefault();
                 onClick?.();
             }}
             style={{
@@ -71,7 +76,7 @@ const ControlButton = ({
                 background: isPressed ? pressedColorMap[variant] : colorMap[variant],
                 color: "white",
                 fontWeight: "bold",
-                fontSize: scalePx(16),
+                fontSize: size === "small" ? scalePx(11) : scalePx(16),
                 transition: "all 0.15s ease",
                 boxShadow: isPressed
                     ? "0 3px 8px rgba(0,0,0,0.4)"
@@ -80,18 +85,23 @@ const ControlButton = ({
                 touchAction: "none",
                 opacity: disabled || loading ? 0.5 : 1,
                 pointerEvents: disabled || loading ? "none" : "auto",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                outline: "none",
             }}
         >
             {loading ? (
                 <span style={{
                     display: "inline-block",
                     animation: "spin 1s linear infinite",
+                    fontSize: scalePx(18),
                 }}>
                     ↻
                 </span>
             ) : children}
         </button>
-    )
-}
+    );
+};
 
-export default ControlButton
+export default ControlButton;
