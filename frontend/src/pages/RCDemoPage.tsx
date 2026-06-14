@@ -12,12 +12,21 @@ const RCDemoPage = () => {
     const {scalePx, scale} = useViewportScale();
     const [leftSpeed, setLeftSpeed] = useState(0);
     const [rightSpeed, setRightSpeed] = useState(0);
-    const [throttleDisplay, setThrottleDisplay] = useState(0);
-    const [directionDisplay, setDirectionDisplay] = useState(0);
+    const [throttle, setThrottle] = useState(0);
+    const [rotation, setRotation] = useState(0);
     const [cameraOn, setCameraOn] = useState(false);
     const [fpsIndex, setFpsIndex] = useState(0);
     const [wsConnected, setWsConnected] = useState(false);
     const [isLandscape, setIsLandscape] = useState(() => window.innerWidth > window.innerHeight);
+
+    const throttleRef = useRef(0);
+    const rotationRef = useRef(0);
+    const intervalRef = useRef<number | null>(null);
+    const lastCmdRef = useRef<{x: number, y: number} | null>(null);
+    const thrEl = useRef<HTMLDivElement>(null);
+    const thrActive = useRef(false);
+    const rotEl = useRef<HTMLDivElement>(null);
+    const rotActive = useRef(false);
 
     useEffect(() => {
         const check = () => setIsLandscape(window.innerWidth > window.innerHeight);
@@ -26,172 +35,275 @@ const RCDemoPage = () => {
         return () => { window.removeEventListener("resize", check); window.removeEventListener("orientationchange", check); };
     }, []);
 
-    const throttleRef = useRef(0);
-    const directionRef = useRef(0);
-    const motorIntervalRef = useRef<number | null>(null);
-    const lastCommandRef = useRef<{x: number, y: number} | null>(null);
-    const throttleRefEl = useRef<HTMLDivElement>(null);
-    const throttleActiveRef = useRef(false);
-    const directionRefEl = useRef<HTMLDivElement>(null);
-    const directionActiveRef = useRef(false);
-
     const sendCommand = useCallback(() => {
-        const thr = Math.abs(throttleRef.current) < 3 ? 0 : throttleRef.current;
-        const dir = Math.abs(directionRef.current) < 3 ? 0 : directionRef.current;
-        if (lastCommandRef.current && Math.abs(lastCommandRef.current.x - dir) < 5 && Math.abs(lastCommandRef.current.y - thr) < 5) return;
-        lastCommandRef.current = {x: dir, y: thr};
-        controlSocket.sendJoystick(Math.round(dir * 0.5), thr);
+        const t = Math.abs(throttleRef.current) < 3 ? 0 : throttleRef.current;
+        const r = Math.abs(rotationRef.current) < 3 ? 0 : rotationRef.current;
+        if (lastCmdRef.current && Math.abs(lastCmdRef.current.x - r) < 5 && Math.abs(lastCmdRef.current.y - t) < 5) return;
+        lastCmdRef.current = {x: r, y: t};
+        controlSocket.sendJoystick(Math.round(r * 0.5), t);
     }, []);
 
-    const startControl = useCallback(() => {
-        if (motorIntervalRef.current !== null) return;
+    const startMotor = useCallback(() => {
+        if (intervalRef.current !== null) return;
         sendCommand();
-        motorIntervalRef.current = window.setInterval(sendCommand, 30);
+        intervalRef.current = window.setInterval(sendCommand, 30);
     }, [sendCommand]);
 
-    const stopControl = useCallback(() => {
-        if (motorIntervalRef.current !== null) { clearInterval(motorIntervalRef.current); motorIntervalRef.current = null; }
+    const stopMotor = useCallback(() => {
+        if (intervalRef.current !== null) { clearInterval(intervalRef.current); intervalRef.current = null; }
         controlSocket.sendJoystick(0, 0);
         setLeftSpeed(0); setRightSpeed(0);
     }, []);
 
     useEffect(() => {
         controlSocket.connect(setWsConnected, (s) => { setLeftSpeed(s.left); setRightSpeed(s.right); });
-        return () => { stopControl(); controlSocket.close(); navigator.sendBeacon("/api/camera/close"); };
+        return () => { stopMotor(); controlSocket.close(); navigator.sendBeacon("/api/camera/close"); };
     }, []);
 
-    const stickSize = Math.round(38 * scale);
-    const sliderLength = isLandscape ? Math.min(window.innerHeight * 0.55, Math.round(200 * scale)) : Math.min(window.innerWidth * 0.35, Math.round(150 * scale));
-    const sliderWidth = Math.round(44 * scale);
-
-    // 油门（垂直推）
-    const handleThrottleMove = useCallback((_x: number, clientY: number) => {
-        if (!throttleRefEl.current) return;
-        const rect = throttleRefEl.current.getBoundingClientRect();
-        const maxDist = rect.height / 2 - stickSize / 2 - 4;
-        const dist = Math.max(-maxDist, Math.min(maxDist, clientY - (rect.top + rect.height / 2)));
-        const thr = Math.round((-dist / maxDist) * 100);
-        throttleRef.current = thr; setThrottleDisplay(thr);
-        if (thr !== 0 && !throttleActiveRef.current) { throttleActiveRef.current = true; startControl(); }
-    }, [startControl, stickSize]);
-
-    const handleThrottleEnd = useCallback(() => { throttleRef.current = 0; throttleActiveRef.current = false; setThrottleDisplay(0); }, []);
-
-    // 方向（水平推）
-    const handleDirectionMove = useCallback((clientX: number, _y: number) => {
-        if (!directionRefEl.current) return;
-        const rect = directionRefEl.current.getBoundingClientRect();
-        const maxDist = rect.width / 2 - stickSize / 2 - 4;
-        const dist = Math.max(-maxDist, Math.min(maxDist, clientX - (rect.left + rect.width / 2)));
-        const dir = Math.round((dist / maxDist) * 100);
-        directionRef.current = dir; setDirectionDisplay(dir);
-        if (dir !== 0 && !directionActiveRef.current) { directionActiveRef.current = true; startControl(); }
-    }, [startControl, stickSize]);
-
-    const handleDirectionEnd = useCallback(() => { directionRef.current = 0; directionActiveRef.current = false; setDirectionDisplay(0); }, []);
-
     const handleBrake = () => {
-        throttleRef.current = 0; directionRef.current = 0;
-        setThrottleDisplay(0); setDirectionDisplay(0);
-        throttleActiveRef.current = false; directionActiveRef.current = false;
-        stopControl();
+        throttleRef.current = 0; rotationRef.current = 0;
+        setThrottle(0); setRotation(0);
+        thrActive.current = false; rotActive.current = false;
+        stopMotor();
     };
 
-    const handleArm = async (action: "grab" | "release") => { try { await api.motor.action(action); } catch {} };
+    const handleArm = async (a: "grab" | "release") => { try { await api.motor.action(a); } catch {} };
 
-    const videoMaxW = isLandscape
-        ? Math.min(window.innerWidth * 0.45, Math.round(400 * scale))
-        : Math.min(window.innerWidth - 24, Math.round(360 * scale));
+    // ---- 控制条尺寸 ----
+    const stickR = Math.round(18 * scale);
 
+    // 竖屏
+    const pThrottleW = Math.round(50 * scale);
+    const pThrottleH = Math.min(Math.round(window.innerHeight * 0.28), Math.round(200 * scale));
+    const pRotW = Math.round((window.innerWidth - 48) / 2);
+    const pRotH = Math.round(52 * scale);
+
+    // 横屏 — 控制条更大
+    const lThrottleW = Math.round(60 * scale);
+    const lThrottleH = Math.min(Math.round(window.innerHeight * 0.5), Math.round(260 * scale));
+    const lRotW = Math.round(180 * scale);
+    const lRotH = Math.round(60 * scale);
+
+    const throttleW = isLandscape ? lThrottleW : pThrottleW;
+    const throttleH = isLandscape ? lThrottleH : pThrottleH;
+    const rotW = isLandscape ? lRotW : pRotW;
+    const rotH = isLandscape ? lRotH : pRotH;
+
+    const throttleMax = throttleH / 2 - stickR - 4;
+    const rotMax = rotW / 2 - stickR - 4;
+
+    // ---- 油门（垂直推） ----
+    const handleThrottleMove = useCallback((_x: number, clientY: number) => {
+        if (!thrEl.current) return;
+        const {top, height} = thrEl.current.getBoundingClientRect();
+        const dist = Math.max(-throttleMax, Math.min(throttleMax, clientY - (top + height / 2)));
+        const v = Math.round((-dist / throttleMax) * 100);
+        throttleRef.current = v; setThrottle(v);
+        if (v !== 0 && !thrActive.current) { thrActive.current = true; startMotor(); }
+    }, [throttleMax, startMotor]);
+
+    const handleThrottleEnd = useCallback(() => { throttleRef.current = 0; thrActive.current = false; setThrottle(0); }, []);
+
+    // ---- 方向（水平推） ----
+    const handleRotationMove = useCallback((clientX: number, _y: number) => {
+        if (!rotEl.current) return;
+        const {left, width} = rotEl.current.getBoundingClientRect();
+        const dist = Math.max(-rotMax, Math.min(rotMax, clientX - (left + width / 2)));
+        const v = Math.round((dist / rotMax) * 100);
+        rotationRef.current = v; setRotation(v);
+        if (v !== 0 && !rotActive.current) { rotActive.current = true; startMotor(); }
+    }, [rotMax, startMotor]);
+
+    const handleRotationEnd = useCallback(() => { rotationRef.current = 0; rotActive.current = false; setRotation(0); }, []);
+
+    // ---- 滑块条渲染 ----
     const renderSlider = (
-        refEl: React.RefObject<HTMLDivElement | null>,
-        vertical: boolean, display: number,
-        activeColor: string, idleColor: string,
+        ref: React.RefObject<HTMLDivElement | null>,
+        vert: boolean, w: number, h: number,
+        val: number, color: string,
         onMove: (cx: number, cy: number) => void, onEnd: () => void,
-        label: string, posLabel: string, negLabel: string,
-    ) => (
-        <div style={{...S.col, gap: scalePx(4)}}>
-            <span style={{fontSize: scalePx(9), color: "var(--color-text-dim)", textTransform: "uppercase", letterSpacing: "1px"}}>{label}</span>
-            <div ref={refEl}
-                 onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); onMove(e.clientX, e.clientY); }}
-                 onPointerMove={e => onMove(e.clientX, e.clientY)}
-                 onPointerUp={onEnd} onPointerLeave={onEnd} onPointerCancel={onEnd}
-                 style={{
-                     width: vertical ? sliderWidth : sliderLength, height: vertical ? sliderLength : sliderWidth,
-                     borderRadius: "var(--radius-xl)", background: "var(--color-bg-card)", border: "2px solid var(--color-border)",
-                     position: "relative", touchAction: "none", cursor: "pointer",
-                 }}>
-                <div style={{position: "absolute", left: vertical ? "50%" : 0, top: vertical ? 0 : "50%", transform: vertical ? "translateX(-50%)" : "translateY(-50%)", width: vertical ? "2px" : "100%", height: vertical ? "100%" : "1px", background: "var(--color-border-light)"}} />
+    ) => {
+        const md = ((vert ? h : w) / 2 - stickR - 4);
+        const pct = md > 0 ? (val / 100) * md : 0;
+        const active = Math.abs(val) > 5;
+
+        return (
+            <div
+                ref={ref}
+                onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); onMove(e.clientX, e.clientY); }}
+                onPointerMove={e => onMove(e.clientX, e.clientY)}
+                onPointerUp={onEnd} onPointerLeave={onEnd} onPointerCancel={onEnd}
+                style={{
+                    width: w, height: h,
+                    borderRadius: scalePx(20),
+                    background: "var(--color-bg-card)",
+                    border: `2px solid ${active ? color : "var(--color-border)"}`,
+                    position: "relative", touchAction: "none", cursor: "pointer",
+                    flexShrink: 0, transition: "border-color 0.2s",
+                }}
+            >
+                {/* 中心线 */}
                 <div style={{
-                    position: "absolute", width: stickSize, height: stickSize, borderRadius: "50%",
-                    background: display !== 0 ? activeColor : idleColor, border: "3px solid var(--color-border)",
-                    left: vertical ? "50%" : `${50 + display / 100 * 50}%`,
-                    top: vertical ? `${50 - display / 100 * 50}%` : "50%",
-                    transform: "translate(-50%, -50%)", boxShadow: "0 2px 8px rgba(0,0,0,0.35)", transition: display === 0 ? "background 0.3s" : "none",
+                    position: "absolute",
+                    left: vert ? "50%" : 0, top: vert ? 0 : "50%",
+                    transform: vert ? "translateX(-50%)" : "translateY(-50%)",
+                    width: vert ? 2 : "100%", height: vert ? "100%" : 2,
+                    background: "var(--color-border-light)",
+                }} />
+                {/* 滑块 */}
+                <div style={{
+                    position: "absolute",
+                    width: stickR * 2, height: stickR * 2, borderRadius: "50%",
+                    background: active ? color : "var(--color-bg-elevated)",
+                    border: `2px solid ${active ? color : "var(--color-border)"}`,
+                    left: vert ? "50%" : `calc(50% + ${pct}px)`,
+                    top: vert ? `calc(50% - ${pct}px)` : "50%",
+                    transform: "translate(-50%, -50%)",
+                    boxShadow: active ? `0 0 10px ${color}55` : "0 2px 6px rgba(0,0,0,0.3)",
+                    transition: val === 0 ? "all 0.3s ease" : "none",
                 }} />
             </div>
-            <span style={{fontSize: scalePx(10), color: "var(--color-text-muted)", fontWeight: 600}}>
-                {display > 0 ? posLabel : display < 0 ? negLabel : "·"} {Math.abs(display)}%
-            </span>
+        );
+    };
+
+    // ---- 视频 ----
+    const videoW = isLandscape
+        ? Math.min(window.innerWidth * 0.4, Math.round(340 * scale))
+        : Math.min(window.innerWidth - 20, Math.round(340 * scale));
+    const videoH = Math.round(videoW * 0.5625);
+
+    const CameraBar = () => (
+        <div style={{...S.row, gap: scalePx(6)}}>
+            <CameraToggle onStatusChange={setCameraOn} />
+            {cameraOn && (
+                <button onClick={() => setFpsIndex(i => (i + 1) % 3)} style={{
+                    background: fpsIndex > 0 ? "var(--color-success)" : "var(--color-bg-elevated)",
+                    border: `1px solid ${fpsIndex > 0 ? "var(--color-success)" : "var(--color-border)"}`,
+                    color: fpsIndex > 0 ? "#fff" : "var(--color-text-muted)",
+                    padding: `${scalePx(2)} ${scalePx(6)}`, borderRadius: "var(--radius-sm)",
+                    fontSize: scalePx(9), fontWeight: 600, cursor: "pointer", outline: "none",
+                }}>
+                    {FPS_LABELS[fpsIndex]}
+                </button>
+            )}
         </div>
     );
 
-    return (
-        <Page center padTop={6}>
-            {/* 横屏 */}
-            {isLandscape ? (
-                <div style={{display: "flex", alignItems: "center", justifyContent: "center", gap: scalePx(6), minHeight: `calc(100dvh - var(--tab-bar-height) - 56px)`}}>
-                    {renderSlider(directionRefEl, false, directionDisplay, "var(--color-primary)", "var(--color-bg-elevated)", handleDirectionMove, handleDirectionEnd, "方向", "→", "←")}
-                    <div style={{...S.col, gap: scalePx(4), flex: 1}}>
-                        <div style={{...S.row, gap: scalePx(8)}}>
-                            <span style={S.muted}>摄像头</span><CameraToggle onStatusChange={setCameraOn} />
-                            {cameraOn && <button onClick={() => setFpsIndex((fpsIndex + 1) % 3)} style={{background: fpsIndex > 0 ? "var(--color-success)" : "var(--color-bg-elevated)", border: `1px solid ${fpsIndex > 0 ? "var(--color-success)" : "var(--color-border)"}`, color: fpsIndex > 0 ? "#fff" : "var(--color-text-muted)", padding: `${scalePx(1)} ${scalePx(5)}`, borderRadius: "var(--radius-sm)", fontSize: scalePx(9), fontWeight: 600, cursor: "pointer"}}>{FPS_LABELS[fpsIndex]}</button>}
-                        </div>
-                        <div style={{borderRadius: "var(--radius-md)", overflow: "hidden", border: "2px solid var(--color-border)"}}>
-                            {cameraOn ? <img src={`/api/camera/stream?fps=${FPS_OPTIONS[fpsIndex]}`} alt="Camera" style={{width: videoMaxW, height: Math.round(videoMaxW * 0.5625), objectFit: "cover", background: "#000", display: "block"}} />
-                                : <div style={{width: videoMaxW, height: Math.round(videoMaxW * 0.5625), background: "var(--color-bg-card)", ...S.col, justifyContent: "center", color: "var(--color-text-muted)", fontSize: scalePx(12)}}>摄像头关闭</div>}
-                        </div>
-                        <div style={{...S.row, gap: scalePx(12), fontSize: scalePx(11)}}>
-                            <span>左 <b style={S.success}>{leftSpeed >= 0 ? "+" : ""}{leftSpeed.toFixed(2)}</b></span>
-                            <span>右 <b style={S.success}>{rightSpeed >= 0 ? "+" : ""}{rightSpeed.toFixed(2)}</b></span>
-                            <span style={S.dot(wsConnected)} />
-                        </div>
-                    </div>
-                    {renderSlider(throttleRefEl, true, throttleDisplay, "var(--color-success)", "var(--color-bg-elevated)", handleThrottleMove, handleThrottleEnd, "油门", "▲", "▼")}
-                </div>
+    const VideoBox = () => (
+        <div style={{borderRadius: "var(--radius-md)", overflow: "hidden", border: "2px solid var(--color-border)", flexShrink: 0}}>
+            {cameraOn ? (
+                <img src={`/api/camera/stream?fps=${FPS_OPTIONS[fpsIndex]}`} alt="Camera"
+                     style={{width: videoW, height: videoH, objectFit: "cover", background: "#000", display: "block"}} />
             ) : (
-                /* 竖屏 */
-                <div style={{...S.col, gap: scalePx(6)}}>
-                    <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", maxWidth: videoMaxW}}>
-                        <h3 style={{fontSize: scalePx(14), fontWeight: 600, margin: 0}}>摇杆驾驶</h3>
-                        <div style={{...S.row, gap: scalePx(6)}}>
-                            {cameraOn && <button onClick={() => setFpsIndex((fpsIndex + 1) % 3)} style={{background: fpsIndex > 0 ? "var(--color-success)" : "var(--color-bg-elevated)", border: `1px solid ${fpsIndex > 0 ? "var(--color-success)" : "var(--color-border)"}`, color: fpsIndex > 0 ? "#fff" : "var(--color-text-muted)", padding: `${scalePx(1)} ${scalePx(5)}`, borderRadius: "var(--radius-sm)", fontSize: scalePx(9), fontWeight: 600, cursor: "pointer"}}>{FPS_LABELS[fpsIndex]}</button>}
-                            <span style={S.muted}>摄像头</span><CameraToggle onStatusChange={setCameraOn} />
-                        </div>
-                    </div>
-                    <div style={{borderRadius: "var(--radius-md)", overflow: "hidden", border: "2px solid var(--color-border)"}}>
-                        {cameraOn ? <img src={`/api/camera/stream?fps=${FPS_OPTIONS[fpsIndex]}`} alt="Camera" style={{width: videoMaxW, height: Math.round(videoMaxW * 0.5625), objectFit: "cover", background: "#000", display: "block"}} />
-                            : <div style={{width: videoMaxW, height: Math.round(videoMaxW * 0.5625), background: "var(--color-bg-card)", ...S.col, justifyContent: "center", color: "var(--color-text-muted)", fontSize: scalePx(12)}}>摄像头关闭</div>}
-                    </div>
-                    <div style={{...S.row, gap: scalePx(12), fontSize: scalePx(11)}}>
-                        <span>左 <b style={S.success}>{leftSpeed >= 0 ? "+" : ""}{leftSpeed.toFixed(2)}</b></span>
-                        <span>右 <b style={S.success}>{rightSpeed >= 0 ? "+" : ""}{rightSpeed.toFixed(2)}</b></span>
-                        <span style={S.dot(wsConnected)} />
-                    </div>
-                    <div style={{display: "flex", gap: scalePx(16)}}>
-                        {renderSlider(throttleRefEl, true, throttleDisplay, "var(--color-success)", "var(--color-bg-elevated)", handleThrottleMove, handleThrottleEnd, "油门", "▲", "▼")}
-                        {renderSlider(directionRefEl, false, directionDisplay, "var(--color-primary)", "var(--color-bg-elevated)", handleDirectionMove, handleDirectionEnd, "方向", "→", "←")}
-                    </div>
+                <div style={{width: videoW, height: videoH, background: "var(--color-bg-card)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-text-muted)", fontSize: scalePx(12)}}>
+                    摄像头关闭
                 </div>
             )}
+        </div>
+    );
 
-            {/* 按钮组 */}
-            <div style={{...S.col, gap: scalePx(6), maxWidth: isLandscape ? Math.round(videoMaxW + sliderLength + 120) : videoMaxW, marginTop: scalePx(8)}}>
-                <div style={{display: "flex", gap: scalePx(8), width: "100%"}}>
-                    <button onClick={() => handleArm("grab")} style={{flex: 1, padding: `${scalePx(8)} 0`, background: "linear-gradient(135deg, #16a34a, var(--color-success))", border: "none", color: "#fff", borderRadius: "var(--radius-md)", fontSize: scalePx(14), fontWeight: 700, letterSpacing: "1px", boxShadow: "0 3px 8px rgba(34,197,94,0.3)", cursor: "pointer", outline: "none"}}>✋ 抓取</button>
-                    <button onClick={() => handleArm("release")} style={{flex: 1, padding: `${scalePx(8)} 0`, background: "linear-gradient(135deg, #2563eb, var(--color-primary))", border: "none", color: "#fff", borderRadius: "var(--radius-md)", fontSize: scalePx(14), fontWeight: 700, letterSpacing: "1px", boxShadow: "0 3px 8px rgba(59,130,246,0.3)", cursor: "pointer", outline: "none"}}>🤚 释放</button>
+    const SpeedBar = () => (
+        <div style={{...S.row, gap: scalePx(12), fontSize: scalePx(10)}}>
+            <span>左 <b style={S.success}>{leftSpeed >= 0 ? "+" : ""}{leftSpeed.toFixed(1)}</b></span>
+            <span>右 <b style={S.success}>{rightSpeed >= 0 ? "+" : ""}{rightSpeed.toFixed(1)}</b></span>
+            <span style={S.dot(wsConnected)} />
+        </div>
+    );
+
+    const btnGrab: React.CSSProperties = {
+        flex: 1, padding: "16px 0", fontSize: 18, fontWeight: 700,
+        background: "linear-gradient(135deg, #16a34a, #22c55e)",
+        border: "none", color: "#fff", borderRadius: "var(--radius-md)",
+        letterSpacing: "2px", boxShadow: "0 4px 14px rgba(34,197,94,0.35)",
+        cursor: "pointer", outline: "none", flexShrink: 0,
+    };
+    const btnRelease: React.CSSProperties = {
+        ...btnGrab,
+        background: "linear-gradient(135deg, #2563eb, #3b82f6)",
+        boxShadow: "0 4px 14px rgba(59,130,246,0.35)",
+    };
+    const btnBrake: React.CSSProperties = {
+        width: "100%", padding: "10px 0", fontSize: 14, fontWeight: 700,
+        background: "var(--color-danger-soft)",
+        border: "2px solid var(--color-danger)", color: "var(--color-danger)",
+        borderRadius: "var(--radius-md)", letterSpacing: "2px",
+        cursor: "pointer", outline: "none", flexShrink: 0,
+    };
+
+    // ---- 横屏 ----
+    if (isLandscape) {
+        return (
+            <Page center padTop={4}>
+                <div style={{display: "flex", alignItems: "center", justifyContent: "center", gap: scalePx(8), minHeight: `calc(100dvh - var(--tab-bar-height) - 16px)`}}>
+                    {/* 左：油门（垂直条） */}
+                    <div style={{...S.col, gap: scalePx(4)}}>
+                        <span style={{fontSize: scalePx(9), color: "var(--color-text-dim)", letterSpacing: "1px"}}>油门</span>
+                        {renderSlider(thrEl, true, throttleW, throttleH, throttle, "var(--color-success)", handleThrottleMove, handleThrottleEnd)}
+                        <span style={{fontSize: scalePx(10), fontWeight: 600, color: Math.abs(throttle) > 5 ? "var(--color-success)" : "var(--color-text-muted)"}}>
+                            {throttle > 5 ? "▲" : throttle < -5 ? "▼" : "·"} {Math.abs(throttle)}%
+                        </span>
+                    </div>
+
+                    {/* 中：视频 + 按钮 */}
+                    <div style={{...S.col, gap: scalePx(8), flex: 1}}>
+                        <CameraBar />
+                        <VideoBox />
+                        <SpeedBar />
+                        <div style={{display: "flex", gap: scalePx(10), flexShrink: 0}}>
+                            <button onClick={() => handleArm("grab")} style={btnGrab}>✋ 抓取</button>
+                            <button onClick={() => handleArm("release")} style={btnRelease}>🤚 释放</button>
+                        </div>
+                        <button onClick={handleBrake} style={btnBrake}>⏹ 刹车</button>
+                    </div>
+
+                    {/* 右：方向（水平条） */}
+                    <div style={{...S.col, gap: scalePx(4)}}>
+                        <span style={{fontSize: scalePx(9), color: "var(--color-text-dim)", letterSpacing: "1px"}}>方向</span>
+                        {renderSlider(rotEl, false, rotW, rotH, rotation, "var(--color-primary)", handleRotationMove, handleRotationEnd)}
+                        <span style={{fontSize: scalePx(10), fontWeight: 600, color: Math.abs(rotation) > 5 ? "var(--color-primary)" : "var(--color-text-muted)"}}>
+                            {rotation > 5 ? "→" : rotation < -5 ? "←" : "·"} {Math.abs(rotation)}%
+                        </span>
+                    </div>
                 </div>
-                <button onClick={handleBrake} style={{width: "100%", padding: `${scalePx(7)} 0`, background: "var(--color-danger-soft)", border: "2px solid var(--color-danger)", color: "var(--color-danger)", borderRadius: "var(--radius-md)", fontSize: scalePx(13), fontWeight: 700, letterSpacing: "1px", cursor: "pointer", outline: "none"}}>⏹ 刹车</button>
+            </Page>
+        );
+    }
+
+    // ---- 竖屏 ----
+    return (
+        <Page center padTop={6}>
+            <div style={{...S.col, gap: scalePx(8)}}>
+                <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", maxWidth: videoW}}>
+                    <h3 style={{fontSize: scalePx(14), fontWeight: 600, margin: 0}}>摇杆驾驶</h3>
+                    <CameraBar />
+                </div>
+                <VideoBox />
+                <SpeedBar />
+
+                {/* 按钮 — 居中 */}
+                <div style={{display: "flex", gap: scalePx(12), width: "100%", maxWidth: videoW}}>
+                    <button onClick={() => handleArm("grab")} style={btnGrab}>✋ 抓取</button>
+                    <button onClick={() => handleArm("release")} style={btnRelease}>🤚 释放</button>
+                </div>
+                <button onClick={handleBrake} style={{...btnBrake, maxWidth: videoW}}>⏹ 刹车</button>
+
+                {/* 控制条并排 */}
+                <div style={{display: "flex", gap: scalePx(12), justifyContent: "center", alignItems: "flex-start"}}>
+                    <div style={{...S.col, gap: scalePx(4)}}>
+                        <span style={{fontSize: scalePx(9), color: "var(--color-text-dim)", letterSpacing: "1px"}}>油门</span>
+                        {renderSlider(thrEl, true, throttleW, throttleH, throttle, "var(--color-success)", handleThrottleMove, handleThrottleEnd)}
+                        <span style={{fontSize: scalePx(10), fontWeight: 600, color: Math.abs(throttle) > 5 ? "var(--color-success)" : "var(--color-text-muted)"}}>
+                            {throttle > 5 ? "▲" : throttle < -5 ? "▼" : "·"} {Math.abs(throttle)}%
+                        </span>
+                    </div>
+                    <div style={{...S.col, gap: scalePx(4)}}>
+                        <span style={{fontSize: scalePx(9), color: "var(--color-text-dim)", letterSpacing: "1px"}}>方向</span>
+                        {renderSlider(rotEl, false, rotW, rotH, rotation, "var(--color-primary)", handleRotationMove, handleRotationEnd)}
+                        <span style={{fontSize: scalePx(10), fontWeight: 600, color: Math.abs(rotation) > 5 ? "var(--color-primary)" : "var(--color-text-muted)"}}>
+                            {rotation > 5 ? "→" : rotation < -5 ? "←" : "·"} {Math.abs(rotation)}%
+                        </span>
+                    </div>
+                </div>
             </div>
         </Page>
     );

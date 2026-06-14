@@ -45,7 +45,7 @@ const ControlButton = ({
             : size === "wide"
             ? {width: "40vw", height: scalePx(60), maxWidth: scalePx(200)}
             : size === "full"
-            ? {flex: 1, height: scalePx(52), width: "100%"}
+            ? {flex: 1, minHeight: scalePx(64), width: "100%"}
             : {padding: `${scalePx(7)} ${scalePx(14)}`, fontSize: scalePx(11), height: scalePx(36)};
 
     const handlePressStart = () => {

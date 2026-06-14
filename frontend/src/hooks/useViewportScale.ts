@@ -3,7 +3,7 @@ import {useCallback, useEffect, useState} from "react";
 // 基准 375px（移动端设计标准宽度），以此为基准等比缩放
 // 更窄的屏幕缩小，更宽的屏幕适度放大（上限 1.2，避免平板等大屏上 UI 元素过大）
 const DEFAULT_BASE = 375;
-const DEFAULT_MAX = 1.2;
+const DEFAULT_MAX = 1.5;
 const DEFAULT_MIN = 0.7;
 
 function computeScale(base: number, max: number, min: number): number {

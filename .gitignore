@@ -4,4 +4,4 @@ static
 output/
 checkpoints/
 dora
-dist/
+dist/.DS_Store

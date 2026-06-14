@@ -1,5 +1,4 @@
 import React from "react";
-import {useViewportScale} from "../hooks/useViewportScale";
 
 interface PageProps {
     children: React.ReactNode;
@@ -12,12 +11,13 @@ interface PageProps {
 /**
  * 页面容器 — 统一的外壳，处理 padding、动画、滚动
  */
-const Page: React.FC<PageProps> = ({children, center = true, padTop = 12}) => {
-    const {scalePx} = useViewportScale();
+const Page: React.FC<PageProps> = ({children, center = true}) => {
     return (
         <div
             style={{
-                padding: `${scalePx(padTop)} ${scalePx(12)} ${scalePx(24)}`,
+                height: "100%",
+                width: "100%",
+                padding: "0 30px 0 30px",
                 color: "var(--color-text)",
                 animation: "fadeIn 0.25s ease-out",
                 ...(center ? {display: "flex", flexDirection: "column", alignItems: "center"} : {}),

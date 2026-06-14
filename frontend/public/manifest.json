@@ -1,7 +1,7 @@
 {
-    "name": "AKA-00 智能控制",
-    "short_name": "AKA-00",
-    "description": "AKA-00 机器人控制面板",
+    "name": "辰龙机器人控制台",
+    "short_name": "辰龙机器人",
+    "description": "辰龙机器人控制面板",
     "start_url": "/",
     "display": "standalone",
     "orientation": "portrait",
