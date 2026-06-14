@@ -1,10 +1,14 @@
 #!/bin/bash
-# Build a standalone executable for SG2002 deployment.
-# Output: dist/aka-server — copy to board, chmod +x, run directly.
+# Build release packages for SG2002 deployment.
 #
 # Usage:
-#   ./build_release.sh              # build with existing static/
+#   ./build_release.sh              # aka-server (self-extracting, for scp deploy)
 #   ./build_release.sh --rebuild    # rebuild frontend then package
+#   ./build_release.sh --ota        # also generate aka-ota.tar.gz (for OTA pull)
+#
+# Output:
+#   dist/aka-server     — self-extracting executable for first-time deploy
+#   dist/aka-ota.tar.gz — OTA package for /api/ota/upgrade (upload to GitHub Releases)
 
 set -e
 
@@ -67,6 +71,10 @@ exec ./init.sh
 #__PAYLOAD_BELOW__
 HEADER
 
+# Generate VERSION (for both build modes)
+git -C "$SCRIPT_DIR" describe --tags --always --dirty 2>/dev/null > "$SCRIPT_DIR/VERSION" || \
+    echo "dev-$(date +%Y%m%d%H%M)" > "$SCRIPT_DIR/VERSION"
+
 # Append payload (base64-encoded tar.gz)
 echo "Packaging project..."
 cd "$SCRIPT_DIR"
@@ -94,11 +102,61 @@ COPYFILE_DISABLE=1 tar cz \
 
 chmod +x "$OUTPUT"
 echo "Done: $OUTPUT ($(du -h "$OUTPUT" | cut -f1))"
+
+# Clean up temp VERSION
+rm -f "$SCRIPT_DIR/VERSION"
+
+# ---- OTA package (tar.gz) ----
+if [ "$1" = "--ota" ] || [ "$2" = "--ota" ]; then
+    OTA_PKG="$SCRIPT_DIR/dist/aka-ota.tar.gz"
+
+    # Generate VERSION file from git tag
+    git -C "$SCRIPT_DIR" describe --tags --always --dirty 2>/dev/null > "$SCRIPT_DIR/VERSION" || \
+        echo "dev-$(date +%Y%m%d%H%M)" > "$SCRIPT_DIR/VERSION"
+
+    echo "Building OTA package..."
+    COPYFILE_DISABLE=1 tar czf "$OTA_PKG" \
+        --exclude='dora' \
+        --exclude='frontend' \
+        --exclude='node_modules' \
+        --exclude='dist' \
+        --exclude='.git' \
+        --exclude='__pycache__' \
+        --exclude='*.pyc' \
+        --exclude='images' \
+        --exclude='docs' \
+        --exclude='tests' \
+        --exclude='output' \
+        --exclude='checkpoints' \
+        --exclude='*.zip' \
+        --exclude='*.pdf' \
+        --exclude='.claude' \
+        --exclude='.vscode' \
+        --exclude='.idea' \
+        --exclude='build_release.sh' \
+        --exclude='hardware' \
+        .
+
+    # Clean up temp VERSION file (it's baked into the tar.gz)
+    rm -f "$SCRIPT_DIR/VERSION"
+
+    echo "Done: $OTA_PKG ($(du -h "$OTA_PKG" | cut -f1))"
+    echo ""
+    echo "Upload to GitHub Releases:"
+    echo "  gh release create vX.Y.Z $OTA_PKG --title 'vX.Y.Z'"
+    echo ""
+    echo "Or upload manually at:"
+    echo "  https://github.com/chenlongos/AKA-00/releases/new"
+fi
+
 echo ""
-echo "Deploy:"
+echo "Deploy (first time):"
 echo "  scp $OUTPUT root@<robot>:/usr/local/bin/"
 echo "  ssh root@<robot> 'aka-server --init'   # first time only"
-echo "  ssh root@<robot> 'aka-server'          # normal run"
 echo ""
-echo "Update:"
-echo "  ssh root@<robot> 'rm -rf /root/AKA-00'  # then copy and run again"
+echo "Update (push):"
+echo "  scp $OUTPUT root@<robot>:/usr/local/bin/"
+echo "  ssh root@<robot> 'rm -rf /root/AKA-00 && aka-server'"
+echo ""
+echo "Update (OTA pull):"
+echo "  机器人连接 http://192.168.4.1/ota → 在线更新"
