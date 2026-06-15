@@ -2,18 +2,18 @@
 # Build release packages for SG2002 deployment.
 #
 # Usage:
-#   ./build_release.sh              # aka-server (self-extracting, for scp deploy)
+#   ./build_release.sh              # aka-00-server (self-extracting, for scp deploy)
 #   ./build_release.sh --rebuild    # rebuild frontend then package
 #   ./build_release.sh --ota        # also generate aka-ota.tar.gz (for OTA pull)
 #
 # Output:
-#   dist/aka-server     — self-extracting executable for first-time deploy
+#   dist/aka-00-server     — self-extracting executable for first-time deploy
 #   dist/aka-ota.tar.gz — OTA package for /api/ota/upgrade (upload to GitHub Releases)
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-OUTPUT="$SCRIPT_DIR/dist/aka-server"
+OUTPUT="$SCRIPT_DIR/dist/aka-00-server"
 mkdir -p "$SCRIPT_DIR/dist"
 
 # Build frontend if needed
@@ -25,8 +25,8 @@ fi
 
 # Create the self-extracting executable.
 # Supports two modes:
-#   aka-server          — normal run (extract if first time, then start server)
-#   aka-server --init   — first-time setup (extract + AP hotspot + DHCP + auto-start)
+#   aka-00-server          — normal run (extract if first time, then start server)
+#   aka-00-server --init   — first-time setup (extract + AP hotspot + DHCP + auto-start)
 cat > "$OUTPUT" <<'HEADER'
 #!/bin/sh
 # AKA-00 Server
@@ -152,11 +152,11 @@ fi
 echo ""
 echo "Deploy (first time):"
 echo "  scp $OUTPUT root@<robot>:/usr/local/bin/"
-echo "  ssh root@<robot> 'aka-server --init'   # first time only"
+echo "  ssh root@<robot> 'aka-00-server --init'   # first time only"
 echo ""
 echo "Update (push):"
 echo "  scp $OUTPUT root@<robot>:/usr/local/bin/"
-echo "  ssh root@<robot> 'rm -rf /root/AKA-00 && aka-server'"
+echo "  ssh root@<robot> 'rm -rf /root/AKA-00 && aka-00-server'"
 echo ""
 echo "Update (OTA pull):"
 echo "  机器人连接 http://192.168.4.1/ota → 在线更新"
