@@ -128,7 +128,7 @@ const ArmAnglesPage = () => {
             <Header
                 title="舵机角度配置"
                 subtitle={<span>当前驱动: <b>{driver}</b></span>}
-                showClose
+                showClose closeTo="/settings"
                 actions={
                     <button onClick={saveConfig} disabled={saving}
                             style={{color: saving ? "var(--color-text-dim)" : "var(--color-primary)", fontSize: scalePx(14), fontWeight: 600, background: "none", border: "none", cursor: saving ? "not-allowed" : "pointer"}}>

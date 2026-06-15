@@ -77,6 +77,7 @@ const WiFiConfigPage = () => {
             <Header
                 title="无线局域网"
                 subtitle={connectionStatus}
+                showClose closeTo="/settings"
                 actions={
                     <span onClick={loadList}
                           style={{color: scanning || connecting ? "var(--color-text-dim)" : "var(--color-primary)", fontSize: scalePx(14), fontWeight: 600, cursor: scanning || connecting ? "not-allowed" : "pointer", userSelect: "none"}}>

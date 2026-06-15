@@ -107,7 +107,7 @@ const OTAPage = () => {
             color: "#1c1c1e",
             background: "#f2f2f7",
         } as React.CSSProperties}>
-            <Header title="固件升级" showClose />
+            <Header title="固件升级" showClose closeTo="/settings" />
 
             <div style={{padding: scalePx(12)}}>
                 {/* 版本信息 */}
