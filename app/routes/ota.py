@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import tarfile
+import threading
 import urllib.request
 from flask import Blueprint, request, jsonify
 
@@ -12,6 +13,9 @@ ota_bp = Blueprint("ota", __name__, url_prefix="/api/ota")
 APP_DIR = "/root/AKA-00"
 OTA_DIR = os.path.join(APP_DIR, ".ota")
 VERSION_FILE = os.path.join(APP_DIR, "VERSION")
+
+# 进度追踪（task_id → {progress, status, message}）
+_upgrade_tasks = {}
 
 # ---- 拉取配置 ----
 # GitHub Releases API
@@ -37,6 +41,15 @@ def _version():
 @ota_bp.route("/version")
 def version():
     return jsonify({"version": _version(), "service": "AKA-00"})
+
+
+@ota_bp.route("/upgrade/progress")
+def upgrade_progress():
+    task_id = request.args.get("task_id", "")
+    task = _upgrade_tasks.get(task_id)
+    if not task:
+        return jsonify({"progress": 0, "status": "unknown"})
+    return jsonify(task)
 
 
 @ota_bp.route("/check")
@@ -77,38 +90,48 @@ def check():
 
 @ota_bp.route("/upgrade", methods=["POST"])
 def upgrade():
-    """从远端下载最新固件并安装（拉取模式）"""
-    # 先查到最新版本信息
+    """从远端下载最新固件并安装（拉取模式，异步+进度）"""
     try:
         info = _fetch_release_info()
     except Exception as e:
-        return jsonify({"status": "error", "message": f"无法连接: {e}"}), 502
+        return jsonify({"status": "error", "message": f"无法连接更新服务器: {e}"}), 502
 
     if info is None:
         return jsonify({"status": "error", "message": "未找到可用更新"}), 404
 
-    if info["version"] == _version():
+    if info.get("version") == _version():
         return jsonify({"status": "ok", "message": "已是最新版本", "version": _version()})
 
-    download_url = info["url"]
+    download_url = info.get("url", "")
     if not download_url:
-        return jsonify({"status": "error", "message": "固件下载地址为空"}), 500
+        return jsonify({"status": "error", "message": "固件下载地址为空，请检查更新源配置"}), 500
 
-    # 下载到临时文件
-    os.makedirs(OTA_DIR, exist_ok=True)
-    tmp_path = os.path.join(OTA_DIR, "download.tmp")
+    import uuid
+    task_id = uuid.uuid4().hex[:8]
+    _upgrade_tasks[task_id] = {"progress": 0, "status": "downloading", "message": "准备下载..."}
 
-    try:
-        _download(download_url, tmp_path)
-        _install(tmp_path)
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-    finally:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+    def _do_upgrade():
+        try:
+            os.makedirs(OTA_DIR, exist_ok=True)
+            tmp_path = os.path.join(OTA_DIR, f"download_{task_id}.tmp")
+            total_size = info.get("size", 0)
 
-    _restart()
-    return jsonify({"status": "ok", "message": "updated, restarting...", "version": info["version"]})
+            _upgrade_tasks[task_id] = {"progress": 0, "status": "downloading", "message": "正在下载固件..."}
+            _download_with_progress(download_url, tmp_path, task_id, total_size)
+
+            _upgrade_tasks[task_id] = {"progress": 100, "status": "installing", "message": "正在安装..."}
+            _install(tmp_path)
+
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+            _upgrade_tasks[task_id] = {"progress": 100, "status": "done", "message": "安装完成，即将重启"}
+            _restart()
+        except Exception as e:
+            _upgrade_tasks[task_id] = {"progress": 0, "status": "error", "message": str(e)}
+
+    threading.Thread(target=_do_upgrade, daemon=True).start()
+    return jsonify({"status": "ok", "task_id": task_id})
 
 
 # ============================================================
@@ -117,13 +140,16 @@ def upgrade():
 
 @ota_bp.route("/update", methods=["POST"])
 def update():
-    """本地上传固件文件并安装"""
+    """本地上传固件文件并安装（异步+进度）"""
     file = request.files.get("firmware")
     if not file or file.filename == "":
         return jsonify({"status": "error", "message": "no firmware file"}), 400
 
+    import uuid
+    task_id = uuid.uuid4().hex[:8]
+
     os.makedirs(OTA_DIR, exist_ok=True)
-    tmp_path = os.path.join(OTA_DIR, "upload.tmp")
+    tmp_path = os.path.join(OTA_DIR, f"upload_{task_id}.tmp")
     file.save(tmp_path)
 
     expected_md5 = request.form.get("md5", "")
@@ -133,16 +159,23 @@ def update():
             os.remove(tmp_path)
             return jsonify({"status": "error", "message": f"md5 mismatch: {actual}"}), 400
 
-    try:
-        _install(tmp_path)
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-    finally:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+    _upgrade_tasks[task_id] = {"progress": 50, "status": "installing", "message": "正在安装固件..."}
 
-    _restart()
-    return jsonify({"status": "ok", "message": "updated, restarting..."})
+    def _do_install():
+        try:
+            _upgrade_tasks[task_id] = {"progress": 60, "status": "installing", "message": "正在解压..."}
+            _install(tmp_path)
+
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+            _upgrade_tasks[task_id] = {"progress": 100, "status": "done", "message": "安装完成，即将重启"}
+            _restart()
+        except Exception as e:
+            _upgrade_tasks[task_id] = {"progress": 0, "status": "error", "message": str(e)}
+
+    threading.Thread(target=_do_install, daemon=True).start()
+    return jsonify({"status": "ok", "task_id": task_id, "message": "upload received, installing..."})
 
 
 # ============================================================
@@ -163,8 +196,16 @@ def _http_get_json(url):
         "User-Agent": "AKA-00-OTA/1.0",
         "Accept": "application/json",
     })
-    with urllib.request.urlopen(req, timeout=DOWNLOAD_TIMEOUT) as resp:
-        return json.loads(resp.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=DOWNLOAD_TIMEOUT) as resp:
+            body = resp.read().decode()
+            data = json.loads(body)
+            # GitHub API 限流检测
+            if isinstance(data, dict) and data.get("message") and "API rate limit" in str(data.get("message", "")):
+                raise Exception("GitHub API 限流，请稍后重试或使用自定义更新源")
+            return data
+    except urllib.error.HTTPError as e:
+        raise Exception(f"HTTP {e.code}: {e.reason}")
 
 
 def _fetch_release_info():
@@ -217,6 +258,30 @@ def _download(url, dest):
                 f.write(chunk)
 
 
+def _download_with_progress(url, dest, task_id, total_size=0):
+    """流式下载，同时更新进度"""
+    req = urllib.request.Request(url, headers={"User-Agent": "AKA-00-OTA/1.0"})
+    with urllib.request.urlopen(req, timeout=DOWNLOAD_TIMEOUT) as resp:
+        # 尝试从响应头获取文件大小
+        cl = resp.headers.get("Content-Length")
+        size = int(cl) if cl else total_size
+        downloaded = 0
+        with open(dest, "wb") as f:
+            while True:
+                chunk = resp.read(65536)
+                if not chunk:
+                    break
+                f.write(chunk)
+                downloaded += len(chunk)
+                if size > 0:
+                    pct = int(downloaded * 100 / size)
+                    _upgrade_tasks[task_id] = {
+                        "progress": min(pct, 99),
+                        "status": "downloading",
+                        "message": f"正在下载... {min(pct, 99)}%",
+                    }
+
+
 def _install(path):
     staging = os.path.join(OTA_DIR, "staging")
     if os.path.exists(staging):
@@ -261,6 +326,7 @@ def _install(path):
 
 
 def _extract_selfext(executable, dest):
+    import base64
     try:
         subprocess.run(
             ["sed", "-n", "/^#__PAYLOAD_BELOW__$/,$p", executable],
@@ -268,13 +334,22 @@ def _extract_selfext(executable, dest):
             check=True,
         )
     except subprocess.CalledProcessError as e:
-        raise ValueError(f"payload extract failed: {e}")
+        raise ValueError(f"payload extract failed (sed): {e}")
+
+    # 用 Python 解码 base64 再解压 tar，避免依赖系统 base64 命令
     try:
-        subprocess.run(
-            f"tail -n +2 {dest}/payload.b64 | base64 -d | tar xz -C {dest}",
-            shell=True, check=True,
-        )
-    except subprocess.CalledProcessError as e:
+        b64_path = os.path.join(dest, "payload.b64")
+        tar_path = os.path.join(dest, "payload.tar.gz")
+        with open(b64_path) as f:
+            f.readline()  # 跳过 #__PAYLOAD_BELOW__ 行
+            encoded = f.read()
+        with open(tar_path, "wb") as f:
+            f.write(base64.b64decode(encoded))
+        with tarfile.open(tar_path, mode="r:gz") as tar:
+            tar.extractall(path=dest)
+        os.remove(b64_path)
+        os.remove(tar_path)
+    except Exception as e:
         raise ValueError(f"decode failed: {e}")
 
 

@@ -1,5 +1,6 @@
 import React, {useEffect, useState} from "react";
 import Header from "../components/Header";
+import AlertDialog from "../components/AlertDialog";
 import {useViewportScale} from "../hooks/useViewportScale";
 
 interface WifiNetwork { id: string; ssid: string; signal: number; secured: boolean; is_connected: boolean; }
@@ -13,6 +14,7 @@ const WiFiConfigPage = () => {
     const [connecting, setConnecting] = useState(false);
     const [passwords, setPasswords] = useState<Record<string, string>>({});
     const [messages, setMessages] = useState<Record<string, string>>({});
+    const [alertMsg, setAlertMsg] = useState("");
 
     useEffect(() => { loadList(); }, []);
 
@@ -46,7 +48,7 @@ const WiFiConfigPage = () => {
 
     const connect = async (net: WifiNetwork) => {
         const pwd = net.secured ? passwords[net.id] || "" : "";
-        if (net.secured && !pwd) { alert("请输入密码"); return; }
+        if (net.secured && !pwd) { setAlertMsg("请输入密码"); return; }
         setConnecting(true);
         setMessages(prev => ({...prev, [net.id]: "正在连接并获取地址..."}));
         try {
@@ -125,6 +127,8 @@ const WiFiConfigPage = () => {
                     </div>
                 ))}
             </div>
+
+            <AlertDialog open={!!alertMsg} message={alertMsg} onClose={() => setAlertMsg("")} />
         </div>
     );
 };

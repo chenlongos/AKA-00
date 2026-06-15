@@ -3,6 +3,7 @@ import {api, controlSocket} from "../api";
 import ControlButton from "../components/ControlButton.tsx";
 import CameraToggle from "../components/CameraToggle";
 import Page from "../components/Page";
+import AlertDialog from "../components/AlertDialog";
 import {S} from "../styles";
 import {useViewportScale} from "../hooks/useViewportScale";
 
@@ -14,6 +15,7 @@ const BaseControlPage = () => {
     const [rightSpeed, setRightSpeed] = useState(0);
     const [wsConnected, setWsConnected] = useState(false);
     const [isLandscape, setIsLandscape] = useState(() => window.innerWidth > window.innerHeight);
+    const [alertMsg, setAlertMsg] = useState("");
     const currentActionRef = useRef<string | null>(null);
 
     useEffect(() => {
@@ -65,7 +67,7 @@ const BaseControlPage = () => {
             const data = await api.system.ip();
             if (!data?.ip) throw new Error("无IP数据");
             window.location.replace(`https://labs.chenlongrobot.com/?ip=${encodeURIComponent(data.ip)}`);
-        } catch { alert("无法获取IP，请稍后重试"); }
+        } catch { setAlertMsg("无法获取IP，请稍后重试"); }
     };
 
     // 十字方向键尺寸 — 竖屏取宽度，横屏取高度
@@ -175,6 +177,7 @@ const BaseControlPage = () => {
                         </div>
                     </div>
                 </div>
+                <AlertDialog open={!!alertMsg} message={alertMsg} onClose={() => setAlertMsg("")} />
             </Page>
         );
     }
@@ -207,6 +210,7 @@ const BaseControlPage = () => {
             <div style={{marginTop: scalePx(12)}}><Dpad /></div>
             <div style={{marginTop: scalePx(10), width: "100%", maxWidth: contentW}}><Speed /></div>
             <div style={{marginTop: scalePx(12), width: "100%", maxWidth: contentW}}><SideButtons /></div>
+            <AlertDialog open={!!alertMsg} message={alertMsg} onClose={() => setAlertMsg("")} />
         </Page>
     );
 };

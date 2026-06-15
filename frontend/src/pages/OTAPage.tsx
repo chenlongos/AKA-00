@@ -3,6 +3,7 @@ import {useViewportScale} from "../hooks/useViewportScale";
 import Header from "../components/Header";
 import Card from "../components/Card";
 import ControlButton from "../components/ControlButton";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 interface VersionInfo {
     version?: string;
@@ -19,6 +20,9 @@ const OTAPage = () => {
     const [upgrading, setUpgrading] = useState(false);
     const [status, setStatus] = useState("");
     const [uploading, setUploading] = useState(false);
+    const [showConfirm, setShowConfirm] = useState(false);
+    const [upgradeProgress, setUpgradeProgress] = useState(0);
+    const [upgradeMsg, setUpgradeMsg] = useState("");
 
     useEffect(() => {
         fetchVersion();
@@ -53,43 +57,100 @@ const OTAPage = () => {
         finally { setChecking(false); }
     };
 
-    const doUpgrade = async () => {
-        if (!confirm("确定要升级固件吗？升级过程中请勿关闭电源。")) return;
+    const doUpgrade = () => { setShowConfirm(true); };
+
+    const executeUpgrade = async () => {
+        setShowConfirm(false);
         setUpgrading(true);
-        setStatus("正在下载并安装固件...");
+        setUpgradeProgress(0);
+        setUpgradeMsg("正在启动升级...");
+        setStatus("");
+
         try {
             const res = await fetch("/api/ota/upgrade", {method: "POST"});
             const data = await res.json();
-            if (data.status === "ok") {
-                setStatus("固件升级成功，请重启设备");
-            } else {
+
+            if (data.status !== "ok" || !data.task_id) {
                 setStatus(`升级失败: ${data.message || "未知错误"}`);
+                setUpgrading(false);
+                return;
             }
+
+            const taskId = data.task_id;
+            const poll = setInterval(async () => {
+                try {
+                    const pr = await fetch(`/api/ota/upgrade/progress?task_id=${taskId}`);
+                    const pd = await pr.json();
+                    setUpgradeProgress(pd.progress || 0);
+                    setUpgradeMsg(pd.message || "");
+
+                    if (pd.status === "done") {
+                        clearInterval(poll);
+                        setUpgrading(false);
+                        setStatus("固件升级成功，设备即将重启");
+                    } else if (pd.status === "error") {
+                        clearInterval(poll);
+                        setUpgrading(false);
+                        setStatus(`升级失败: ${pd.message}`);
+                    }
+                } catch {
+                    clearInterval(poll);
+                    setUpgrading(false);
+                    setStatus("进度查询失败");
+                }
+            }, 500);
         } catch {
+            setUpgrading(false);
             setStatus("升级请求失败");
         }
-        finally { setUpgrading(false); }
     };
 
     const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
         setUploading(true);
-        setStatus("正在上传固件...");
+        setUpgradeProgress(0);
+        setUpgradeMsg("正在上传文件...");
+        setStatus("");
         try {
             const form = new FormData();
             form.append("firmware", file);
             const res = await fetch("/api/ota/update", {method: "POST", body: form});
             const data = await res.json();
-            if (data.status === "ok") {
-                setStatus("固件上传成功，正在安装...");
-            } else {
+
+            if (data.status !== "ok" || !data.task_id) {
                 setStatus(`上传失败: ${data.message || "未知错误"}`);
+                setUploading(false);
+                return;
             }
-        } catch {
-            setStatus("上传请求失败");
+
+            const taskId = data.task_id;
+            const poll = setInterval(async () => {
+                try {
+                    const pr = await fetch(`/api/ota/upgrade/progress?task_id=${taskId}`);
+                    const pd = await pr.json();
+                    setUpgradeProgress(pd.progress || 0);
+                    setUpgradeMsg(pd.message || "");
+
+                    if (pd.status === "done") {
+                        clearInterval(poll);
+                        setUploading(false);
+                        setStatus("固件安装成功，设备即将重启");
+                    } else if (pd.status === "error") {
+                        clearInterval(poll);
+                        setUploading(false);
+                        setStatus(`安装失败: ${pd.message}`);
+                    }
+                } catch {
+                    clearInterval(poll);
+                    setUploading(false);
+                    setStatus("进度查询失败");
+                }
+            }, 500);
+        } catch (e) {
+            setUploading(false);
+            setStatus(`上传请求失败: ${e}`);
         }
-        finally { setUploading(false); }
     };
 
     return (
@@ -153,9 +214,35 @@ const OTAPage = () => {
                         boxShadow: "0 6px 15px rgba(0,0,0,0.5)",
                     }}>
                         {uploading ? "上传中..." : "选择固件文件"}
-                        <input type="file" accept=".zip,.tar.gz,.tgz" onChange={handleUpload} style={{display: "none"}} disabled={uploading} />
+                        <input type="file" onChange={handleUpload} style={{display: "none"}} disabled={uploading} />
                     </label>
                 </Card>
+
+                {/* 升级进度条 */}
+                {upgrading && (
+                    <Card marginBottom={12}>
+                        <div style={{textAlign: "center"}}>
+                            <div style={{fontSize: scalePx(13), fontWeight: 600, marginBottom: scalePx(10), color: "var(--color-text)"}}>
+                                {upgradeMsg || "正在升级..."}
+                            </div>
+                            <div style={{
+                                width: "100%", height: scalePx(8),
+                                background: "var(--color-bg-elevated)", borderRadius: scalePx(4),
+                                overflow: "hidden",
+                            }}>
+                                <div style={{
+                                    width: `${upgradeProgress}%`, height: "100%",
+                                    background: upgradeProgress === 100 ? "var(--color-success)" : "var(--color-primary)",
+                                    borderRadius: scalePx(4),
+                                    transition: "width 0.3s ease",
+                                }} />
+                            </div>
+                            <div style={{fontSize: scalePx(12), color: "var(--color-text-dim)", marginTop: scalePx(6)}}>
+                                {upgradeProgress}%
+                            </div>
+                        </div>
+                    </Card>
+                )}
 
                 {/* 状态 */}
                 {status && (
@@ -169,6 +256,16 @@ const OTAPage = () => {
                     </div>
                 )}
             </div>
+
+            <ConfirmDialog
+                open={showConfirm}
+                title="确认升级"
+                message="确定要升级固件吗？升级过程中请勿关闭电源。"
+                confirmText="立即升级"
+                danger
+                onConfirm={executeUpgrade}
+                onCancel={() => setShowConfirm(false)}
+            />
         </div>
     );
 };
