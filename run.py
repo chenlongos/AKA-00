@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import json
 import os
 import struct
 import subprocess
@@ -12,6 +13,7 @@ import tornado.websocket
 import tornado.wsgi
 
 from app import create_app
+from app.routes._utils import get_wifi_ip
 from app.services import get_control_service
 from src.state import get_state_collector
 
@@ -89,19 +91,65 @@ class ControlWebSocket(tornado.websocket.WebSocketHandler):
             self._push_status, 200
         )
         self._status_timer.start()
+        self._send_json({"type": "ip", "ip": get_wifi_ip()})
 
     async def on_message(self, message):
-        if not isinstance(message, bytes) or len(message) < 3:
+        if not isinstance(message, bytes) or len(message) < 2:
             return
-        if message[0] != 0xAA:
+        if len(message) < 3:
             return
-        x = message[1] if message[1] < 128 else message[1] - 256
-        y = message[2] if message[2] < 128 else message[2] - 256
-        left = max(-60, min(60, y + x))
-        right = max(-60, min(60, y - x))
-        await tornado.ioloop.IOLoop.current().run_in_executor(
-            None, get_control_service().run_motor, left, right
-        )
+        # 摇杆: [0xAA, x, y]
+        if message[0] == 0xAA:
+            x = message[1] if message[1] < 128 else message[1] - 256
+            y = message[2] if message[2] < 128 else message[2] - 256
+            left = max(-60, min(60, y + x))
+            right = max(-60, min(60, y - x))
+            await tornado.ioloop.IOLoop.current().run_in_executor(
+                None, get_control_service().run_motor, left, right
+            )
+            return
+        # JSON 命令: [0xDD, json_bytes...]
+        if message[0] == 0xDD:
+            try:
+                cmd = json.loads(message[1:].decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                return
+            await self._handle_json(cmd)
+
+    async def _handle_json(self, cmd: dict):
+        typ = cmd.get("type", "")
+        service = get_control_service()
+
+        if typ == "action":
+            result = await tornado.ioloop.IOLoop.current().run_in_executor(
+                None,
+                service.execute_action,
+                cmd.get("action", "stop"),
+                cmd.get("speed", 50),
+                cmd.get("time", 0),
+            )
+            self._send_json({"type": "action", "result": result})
+
+        elif typ == "raw_command":
+            result = await tornado.ioloop.IOLoop.current().run_in_executor(
+                None, service.send_raw_command, cmd.get("cmd", "")
+            )
+            self._send_json({"type": "raw_command", "result": result})
+
+        elif typ == "ip":
+            self._send_json({"type": "ip", "ip": get_wifi_ip()})
+
+        elif typ == "pwm_channels":
+            data = await tornado.ioloop.IOLoop.current().run_in_executor(
+                None, service.get_pwm_channels
+            )
+            self._send_json({"type": "pwm_channels", "data": data})
+
+        elif typ == "reinitialize":
+            result = await tornado.ioloop.IOLoop.current().run_in_executor(
+                None, service.reinitialize_motor_pair
+            )
+            self._send_json({"type": "reinitialize", "result": result})
 
     def on_close(self):
         self._status_timer.stop()
@@ -114,12 +162,17 @@ class ControlWebSocket(tornado.websocket.WebSocketHandler):
             None, get_control_service().run_motor, 0, 0
         )
 
+    def _send_json(self, data: dict):
+        try:
+            self.write_message(b"\xDD" + json.dumps(data).encode("utf-8"), binary=True)
+        except tornado.websocket.WebSocketClosedError:
+            pass
+
     def _push_status(self):
         collector = get_state_collector()
         left = int(collector._status.left_speed * 1000)
         right = int(collector._status.right_speed * 1000)
         self._status_ticks += 1
-        # only push if speed changed or every 2s heartbeat
         if (left == self._last_left and right == self._last_right
                 and self._status_ticks < 10):
             return

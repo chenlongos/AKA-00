@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useRef, useState} from "react";
-import {api, controlSocket} from "../api";
+import {controlSocket} from "../api";
 import CameraToggle from "../components/CameraToggle";
 import Page from "../components/Page";
 import {S} from "../styles";
@@ -7,6 +7,32 @@ import {useViewportScale} from "../hooks/useViewportScale";
 
 const FPS_OPTIONS = [30, 20, 10];
 const FPS_LABELS = ["高清", "均衡", "省流"];
+
+// 独立组件，避免 inline 定义导致 CameraToggle 被反复卸载/挂载
+const CameraBar = ({
+    scalePx, cameraOn, fpsIndex, onStatusChange, onFpsChange,
+}: {
+    scalePx: (px: number) => string;
+    cameraOn: boolean;
+    fpsIndex: number;
+    onStatusChange: (on: boolean) => void;
+    onFpsChange: () => void;
+}) => (
+    <div style={{display: "flex", alignItems: "center", gap: scalePx(6)}}>
+        <CameraToggle onStatusChange={onStatusChange} />
+        {cameraOn && (
+            <button onClick={onFpsChange} style={{
+                background: fpsIndex > 0 ? "var(--color-success)" : "var(--color-bg-elevated)",
+                border: `1px solid ${fpsIndex > 0 ? "var(--color-success)" : "var(--color-border)"}`,
+                color: fpsIndex > 0 ? "#fff" : "var(--color-text-muted)",
+                padding: `${scalePx(2)} ${scalePx(6)}`, borderRadius: "var(--radius-sm)",
+                fontSize: scalePx(9), fontWeight: 600, cursor: "pointer", outline: "none",
+            }}>
+                {FPS_LABELS[fpsIndex]}
+            </button>
+        )}
+    </div>
+);
 
 const RCDemoPage = () => {
     const {scalePx, scale} = useViewportScale();
@@ -18,7 +44,6 @@ const RCDemoPage = () => {
     const [fpsIndex, setFpsIndex] = useState(0);
     const [wsConnected, setWsConnected] = useState(false);
     const [isLandscape, setIsLandscape] = useState(() => window.innerWidth > window.innerHeight);
-
     const throttleRef = useRef(0);
     const rotationRef = useRef(0);
     const intervalRef = useRef<number | null>(null);
@@ -56,8 +81,11 @@ const RCDemoPage = () => {
     }, []);
 
     useEffect(() => {
-        controlSocket.connect(setWsConnected, (s) => { setLeftSpeed(s.left); setRightSpeed(s.right); });
-        return () => { stopMotor(); controlSocket.close(); navigator.sendBeacon("/api/camera/close"); };
+        controlSocket.connect(
+            setWsConnected,
+            (s) => { setLeftSpeed(s.left); setRightSpeed(s.right); },
+        );
+        return () => { stopMotor(); controlSocket.close(); };
     }, []);
 
     const handleBrake = () => {
@@ -67,7 +95,7 @@ const RCDemoPage = () => {
         stopMotor();
     };
 
-    const handleArm = async (a: "grab" | "release") => { try { await api.motor.action(a); } catch {} };
+    const handleArm = (a: "grab" | "release") => { controlSocket.sendAction(a); };
 
     // ---- 控制条尺寸 ----
     const stickR = Math.round(18 * scale);
@@ -172,23 +200,6 @@ const RCDemoPage = () => {
         : Math.min(window.innerWidth - 20, Math.round(340 * scale));
     const videoH = Math.round(videoW * 0.5625);
 
-    const CameraBar = () => (
-        <div style={{...S.row, gap: scalePx(6)}}>
-            <CameraToggle onStatusChange={setCameraOn} />
-            {cameraOn && (
-                <button onClick={() => setFpsIndex(i => (i + 1) % 3)} style={{
-                    background: fpsIndex > 0 ? "var(--color-success)" : "var(--color-bg-elevated)",
-                    border: `1px solid ${fpsIndex > 0 ? "var(--color-success)" : "var(--color-border)"}`,
-                    color: fpsIndex > 0 ? "#fff" : "var(--color-text-muted)",
-                    padding: `${scalePx(2)} ${scalePx(6)}`, borderRadius: "var(--radius-sm)",
-                    fontSize: scalePx(9), fontWeight: 600, cursor: "pointer", outline: "none",
-                }}>
-                    {FPS_LABELS[fpsIndex]}
-                </button>
-            )}
-        </div>
-    );
-
     const VideoBox = () => (
         <div style={{borderRadius: "var(--radius-md)", overflow: "hidden", border: "2px solid var(--color-border)", flexShrink: 0}}>
             {cameraOn ? (
@@ -246,7 +257,7 @@ const RCDemoPage = () => {
 
                     {/* 中：视频 + 按钮 */}
                     <div style={{...S.col, gap: scalePx(8), flex: 1}}>
-                        <CameraBar />
+                        <CameraBar scalePx={scalePx} cameraOn={cameraOn} fpsIndex={fpsIndex} onStatusChange={setCameraOn} onFpsChange={() => setFpsIndex(i => (i + 1) % 3)} />
                         <VideoBox />
                         <SpeedBar />
                         <div style={{display: "flex", gap: scalePx(10), flexShrink: 0}}>
@@ -275,7 +286,7 @@ const RCDemoPage = () => {
             <div style={{...S.col, gap: scalePx(8)}}>
                 <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", maxWidth: videoW}}>
                     <h3 style={{fontSize: scalePx(14), fontWeight: 600, margin: 0}}>摇杆驾驶</h3>
-                    <CameraBar />
+                    <CameraBar scalePx={scalePx} cameraOn={cameraOn} fpsIndex={fpsIndex} onStatusChange={setCameraOn} onFpsChange={() => setFpsIndex(i => (i + 1) % 3)} />
                 </div>
                 <VideoBox />
                 <SpeedBar />

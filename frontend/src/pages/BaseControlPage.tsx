@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from "react";
-import {api, controlSocket} from "../api";
+import {controlSocket} from "../api";
 import ControlButton from "../components/ControlButton.tsx";
 import CameraToggle from "../components/CameraToggle";
 import Page from "../components/Page";
@@ -14,6 +14,7 @@ const BaseControlPage = () => {
     const [leftSpeed, setLeftSpeed] = useState(0);
     const [rightSpeed, setRightSpeed] = useState(0);
     const [wsConnected, setWsConnected] = useState(false);
+    const [wsReady, setWsReady] = useState(false);
     const [isLandscape, setIsLandscape] = useState(() => window.innerWidth > window.innerHeight);
     const [alertMsg, setAlertMsg] = useState("");
     const currentActionRef = useRef<string | null>(null);
@@ -26,48 +27,54 @@ const BaseControlPage = () => {
     }, []);
 
     useEffect(() => {
-        controlSocket.connect(setWsConnected, (s) => { setLeftSpeed(s.left); setRightSpeed(s.right); });
+        controlSocket.connect(
+            setWsConnected,
+            (s) => { setLeftSpeed(s.left); setRightSpeed(s.right); },
+            (msg) => {
+                if (msg.type === "ip") {
+                    setIp("IP: " + msg.ip);
+                    setStatus("准备就绪");
+                    setWsReady(true);
+                }
+            },
+        );
         return () => { controlSocket.close(); };
     }, []);
 
+    // WebSocket 就绪后执行初始化（sendRawCommand 依赖 WS 连接）
     useEffect(() => {
+        if (!wsReady) return;
         const processHash = () => {
             const hash = window.location.hash;
             if (hash) {
-                api.motor.rawCommand(hash).catch(console.error);
+                controlSocket.sendRawCommand(hash);
                 window.history.replaceState(null, document.title, window.location.pathname);
             }
         };
         processHash();
         window.addEventListener('hashchange', processHash);
+        controlSocket.sendPwmChannels();
+        controlSocket.sendReinitialize();
         return () => window.removeEventListener('hashchange', processHash);
-    }, []);
+    }, [wsReady]);
 
-    useEffect(() => {
-        api.system.ip().then(data => { setIp("IP: " + data.ip); setStatus("准备就绪"); }).catch(() => setStatus("获取 IP 失败"));
-        api.base.pwmChannels().then(data => api.base.savePwmChannels(data.pwm_channels).catch(() => {}));
-        api.base.reinitialize().catch(() => {});
-    }, []);
-
-    const send = async (action: string, speed: number = 50) => {
+    const send = (action: string, speed: number = 50) => {
         setStatus("执行: " + action);
         if (action === "stop") { controlSocket.sendJoystick(0, 0); }
         else if (action === "up") { controlSocket.sendJoystick(0, speed); }
         else if (action === "down") { controlSocket.sendJoystick(0, -speed); }
         else if (action === "left") { controlSocket.sendJoystick(-speed, 0); }
         else if (action === "right") { controlSocket.sendJoystick(speed, 0); }
-        else { try { await api.motor.action(action, speed); } catch (err) { setStatus("错误: " + err); } }
+        else { controlSocket.sendAction(action, speed); }
     };
 
     const handlePressStart = (action: string, speed?: number) => { currentActionRef.current = action; send(action, speed); };
     const handlePressEnd = () => { currentActionRef.current = null; send("stop"); };
 
-    const redirect = async () => {
-        try {
-            const data = await api.system.ip();
-            if (!data?.ip) throw new Error("无IP数据");
-            window.location.replace(`https://labs.chenlongrobot.com/?ip=${encodeURIComponent(data.ip)}`);
-        } catch { setAlertMsg("无法获取IP，请稍后重试"); }
+    const redirect = () => {
+        const ipStr = ip.replace("IP: ", "");
+        if (!ipStr || ipStr === "获取中...") { setAlertMsg("无法获取IP，请稍后重试"); return; }
+        window.location.replace(`https://labs.chenlongrobot.com/?ip=${encodeURIComponent(ipStr)}`);
     };
 
     // 十字方向键尺寸 — 竖屏取宽度，横屏取高度

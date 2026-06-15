@@ -69,16 +69,29 @@ export const api = { system, motor, arm, base, camera, demo };
 
 export type MotorStatus = { left: number; right: number };
 
+export type JsonMsg =
+    | { type: "ip"; ip: string }
+    | { type: "action"; result: unknown }
+    | { type: "raw_command"; result: unknown }
+    | { type: "pwm_channels"; data: Record<string, number> }
+    | { type: "reinitialize"; result: unknown };
+
 // WebSocket 实时控制通道
 export class ControlSocket {
     private ws: WebSocket | null = null;
     private reconnectTimer: number | null = null;
     private onStatusChange: ((connected: boolean) => void) | null = null;
     private onMotorStatus: ((status: MotorStatus) => void) | null = null;
+    private onJson: ((msg: JsonMsg) => void) | null = null;
 
-    connect(onStatus?: (connected: boolean) => void, onMotorStatus?: (status: MotorStatus) => void) {
+    connect(
+        onStatus?: (connected: boolean) => void,
+        onMotorStatus?: (status: MotorStatus) => void,
+        onJson?: (msg: JsonMsg) => void,
+    ) {
         this.onStatusChange = onStatus ?? null;
         this.onMotorStatus = onMotorStatus ?? null;
+        this.onJson = onJson ?? null;
         this._doConnect();
     }
 
@@ -95,12 +108,24 @@ export class ControlSocket {
         };
 
         this.ws.onmessage = (e) => {
-            if (!(e.data instanceof ArrayBuffer) || e.data.byteLength < 5) return;
+            if (!(e.data instanceof ArrayBuffer) || e.data.byteLength < 2) return;
             const dv = new DataView(e.data);
-            if (dv.getUint8(0) !== 0xBB) return;
-            const left = dv.getInt16(1, true) / 1000;
-            const right = dv.getInt16(3, true) / 1000;
-            this.onMotorStatus?.({ left, right });
+            const type = dv.getUint8(0);
+            // JSON 消息: [0xDD, utf8_json...]
+            if (type === 0xDD) {
+                try {
+                    const json = new TextDecoder().decode(e.data.slice(1));
+                    const msg = JSON.parse(json) as JsonMsg;
+                    this.onJson?.(msg);
+                } catch {}
+                return;
+            }
+            // 电机速度: [0xBB, left_int16, right_int16]
+            if (type === 0xBB && e.data.byteLength >= 5) {
+                const left = dv.getInt16(1, true) / 1000;
+                const right = dv.getInt16(3, true) / 1000;
+                this.onMotorStatus?.({ left, right });
+            }
         };
 
         this.ws.onclose = () => {
@@ -113,6 +138,16 @@ export class ControlSocket {
         this.ws.onerror = () => { this.ws?.close(); };
     }
 
+    // ---- 发送方法 ----
+    private _sendJson(data: object) {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+        const json = new TextEncoder().encode(JSON.stringify(data));
+        const buf = new Uint8Array(1 + json.length);
+        buf[0] = 0xDD;
+        buf.set(json, 1);
+        this.ws.send(buf.buffer);
+    }
+
     sendJoystick(x: number, y: number) {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
         const buf = new ArrayBuffer(3);
@@ -121,6 +156,26 @@ export class ControlSocket {
         dv.setInt8(1, Math.max(-128, Math.min(127, x)));
         dv.setInt8(2, Math.max(-128, Math.min(127, y)));
         this.ws.send(buf);
+    }
+
+    sendAction(action: string, speed: number = 50, time: number = 0) {
+        this._sendJson({ type: "action", action, speed, time });
+    }
+
+    sendRawCommand(cmd: string) {
+        this._sendJson({ type: "raw_command", cmd });
+    }
+
+    sendRequestIp() {
+        this._sendJson({ type: "ip" });
+    }
+
+    sendPwmChannels() {
+        this._sendJson({ type: "pwm_channels" });
+    }
+
+    sendReinitialize() {
+        this._sendJson({ type: "reinitialize" });
     }
 
     close() {
