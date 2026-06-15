@@ -71,11 +71,11 @@ const BaseControlPage = () => {
     // 十字方向键尺寸 — 竖屏取宽度，横屏取高度
     const dpadSize = isLandscape
         ? Math.min(window.innerHeight * 0.8, window.innerWidth * 0.45)
-        : Math.min(window.innerWidth * 0.72, Math.round(280 * scale), window.innerWidth - 36);
+        : Math.min(window.innerWidth * 0.72, Math.round(280 * scale), window.innerWidth - Math.max(60, window.innerWidth * 0.08));
     const dpadGap = Math.round(6 * scale);
     const cellSize = Math.round((dpadSize - dpadGap * 2) / 3);
     const btnFontSize = Math.round(16 * scale);
-    const contentW = Math.min(window.innerWidth - 36, Math.round(400 * scale));
+    const contentW = Math.min(window.innerWidth - Math.max(60, window.innerWidth * 0.08), Math.round(400 * scale));
     const dpadBtn = (dir: string, label: string, bgColor: string) => (
         <button
             onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); handlePressStart(dir, dir === "left" || dir === "right" ? 25 : 50); }}
@@ -139,7 +139,7 @@ const BaseControlPage = () => {
     if (isLandscape) {
         return (
             <Page center padTop={6}>
-                <div style={{display: "flex", alignItems: "stretch", height: "100%", width: "100%", padding: "3%"}}>
+                <div style={{display: "flex", alignItems: "stretch", height: "100%", width: "100%", padding: "3%", gap:"30px"}}>
                     {/* 左：方向键 */}
                     <div style={{display: "flex", alignItems: "center", justifyContent: "center", flex: 1, width: "100%", height: "100%"}}>
                         <Dpad />
