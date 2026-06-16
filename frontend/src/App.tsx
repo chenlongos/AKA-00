@@ -1,3 +1,4 @@
+import {useEffect, useState} from "react";
 import {Route, Routes, useLocation} from "react-router-dom";
 import TabBar from "./components/TabBar.tsx";
 import BaseControlPage from "./pages/BaseControlPage.tsx";
@@ -9,35 +10,31 @@ import GravityControlPage from "./pages/GravityControlPage.tsx";
 import SettingsPage from "./pages/SettingsPage.tsx";
 import OTAPage from "./pages/OTAPage.tsx";
 
-// 带 TabBar 的页面路径
 const TAB_PATHS = ["/", "/rc", "/demo", "/settings"];
 
 function App() {
     const location = useLocation();
     const showTabBar = TAB_PATHS.includes(location.pathname);
+    const [tabBarVisible, setTabBarVisible] = useState(true);
+
+    // 监听 RCDemoPage 发出的 tab bar 显隐事件
+    useEffect(() => {
+        const handler = (e: Event) => {
+            const {show} = (e as CustomEvent).detail;
+            setTabBarVisible(show);
+        };
+        window.addEventListener("toggle-tabbar", handler);
+        return () => window.removeEventListener("toggle-tabbar", handler);
+    }, []);
+
+    // 离开 /rc 时恢复 tab bar
+    useEffect(() => {
+        if (location.pathname !== "/rc") setTabBarVisible(true);
+    }, [location.pathname]);
 
     return (
-        <div
-            style={{
-                display: "flex",
-                flexDirection: "column",
-                height: "100dvh",
-                width: "100%",
-                maxWidth: "100vw",
-                overflow: "hidden",
-                background: "var(--color-bg)",
-            }}
-        >
-            {/* 内容区：flex-1 填充剩余空间，可滚动 */}
-            <div
-                style={{
-                    flex: 1,
-                    overflowY: "auto",
-                    overflowX: "hidden",
-                    overscrollBehavior: "contain",
-                    WebkitOverflowScrolling: "touch",
-                }}
-            >
+        <div style={{display: "flex", flexDirection: "column", height: "100dvh", width: "100%", maxWidth: "100vw", overflow: "hidden", background: "var(--color-bg)"}}>
+            <div style={{flex: 1, overflowY: "auto", overflowX: "hidden", overscrollBehavior: "contain", WebkitOverflowScrolling: "touch"}}>
                 <Routes>
                     <Route path="/" element={<BaseControlPage />} />
                     <Route path="/rc" element={<RCDemoPage />} />
@@ -49,9 +46,7 @@ function App() {
                     <Route path="/gravity" element={<GravityControlPage />} />
                 </Routes>
             </div>
-
-            {/* 底部 TabBar */}
-            {showTabBar && <TabBar />}
+            {showTabBar && tabBarVisible && <TabBar />}
         </div>
     );
 }

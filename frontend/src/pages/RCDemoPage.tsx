@@ -43,6 +43,17 @@ const RCDemoPage = () => {
     const [fpsIndex, setFpsIndex] = useState(0);
     const [wsConnected, setWsConnected] = useState(false);
     const [isLandscape, setIsLandscape] = useState(() => window.innerWidth > window.innerHeight);
+    const [bottomOpen, setBottomOpen] = useState(false);
+
+    const showBottom = useCallback(() => {
+        setBottomOpen(true);
+        window.dispatchEvent(new CustomEvent("toggle-tabbar", {detail: {show: true}}));
+    }, []);
+
+    const hideBottom = useCallback(() => {
+        setBottomOpen(false);
+        window.dispatchEvent(new CustomEvent("toggle-tabbar", {detail: {show: false}}));
+    }, []);
 
     const throttleRef = useRef(0);
     const rotationRef = useRef(0);
@@ -85,6 +96,15 @@ const RCDemoPage = () => {
         controlSocket.connect(setWsConnected, (s) => { setLeftSpeed(s.left); setRightSpeed(s.right); });
         return () => { stopMotor(); controlSocket.close(); };
     }, []);
+
+    // 横屏默认隐藏 tab bar，竖屏显示
+    useEffect(() => {
+        if (isLandscape) {
+            hideBottom();
+        } else {
+            window.dispatchEvent(new CustomEvent("toggle-tabbar", {detail: {show: true}}));
+        }
+    }, [isLandscape, hideBottom]);
 
     const handleBrake = () => {
         throttleRef.current = 0; rotationRef.current = 0;
@@ -230,16 +250,14 @@ const RCDemoPage = () => {
         letterSpacing: "2px", cursor: "pointer", outline: "none",
     };
 
-    // ====== 横屏：视频全屏 + 浮层控件（游戏手柄布局） ======
+    // ====== 横屏：视频全屏 + 浮层控件 ======
     if (isLandscape) {
-        const barH = Math.round(48 * scale);
-        const joyAreaBottom = barH + Math.round(8 * scale);
-        const joyAreaH = vh - barH - joyAreaBottom - Math.round(16 * scale);
-        const throttleH = Math.min(joyAreaH * 0.7, Math.round(300 * scale));
+        const joyAreaBottom = Math.round(56 * scale);
+        const throttleH = Math.min((vh - joyAreaBottom) * 0.65, Math.round(300 * scale));
         const rotH = Math.round(64 * scale);
-
         return (
-            <div style={{position: "fixed", inset: 0, background: "#000", overflow: "hidden"}}>
+            <div style={{position: "fixed", inset: 0, background: "#000", overflow: "hidden"}}
+                 onPointerDown={hideBottom}>
                 {/* 视频全屏 */}
                 <div style={{position: "absolute", inset: 0}}>
                     {cameraOn ? (
@@ -252,10 +270,10 @@ const RCDemoPage = () => {
                     )}
                 </div>
 
-                {/* 顶部栏：摄像头开关 + FPS + 速度 */}
-                <div style={{position: "absolute", top: 0, left: 0, right: 0, height: barH,
-                    padding: `0 ${scalePx(12)}`, background: "linear-gradient(to bottom, rgba(0,0,0,0.8) 60%, transparent)",
-                    zIndex: 2, display: "flex", justifyContent: "space-between", alignItems: "center"}}>
+                {/* 顶部信息 */}
+                <div style={{position: "absolute", top: 0, left: 0, right: 0, zIndex: 2,
+                    padding: `${scalePx(6)} ${scalePx(12)}`, display: "flex",
+                    justifyContent: "space-between", alignItems: "center", pointerEvents: "auto"}}>
                     <div style={{display: "flex", alignItems: "center", gap: scalePx(8)}}>
                         <CameraToggle onStatusChange={setCameraOn} />
                         {cameraOn && (
@@ -290,7 +308,7 @@ const RCDemoPage = () => {
                     }}>⏹ 刹车</button>
                 </div>
 
-                {/* 右下：抓取/释放 + 方向摇杆 */}
+                {/* 右下：抓取/释放 + 方向 */}
                 <div style={{position: "absolute", right: joySide, bottom: joyAreaBottom + Math.round(vh * 0.04),
                     zIndex: 2, display: "flex", flexDirection: "column", alignItems: "center", gap: scalePx(6)}}>
                     <div style={{display: "flex", gap: scalePx(6)}}>
@@ -311,6 +329,18 @@ const RCDemoPage = () => {
                     <span style={{fontSize: scalePx(10), fontWeight: 600, color: Math.abs(rotation) > 5 ? "var(--color-primary)" : "rgba(255,255,255,0.5)"}}>
                         {rotation > 5 ? "→" : rotation < -5 ? "←" : "·"} {Math.abs(rotation)}%
                     </span>
+                </div>
+
+                {/* 底部：折叠按钮 + TabBar */}
+                <div style={{position: "absolute", bottom: 0, left: 0, right: 0, zIndex: 3, display: "flex", justifyContent: "center"}}>
+                    <button onPointerDown={e => { e.stopPropagation(); showBottom(); }} style={{
+                        padding: `${scalePx(2)} ${scalePx(10)}`, fontSize: scalePx(10),
+                        background: "rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.15)",
+                        color: "#fff", borderRadius: `${scalePx(6)} ${scalePx(6)} 0 0`,
+                        cursor: "pointer", outline: "none", backdropFilter: "blur(6px)",
+                    }}>
+                        {bottomOpen ? "▼ 导航" : "▲ 导航"}
+                    </button>
                 </div>
 
             </div>
