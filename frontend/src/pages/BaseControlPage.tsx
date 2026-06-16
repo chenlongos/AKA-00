@@ -148,7 +148,7 @@ const BaseControlPage = () => {
     if (isLandscape) {
         return (
             <Page center padTop={6}>
-                <div style={{display: "flex", alignItems: "stretch", height: "100%", width: "100%", padding: "3%", gap:"30px"}}>
+                <div style={{display: "flex", alignItems: "stretch", height: "100%", width: "100%", gap:"30px"}}>
                     {/* 左：方向键 */}
                     <div style={{display: "flex", alignItems: "center", justifyContent: "center", flex: 1, width: "100%", height: "100%"}}>
                         <Dpad />
