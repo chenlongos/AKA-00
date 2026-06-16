@@ -329,7 +329,7 @@ const RCDemoPage = () => {
         <Page center padTop={6}>
             <div style={{...S.col, gap, alignItems: "center", width: pVideoW}}>
                 {/* 顶部栏 */}
-                <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", height: topH}}>
+                <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", height: topH, marginTop: "5px"}}>
                     <CameraBar scalePx={scalePx} cameraOn={cameraOn} fpsIndex={fpsIndex} onStatusChange={setCameraOn} onFpsChange={() => setFpsIndex(i => (i + 1) % 3)} />
                     <div style={{display: "flex", gap: scalePx(8), fontSize: scalePx(10), whiteSpace: "nowrap"}}>
                         <span>左 <b style={S.success}>{leftSpeed >= 0 ? "+" : ""}{leftSpeed.toFixed(1)}</b></span>

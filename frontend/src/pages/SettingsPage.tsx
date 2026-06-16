@@ -16,7 +16,7 @@ const SettingsPage = () => {
 
     return (
         <Page center>
-            <h2 style={{fontSize: scalePx(17), fontWeight: 700, marginBottom: scalePx(16)}}>设置</h2>
+            <h2 style={{fontSize: scalePx(17), fontWeight: 700, marginBottom: scalePx(16), marginTop: "20px"}}>设置</h2>
             <div style={{width: "100%", maxWidth: scalePx(420)}}>
                 {items.map(item => (
                     <Card key={item.path} marginBottom={10}>
