@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
+import collections
 import json
 import os
+import socket
 import struct
 import subprocess
 import time
@@ -31,14 +33,21 @@ class MJPEGStreamHandler(tornado.web.RequestHandler):
             self.write({"error": "camera not available"})
             return
 
-        fps = int(self.get_argument("fps", "30"))
-        interval = 1.0 / max(1, min(fps, 30))
+        fps = int(self.get_argument("fps", "24"))
+        interval = 1.0 / max(1, min(fps, 24))
 
         self.set_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
         self.set_header("Access-Control-Allow-Origin", "*")
         self.set_header("Cache-Control", "no-cache, no-store, must-revalidate")
         self.set_header("Pragma", "no-cache")
         self.set_header("Expires", "0")
+
+        # ── TCP optimizations ──────────────────────────────────────
+        stream = self.request.connection.stream
+        stream.set_nodelay(True)
+        sock = stream.socket
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 256 * 1024)
+        has_cork = hasattr(socket, "TCP_CORK")
 
         io_loop = tornado.ioloop.IOLoop.current()
 
@@ -50,13 +59,29 @@ class MJPEGStreamHandler(tornado.web.RequestHandler):
                 await tornado.gen.sleep(0.05)
                 continue
 
+            # Frame skip: don't push if last flush hasn't completed
+            if stream.writing():
+                await tornado.gen.sleep(0.01)
+                continue
+
+            # Single write (merge header + jpeg + footer → one send())
+            frame_data = (
+                b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n"
+                % len(jpg_bytes)
+                + jpg_bytes
+                + b"\r\n"
+            )
+
             try:
-                self.write(b"--frame\r\nContent-Type: image/jpeg\r\n\r\n")
-                self.write(jpg_bytes)
-                self.write(b"\r\n")
+                if has_cork:
+                    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_CORK, 1)
+                self.write(frame_data)
                 await self.flush()
             except tornado.iostream.StreamClosedError:
                 break
+            finally:
+                if has_cork:
+                    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_CORK, 0)
 
             await tornado.gen.sleep(interval)
 
