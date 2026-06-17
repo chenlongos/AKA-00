@@ -40,8 +40,13 @@
 #include <condition_variable>
 #include <chrono>
 #include <sstream>
+#include <memory>
 
 #include <fcntl.h>
+#ifdef __linux__
+#include <sys/epoll.h>
+#endif
+#include <sys/uio.h>
 #include <unistd.h>
 #include <poll.h>
 #include <sys/ioctl.h>
@@ -193,40 +198,39 @@ struct StreamStats {
 
 // ====================================================================
 //  Thread-safe frame buffer (single producer, multiple consumers)
-//  Uses double-buffer to safely serve frame data without copying.
+//  Uses shared_ptr to avoid copying frame data — consumers hold a
+//  reference while the producer can publish new frames independently.
 // ====================================================================
 
 class FrameBuffer {
 public:
-    void publish(const uint8_t* data, size_t len) {
+    void publish(std::shared_ptr<const std::vector<uint8_t>> frame) {
         std::lock_guard<std::mutex> lock(_mtx);
-        int write_idx = 1 - _read_idx;  // write to the non-active buffer
-        _buffers[write_idx].assign(data, data + len);
-        _read_idx = write_idx;
+        _buffer = std::move(frame);
         _seq++;
         _cv.notify_all();
     }
 
-    // Returns a COPY of the frame (safe to use outside lock).
-    // The copy is intentional — frame data (~20-80KB) is small relative to network send time.
-    std::tuple<std::vector<uint8_t>, uint64_t> get_copy(uint64_t last_seq) {
+    // Returns shared_ptr (cheap reference-count bump) and sequence number.
+    // No data copy — consumers read from the same underlying vector.
+    std::pair<std::shared_ptr<const std::vector<uint8_t>>, uint64_t>
+    get_frame(uint64_t last_seq) {
         std::unique_lock<std::mutex> lock(_mtx);
         if (last_seq == _seq) {
             _cv.wait_for(lock, std::chrono::milliseconds(100));
         }
-        return {_buffers[_read_idx], _seq};
+        return {_buffer, _seq};
     }
 
     bool has_frame() const {
         std::lock_guard<std::mutex> lock(_mtx);
-        return _seq > 0;
+        return _seq > 0 && _buffer != nullptr;
     }
 
 private:
     mutable std::mutex _mtx;
     std::condition_variable _cv;
-    std::vector<uint8_t> _buffers[2];
-    int _read_idx = 0;
+    std::shared_ptr<const std::vector<uint8_t>> _buffer;
     uint64_t _seq = 0;
 };
 
@@ -330,22 +334,25 @@ public:
     int height() const { return _height; }
     bool is_mjpeg() const { return _pixel_format == V4L2_PIX_FMT_MJPEG; }
 
-    std::pair<const uint8_t*, size_t> read_frame() {
+    // Returns a shared_ptr to the frame data.  The data is copied out of
+    // the mmap buffer so that QBUF can return the buffer to the kernel
+    // immediately — this one copy is unavoidable.
+    std::shared_ptr<std::vector<uint8_t>> read_frame() {
         v4l2_buffer buf;
         CLEAR(buf);
         buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         buf.memory = V4L2_MEMORY_MMAP;
 
         if (ioctl(_fd, VIDIOC_DQBUF, &buf) < 0) {
-            if (errno == EAGAIN) return {nullptr, 0};
-            return {nullptr, 0};
+            if (errno == EAGAIN) return nullptr;
+            return nullptr;
         }
 
         const uint8_t* src = static_cast<const uint8_t*>(_buffers[buf.index].start);
         size_t len = buf.bytesused;
-        _frame_buf.assign(src, src + len);
+        auto frame = std::make_shared<std::vector<uint8_t>>(src, src + len);
         ioctl(_fd, VIDIOC_QBUF, &buf);
-        return {_frame_buf.data(), _frame_buf.size()};
+        return frame;
     }
 
 private:
@@ -355,7 +362,6 @@ private:
     uint32_t _pixel_format;
     Buffer* _buffers;
     unsigned _n_bufs;
-    std::vector<uint8_t> _frame_buf;
 
     bool _try_format() {
         v4l2_format fmt;
@@ -485,64 +491,112 @@ private:
 
     void _server_loop() {
         std::vector<Client> clients;
+
+#ifdef __linux__
+        // ── Linux: epoll (O(1) event dispatch) ──────────────────────
+        int epfd = epoll_create1(0);
+        if (epfd < 0) {
+            std::fprintf(stderr, "[http] epoll_create1 failed: %s\n", std::strerror(errno));
+            return;
+        }
+
+        struct epoll_event ev;
+        ev.events = EPOLLIN;
+        ev.data.fd = _listen_fd;
+        epoll_ctl(epfd, EPOLL_CTL_ADD, _listen_fd, &ev);
+
+        struct epoll_event events[64];
+
+        while (_running) {
+            int nfds = epoll_wait(epfd, events, 64, 100);
+            if (nfds < 0) {
+                if (errno == EINTR) continue;
+                break;
+            }
+
+            for (int i = 0; i < nfds; i++) {
+                int fd = events[i].data.fd;
+
+                if (fd == _listen_fd) {
+                    _accept_client_epoll(clients, epfd);
+                    continue;
+                }
+
+                Client* c = _find_client(clients, fd);
+                if (!c) continue;
+
+                uint32_t revents = events[i].events;
+
+                if (revents & (EPOLLERR | EPOLLHUP)) {
+                    _close_client_epoll(clients, epfd, fd);
+                    continue;
+                }
+
+                if (revents & EPOLLIN) {
+                    if (!_handle_read(*c)) {
+                        _close_client_epoll(clients, epfd, fd);
+                        continue;
+                    }
+                }
+            }
+
+            _push_stream_frames(clients);
+        }
+
+        for (auto& c : clients) {
+            epoll_ctl(epfd, EPOLL_CTL_DEL, c.fd, nullptr);
+            close(c.fd);
+        }
+        close(epfd);
+
+#else
+        // ── Fallback: poll() — portable but O(n) per iteration ──────
         std::vector<struct pollfd> fds;
 
         while (_running) {
-            // Build pollfd array
             fds.clear();
             fds.push_back({_listen_fd, POLLIN, 0});
             for (auto& c : clients) {
-                short events = POLLIN;
-                // For MJPEG stream clients, we don't poll for OUT continuously;
-                // we write when new frames arrive
-                if (!c.recv_buf.empty()) events |= POLLOUT;
-                fds.push_back({c.fd, events, 0});
+                fds.push_back({c.fd, POLLIN, 0});
             }
 
-            int ret = poll(fds.data(), fds.size(), 100); // 100ms timeout
+            int ret = poll(fds.data(), fds.size(), 100);
             if (ret < 0) {
                 if (errno == EINTR) continue;
                 break;
             }
 
-            // Accept new connections
             if (fds[0].revents & POLLIN) {
-                _accept_client(clients);
+                _accept_client_poll(clients);
             }
 
-            // Handle existing clients (iterate backwards for safe removal)
             for (int ci = (int)clients.size() - 1; ci >= 0; ci--) {
-                int fi = ci + 1;  // +1 because fds[0] is listen_fd
+                int fi = ci + 1;
                 if (fi >= (int)fds.size()) continue;
 
                 if (fds[fi].revents & (POLLERR | POLLHUP | POLLNVAL)) {
-                    _close_client(clients, ci);
+                    _close_client_poll(clients, ci);
                     continue;
                 }
 
                 if (fds[fi].revents & POLLIN) {
                     if (!_handle_read(clients[ci])) {
-                        _close_client(clients, ci);
+                        _close_client_poll(clients, ci);
                         continue;
-                    }
-                }
-
-                if (fds[fi].revents & POLLOUT) {
-                    if (!_handle_write(clients[ci])) {
-                        _close_client(clients, ci);
                     }
                 }
             }
 
-            // Push frames to MJPEG stream clients
             _push_stream_frames(clients);
         }
 
-        // Cleanup
         for (auto& c : clients) close(c.fd);
+#endif
     }
 
-    void _accept_client(std::vector<Client>& clients) {
+    // ── Client management: epoll (Linux) ─────────────────────────────
+
+    void _accept_client_epoll(std::vector<Client>& clients, int epfd) {
         struct sockaddr_in addr;
         socklen_t addr_len = sizeof(addr);
         int fd = accept(_listen_fd, (struct sockaddr*)&addr, &addr_len);
@@ -554,10 +608,54 @@ private:
         int opt = 1;
         setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
 
-        clients.push_back({fd, "", false, 0});
-        // std::fprintf(stderr, "[http] client connected: %s (%zu total)\n",
-        //     inet_ntoa(addr.sin_addr), clients.size());
+        // Larger send buffer to reduce EAGAIN under load
+        int sndbuf = 256 * 1024;
+        setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
 
+        // Register with epoll (level-triggered)
+        struct epoll_event ev;
+        ev.events = EPOLLIN;
+        ev.data.fd = fd;
+        epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &ev);
+
+        clients.push_back({fd, "", false, 0});
+        _stats.active_clients = (int)clients.size();
+    }
+
+    void _close_client_epoll(std::vector<Client>& clients, int epfd, int fd) {
+        epoll_ctl(epfd, EPOLL_CTL_DEL, fd, nullptr);
+        close(fd);
+        for (auto it = clients.begin(); it != clients.end(); ++it) {
+            if (it->fd == fd) { clients.erase(it); break; }
+        }
+        _stats.active_clients = (int)clients.size();
+    }
+
+    // ── Client management: poll() fallback ───────────────────────────
+
+    void _accept_client_poll(std::vector<Client>& clients) {
+        struct sockaddr_in addr;
+        socklen_t addr_len = sizeof(addr);
+        int fd = accept(_listen_fd, (struct sockaddr*)&addr, &addr_len);
+        if (fd < 0) return;
+
+        int flags = fcntl(fd, F_GETFL, 0);
+        fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+
+        int opt = 1;
+        setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
+
+        int sndbuf = 256 * 1024;
+        setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
+
+        clients.push_back({fd, "", false, 0});
+        _stats.active_clients = (int)clients.size();
+    }
+
+    void _close_client_poll(std::vector<Client>& clients, int idx) {
+        if (idx < 0 || idx >= (int)clients.size()) return;
+        close(clients[idx].fd);
+        clients.erase(clients.begin() + idx);
         _stats.active_clients = (int)clients.size();
     }
 
@@ -597,13 +695,6 @@ private:
         } else {
             return _send_page(c);
         }
-    }
-
-    void _close_client(std::vector<Client>& clients, int idx) {
-        if (idx < 0 || idx >= (int)clients.size()) return;
-        close(clients[idx].fd);
-        clients.erase(clients.begin() + idx);
-        _stats.active_clients = (int)clients.size();
     }
 
     bool _handle_write(Client& c) {
@@ -673,21 +764,28 @@ private:
     }
 
     void _push_stream_frames(std::vector<Client>& clients) {
-        // Wait for a frame if none available yet
         if (!_frame_buf.has_frame()) return;
 
-        auto result = _frame_buf.get_copy(0);
-        std::vector<uint8_t>& frame_data = std::get<0>(result);
-        uint64_t seq = std::get<1>(result);
-        if (frame_data.empty()) return;
+        auto result = _frame_buf.get_frame(0);
+        auto& frame_ptr = result.first;
+        uint64_t seq = result.second;
+        if (!frame_ptr || frame_ptr->empty()) return;
 
-        const uint8_t* data = frame_data.data();
-        size_t len = frame_data.size();
+        const uint8_t* data = frame_ptr->data();
+        size_t len = frame_ptr->size();
 
-        // Pre-build the MJPEG boundary header (constant per frame size)
+        // Pre-build MJPEG boundary header
         char boundary_hdr[256];
         int hdr_len = std::snprintf(boundary_hdr, sizeof(boundary_hdr),
             "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %zu\r\n\r\n", len);
+
+        // Single writev() replaces three send() syscalls
+        struct iovec iov[3] = {
+            {boundary_hdr, (size_t)hdr_len},
+            {(void*)data, len},
+            {(void*)"\r\n", 2}
+        };
+        size_t total = hdr_len + len + 2;
 
         for (auto& c : clients) {
             if (!c.is_stream) continue;
@@ -695,41 +793,89 @@ private:
 
             double send_t0 = now_us();
 
-            // Send boundary header
-            int sent_hdr = _send_all(c.fd, boundary_hdr, hdr_len);
-            if (sent_hdr < 0) continue;
-
-            // Send JPEG frame data
-            int sent_data = _send_all(c.fd, data, len);
-            if (sent_data < 0) continue;
-
-            // Send closing CRLF
-            int sent_end = _send_all(c.fd, "\r\n", 2);
-            if (sent_end < 0) continue;
+            // TCP_CORK: tell the kernel to hold packets until we uncork,
+            // so the entire frame goes out as one TCP segment
+            _cork(c.fd);
+            int rc = _send_iov_nonblock(c.fd, iov, 3, total);
+            _uncork(c.fd);
 
             double send_t1 = now_us();
-            c.last_frame_seq = seq;
-            _stats.send_latency_us.push(send_t1 - send_t0);
+
+            if (rc == 0) {
+                // Success — record timing
+                c.last_frame_seq = seq;
+                _stats.send_latency_us.push(send_t1 - send_t0);
+            }
+            // rc == -1: EAGAIN — socket buffer full, silently skip frame
+            // rc == -2: real error — client will be cleaned by next epoll cycle
         }
     }
 
-    // Send all data, retrying on EAGAIN. Returns 0 on success, -1 on error.
-    int _send_all(int fd, const void* data, size_t len) {
-        const char* ptr = (const char*)data;
-        size_t sent = 0;
-        while (sent < len) {
-            ssize_t n = send(fd, ptr + sent, len - sent, 0);
+    // ── TCP optimisations ───────────────────────────────────────────
+
+    void _cork(int fd) {
+#ifdef __linux__
+        int state = 1;
+        setsockopt(fd, IPPROTO_TCP, TCP_CORK, &state, sizeof(state));
+#elif defined(__APPLE__)
+        int state = 1;
+        setsockopt(fd, IPPROTO_TCP, TCP_NOPUSH, &state, sizeof(state));
+#else
+        (void)fd;
+#endif
+    }
+    void _uncork(int fd) {
+#ifdef __linux__
+        int state = 0;
+        setsockopt(fd, IPPROTO_TCP, TCP_CORK, &state, sizeof(state));
+#elif defined(__APPLE__)
+        int state = 0;
+        setsockopt(fd, IPPROTO_TCP, TCP_NOPUSH, &state, sizeof(state));
+#else
+        (void)fd;
+#endif
+    }
+
+    // Send an iovec array completely, non-blocking.
+    // Returns 0 on success, -1 on EAGAIN (socket buffer full → skip frame),
+    // -2 on real error.
+    int _send_iov_nonblock(int fd, struct iovec* iov, int iovcnt, size_t total) {
+        struct iovec local_iov[3];
+        std::memcpy(local_iov, iov, iovcnt * sizeof(struct iovec));
+        struct iovec* iov_ptr = local_iov;
+        int iov_remain = iovcnt;
+
+        size_t written = 0;
+        while (written < total) {
+            ssize_t n = writev(fd, iov_ptr, iov_remain);
             if (n < 0) {
-                if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                    struct pollfd pfd = {fd, POLLOUT, 0};
-                    poll(&pfd, 1, 500);
-                    continue;
-                }
-                return -1;
+                if (errno == EAGAIN || errno == EWOULDBLOCK)
+                    return -1;   // socket buffer full — caller should skip this frame
+                return -2;       // real error — caller should close client
             }
-            sent += n;
+            written += n;
+            // Advance iovec pointers past what was written
+            while (n > 0 && iov_remain > 0) {
+                if ((size_t)n >= iov_ptr->iov_len) {
+                    n -= iov_ptr->iov_len;
+                    iov_ptr++;
+                    iov_remain--;
+                } else {
+                    iov_ptr->iov_base = (char*)iov_ptr->iov_base + n;
+                    iov_ptr->iov_len -= n;
+                    n = 0;
+                }
+            }
         }
         return 0;
+    }
+
+    // Find a client by fd (linear scan — fine for bench-scale client counts)
+    Client* _find_client(std::vector<Client>& clients, int fd) {
+        for (auto& c : clients) {
+            if (c.fd == fd) return &c;
+        }
+        return nullptr;
     }
 
     bool _send_stats(Client& c) {
@@ -1097,15 +1243,14 @@ int main(int argc, char* argv[]) {
         // Measure DQBUF latency
         double dq_t0 = now_us();
         auto frame = cam.read_frame();
-        const uint8_t* data = frame.first;
-        size_t len = frame.second;
         double dq_t1 = now_us();
 
-        if (data == nullptr || len == 0) {
+        if (!frame || frame->empty()) {
             stats.dropped_frames++;
             continue;
         }
 
+        size_t len = frame->size();
         double dq_elapsed = dq_t1 - dq_t0;
         double frame_interval = dq_t1 - stats.last_frame_ts_us;
 
@@ -1120,8 +1265,8 @@ int main(int argc, char* argv[]) {
             stats.last_frame_ts_us = dq_t1;
         }
 
-        // Publish frame for HTTP streaming
-        frame_buf.publish(data, len);
+        // Publish frame for HTTP streaming (shared_ptr — no data copy)
+        frame_buf.publish(frame);
 
         // Periodic console report
         frames_this_second++;
