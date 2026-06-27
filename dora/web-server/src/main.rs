@@ -13,6 +13,7 @@ use dora_node_api::{self, DoraNode, Event};
 use dora_node_api::futures::StreamExt;
 use eyre::{Context, Result};
 use tokio::sync::watch;
+use tower_http::services::ServeDir;
 
 const SRC_WIDTH: u32 = 640;
 const SRC_HEIGHT: u32 = 480;
@@ -44,10 +45,13 @@ async fn run() -> Result<()> {
     let (frame_tx, _) = watch::channel(Vec::new());
     let state = Arc::new(AppState { frame_tx: frame_tx.clone() });
 
+    let static_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/static");
+    println!("[web-server] Serving static files from {}", static_dir);
+
     let app = Router::new()
-        .route("/", get(index_page))
         .route("/stream", get(stream_handler))
         .route("/api/status", get(status_handler))
+        .fallback_service(ServeDir::new(static_dir))
         .with_state(state.clone());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
@@ -105,44 +109,6 @@ async fn run() -> Result<()> {
     server_handle.abort();
     println!("[web-server] Shutting down ({} frames)", frame_count);
     Ok(())
-}
-
-/// GET / — 简单的摄像头预览页面
-async fn index_page() -> Response<Body> {
-    let html = r#"<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>AKA-00 Camera</title>
-<style>
-  *{margin:0;padding:0;box-sizing:border-box}
-  body{background:#111;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:-apple-system,BlinkMacSystemFont,sans-serif}
-  .container{position:relative;max-width:100vw;max-height:100vh}
-  img{display:block;max-width:100vw;max-height:calc(100vh - 56px);object-fit:contain}
-  .bar{display:flex;align-items:center;justify-content:space-between;padding:8px 16px;background:#1a1a2e;color:#e0e0e0;font-size:13px;width:100%}
-  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#4f4;margin-right:6px;animation:pulse 2s infinite}
-  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-  .fps{color:#888}
-</style>
-</head>
-<body>
-  <div class="bar">
-    <span><span class="dot" id="dot"></span><span id="status">connecting</span></span>
-    <span class="fps" id="fps"></span>
-  </div>
-  <div class="container">
-    <img id="cam" src="/stream" alt="camera"
-         onload="document.getElementById('status').textContent='live';document.getElementById('dot').style.background='#4f4'"
-         onerror="document.getElementById('status').textContent='offline';document.getElementById('dot').style.background='#f44'">
-  </div>
-</body>
-</html>"#;
-
-    Response::builder()
-        .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
-        .body(Body::from(html))
-        .unwrap()
 }
 
 /// GET /stream — MJPEG 流，浏览器 <img> 直接消费

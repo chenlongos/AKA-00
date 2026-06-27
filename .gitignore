@@ -1,6 +1,7 @@
 __pycache__/
 .idea
 static
+!dora/web-server/static/
 output/
 checkpoints/
 dist/
