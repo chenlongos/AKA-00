@@ -4013,6 +4013,7 @@ dependencies = [
  "arrow",
  "async-stream",
  "axum",
+ "base64",
  "dora-message",
  "dora-node-api",
  "eyre",

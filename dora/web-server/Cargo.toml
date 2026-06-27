@@ -16,3 +16,4 @@ arrow = "54"
 eyre = "0.6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+base64 = "0.22"
