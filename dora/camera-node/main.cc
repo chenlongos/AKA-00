@@ -1,4 +1,5 @@
 /// dora C++ 摄像头节点 —— 使用 dora C API + OpenCV
+/// 摄像头在 stop 时彻底释放设备，start 时重新打开
 #include "node_api.h"
 
 #include <opencv2/opencv.hpp>
@@ -11,6 +12,24 @@ constexpr int TARGET_WIDTH  = 640;
 constexpr int TARGET_HEIGHT = 480;
 constexpr int TARGET_FPS    = 30;
 
+/// 打开摄像头，失败返回 false
+static bool camera_open(cv::VideoCapture &cap) {
+    if (!cap.open(0)) return false;
+    cap.set(cv::CAP_PROP_FRAME_WIDTH,  TARGET_WIDTH);
+    cap.set(cv::CAP_PROP_FRAME_HEIGHT, TARGET_HEIGHT);
+    cap.set(cv::CAP_PROP_FPS, TARGET_FPS);
+    int w = (int)cap.get(cv::CAP_PROP_FRAME_WIDTH);
+    int h = (int)cap.get(cv::CAP_PROP_FRAME_HEIGHT);
+    std::cout << "[camera-cpp] 📷 opened " << w << "x" << h << std::endl;
+    return true;
+}
+
+/// 关闭摄像头，释放设备
+static void camera_close(cv::VideoCapture &cap) {
+    cap.release();
+    std::cout << "[camera-cpp] 📷 closed (device released)" << std::endl;
+}
+
 int main() {
     std::cout << "[camera-cpp] Starting..." << std::endl;
 
@@ -22,29 +41,14 @@ int main() {
     }
     std::cout << "[camera-cpp] Dora context initialized" << std::endl;
 
-    // ── 2. 打开摄像头（始终保持打开，避免 reopen 延迟）──
-    cv::VideoCapture cap(0);
-    if (!cap.isOpened()) {
-        std::cerr << "[camera-cpp] Failed to open camera" << std::endl;
-        free_dora_context(ctx);
-        return 1;
-    }
-
-    cap.set(cv::CAP_PROP_FRAME_WIDTH,  TARGET_WIDTH);
-    cap.set(cv::CAP_PROP_FRAME_HEIGHT, TARGET_HEIGHT);
-    cap.set(cv::CAP_PROP_FPS, TARGET_FPS);
-
-    int actual_w = (int)cap.get(cv::CAP_PROP_FRAME_WIDTH);
-    int actual_h = (int)cap.get(cv::CAP_PROP_FRAME_HEIGHT);
-    std::cout << "[camera-cpp] Camera opened " << actual_w << "x" << actual_h
-              << ", waiting for start command..." << std::endl;
-
-    // ── 3. 事件循环 ──
-    cv::Mat frame, rgb;
-    bool    capturing   = false;   // 由 control 输入控制
-    uint64_t tick_count  = 0;
-    auto     last_report = std::chrono::steady_clock::now();
-    uint64_t fps_counter = 0;
+    // ── 2. 事件循环 ──
+    cv::VideoCapture cap;       // 摄像头设备（stop 时 release，start 时 reopen）
+    cv::Mat          frame, rgb;
+    bool             device_open = false;  // 设备是否打开
+    bool             capturing   = false;  // 是否要抓帧（由 control 控制）
+    uint64_t         tick_count  = 0;
+    auto             last_report = std::chrono::steady_clock::now();
+    uint64_t         fps_counter = 0;
 
     while (true) {
         void *event = dora_next_event(ctx);
@@ -72,18 +76,30 @@ int main() {
                 std::string cmd(data_ptr, data_len);
 
                 if (cmd == "start") {
+                    if (!device_open) {
+                        device_open = camera_open(cap);
+                        if (!device_open) {
+                            std::cerr << "[camera-cpp] Failed to open camera" << std::endl;
+                            free_dora_event(event);
+                            continue;
+                        }
+                    }
                     capturing = true;
                     std::cout << "[camera-cpp] ▶  capture started" << std::endl;
                 } else if (cmd == "stop") {
                     capturing = false;
+                    if (device_open) {
+                        camera_close(cap);
+                        device_open = false;
+                    }
                     std::cout << "[camera-cpp] ⏸  capture stopped" << std::endl;
                 }
                 free_dora_event(event);
                 continue;
             }
 
-            // ── tick 输入：只在 capturing 时抓帧 ──
-            if (id == "tick" && capturing) {
+            // ── tick 输入：只在设备就绪 + 抓帧开关打开时工作 ──
+            if (id == "tick" && device_open && capturing) {
                 auto t0 = std::chrono::steady_clock::now();
 
                 cap >> frame;
@@ -92,7 +108,6 @@ int main() {
                     continue;
                 }
 
-                // BGR → RGB
                 cv::cvtColor(frame, rgb, cv::COLOR_BGR2RGB);
 
                 int data_len = rgb.total() * rgb.elemSize();
@@ -109,7 +124,6 @@ int main() {
                 auto capture_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - t0).count();
 
-                // 每秒统计
                 auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - last_report).count();
                 if (elapsed >= 1000) {
@@ -126,8 +140,8 @@ int main() {
         free_dora_event(event);
     }
 
-    // ── 4. 清理 ──
-    cap.release();
+    // ── 3. 清理 ──
+    if (device_open) camera_close(cap);
     free_dora_context(ctx);
     std::cout << "[camera-cpp] Shutting down (" << tick_count << " frames)" << std::endl;
     return 0;
