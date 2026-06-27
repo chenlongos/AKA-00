@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import {controlSocket} from "../api";
 import CameraToggle from "../components/CameraToggle";
+import TabBar from "../components/TabBar";
 import Page from "../components/Page";
 import {S} from "../styles";
 import {useViewportScale} from "../hooks/useViewportScale";
@@ -47,7 +48,6 @@ const RCDemoPage = () => {
 
     const showBottom = useCallback(() => {
         setBottomOpen(true);
-        window.dispatchEvent(new CustomEvent("toggle-tabbar", {detail: {show: true}}));
     }, []);
 
     const hideBottom = useCallback(() => {
@@ -252,8 +252,13 @@ const RCDemoPage = () => {
 
     // ====== 横屏：视频全屏 + 浮层控件 ======
     if (isLandscape) {
-        const joyAreaBottom = Math.round(56 * scale);
-        const throttleH = Math.min((vh - joyAreaBottom) * 0.65, Math.round(300 * scale));
+        // 读取实际 safe-area-inset-bottom（iPhone 横条 ~34px，普通设备 0）
+        const safeBottomPx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--safe-bottom")) || 0;
+        const scaledTabBarPx = Math.round(34 * scale);  // 缩放后的 tab bar 基础高度
+        const tabBarHeight = scaledTabBarPx + safeBottomPx;  // 总高度 = 基础 + 安全区
+        const joyAreaBottom = Math.round(20 * scale);
+        const navBarOffset = bottomOpen ? tabBarHeight : 0;
+        const throttleH = Math.min((vh - joyAreaBottom - navBarOffset) * 0.65, Math.round(300 * scale));
         const rotH = Math.round(64 * scale);
         return (
             <div style={{position: "fixed", inset: 0, background: "#000", overflow: "hidden"}}
@@ -273,19 +278,7 @@ const RCDemoPage = () => {
                 {/* 顶部信息 */}
                 <div style={{position: "absolute", top: 0, left: 0, right: 0, zIndex: 2,
                     padding: `${scalePx(6)} ${scalePx(12)}`, display: "flex",
-                    justifyContent: "space-between", alignItems: "center", pointerEvents: "auto"}}>
-                    <div style={{display: "flex", alignItems: "center", gap: scalePx(8)}}>
-                        <CameraToggle onStatusChange={setCameraOn} />
-                        {cameraOn && (
-                            <button onClick={() => setFpsIndex(i => (i + 1) % 3)} style={{
-                                background: fpsIndex > 0 ? "var(--color-success)" : "rgba(255,255,255,0.15)",
-                                border: "none", color: "#fff", padding: `${scalePx(2)} ${scalePx(6)}`,
-                                borderRadius: "var(--radius-sm)", fontSize: scalePx(9), fontWeight: 600, cursor: "pointer",
-                            }}>
-                                {FPS_LABELS[fpsIndex]}
-                            </button>
-                        )}
-                    </div>
+                    justifyContent: "flex-end", alignItems: "center", pointerEvents: "auto"}}>
                     <div style={{display: "flex", gap: scalePx(10), fontSize: scalePx(11), color: "#fff"}}>
                         <span>左 <b style={{color: "#4ade80"}}>{leftSpeed >= 0 ? "+" : ""}{leftSpeed.toFixed(1)}</b></span>
                         <span>右 <b style={{color: "#4ade80"}}>{rightSpeed >= 0 ? "+" : ""}{rightSpeed.toFixed(1)}</b></span>
@@ -294,7 +287,7 @@ const RCDemoPage = () => {
                 </div>
 
                 {/* 左下：油门 + 刹车 */}
-                <div style={{position: "absolute", left: joySide, bottom: joyAreaBottom + Math.round(vh * 0.02),
+                <div style={{position: "absolute", left: joySide, bottom: joyAreaBottom + navBarOffset + Math.round(vh * 0.02),
                     zIndex: 2, display: "flex", flexDirection: "column", alignItems: "center", gap: scalePx(6)}}>
                     {renderJoystick(thrEl, true, Math.round(70 * scale), throttleH, throttle, "var(--color-success)", handleThrottleMove, handleThrottleEnd)}
                     <span style={{fontSize: scalePx(10), fontWeight: 600, color: Math.abs(throttle) > 5 ? "var(--color-success)" : "rgba(255,255,255,0.5)"}}>
@@ -308,18 +301,30 @@ const RCDemoPage = () => {
                     }}>⏹ 刹车</button>
                 </div>
 
-                {/* 右下：抓取/释放 + 方向 */}
-                <div style={{position: "absolute", right: joySide, bottom: joyAreaBottom + Math.round(vh * 0.04),
+                {/* 右下：摄像头 + 抓取/释放 + 方向 */}
+                <div style={{position: "absolute", right: joySide, bottom: joyAreaBottom + navBarOffset + Math.round(vh * 0.04),
                     zIndex: 2, display: "flex", flexDirection: "column", alignItems: "center", gap: scalePx(6)}}>
-                    <div style={{display: "flex", gap: scalePx(6)}}>
+                    <div style={{display: "flex", alignItems: "center", gap: scalePx(6), alignSelf: "flex-end"}}>
+                        <CameraToggle onStatusChange={setCameraOn} />
+                        {cameraOn && (
+                            <button onClick={() => setFpsIndex(i => (i + 1) % 3)} style={{
+                                background: fpsIndex > 0 ? "var(--color-success)" : "rgba(255,255,255,0.15)",
+                                border: "none", color: "#fff", padding: `${scalePx(2)} ${scalePx(6)}`,
+                                borderRadius: "var(--radius-sm)", fontSize: scalePx(9), fontWeight: 600, cursor: "pointer",
+                            }}>
+                                {FPS_LABELS[fpsIndex]}
+                            </button>
+                        )}
+                    </div>
+                    <div style={{display: "flex", gap: scalePx(6), width: joyW}}>
                         <button onClick={() => handleArm("grab")} style={{
-                            padding: `${scalePx(5)} ${scalePx(12)}`, fontSize: scalePx(11), fontWeight: 700,
+                            flex: 1, padding: `${scalePx(8)} 0`, fontSize: scalePx(13), fontWeight: 700,
                             background: "linear-gradient(135deg, #16a34a, #22c55e)", border: "none", color: "#fff",
                             borderRadius: scalePx(6), cursor: "pointer", outline: "none",
                             boxShadow: "0 2px 8px rgba(34,197,94,0.3)",
                         }}>✋ 抓取</button>
                         <button onClick={() => handleArm("release")} style={{
-                            padding: `${scalePx(5)} ${scalePx(12)}`, fontSize: scalePx(11), fontWeight: 700,
+                            flex: 1, padding: `${scalePx(8)} 0`, fontSize: scalePx(13), fontWeight: 700,
                             background: "linear-gradient(135deg, #2563eb, #3b82f6)", border: "none", color: "#fff",
                             borderRadius: scalePx(6), cursor: "pointer", outline: "none",
                             boxShadow: "0 2px 8px rgba(59,130,246,0.3)",
@@ -332,8 +337,9 @@ const RCDemoPage = () => {
                 </div>
 
                 {/* 底部：折叠按钮 + TabBar */}
-                <div style={{position: "absolute", bottom: 0, left: 0, right: 0, zIndex: 3, display: "flex", justifyContent: "center"}}>
-                    <button onPointerDown={e => { e.stopPropagation(); showBottom(); }} style={{
+                <div style={{position: "absolute", bottom: bottomOpen ? tabBarHeight : 0, left: 0, right: 0, zIndex: 3,
+                    display: "flex", justifyContent: "center", transition: "bottom 0.3s ease"}}>
+                    <button onPointerDown={e => { e.stopPropagation(); bottomOpen ? hideBottom() : showBottom(); }} style={{
                         padding: `${scalePx(2)} ${scalePx(10)}`, fontSize: scalePx(10),
                         background: "rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.15)",
                         color: "#fff", borderRadius: `${scalePx(6)} ${scalePx(6)} 0 0`,
@@ -342,6 +348,16 @@ const RCDemoPage = () => {
                         {bottomOpen ? "▼ 导航" : "▲ 导航"}
                     </button>
                 </div>
+
+                {/* 横屏内嵌 TabBar — 覆盖 --tab-bar-height 跟随缩放 */}
+                {bottomOpen && (
+                    <div style={{
+                        position: "absolute", bottom: 0, left: 0, right: 0, zIndex: 3,
+                        "--tab-bar-height": `${scaledTabBarPx}px`,
+                    } as React.CSSProperties}>
+                        <TabBar />
+                    </div>
+                )}
 
             </div>
         );
