@@ -264,7 +264,7 @@ const RCDemoPage = () => {
     if (isLandscape) {
         // 读取实际 safe-area-inset-bottom（iPhone 横条 ~34px，普通设备 0）
         const safeBottomPx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--safe-bottom")) || 0;
-        const scaledTabBarPx = Math.round(44 * scale);  // 跟随全局 --tab-bar-height
+        const scaledTabBarPx = Math.round(34 * scale);  // 跟随全局 --tab-bar-height
         const tabBarHeight = scaledTabBarPx + safeBottomPx;  // 总高度 = 基础 + 安全区
         const joyAreaBottom = Math.round(12 * scale);
         const navBarOffset = bottomOpen ? tabBarHeight : 0;

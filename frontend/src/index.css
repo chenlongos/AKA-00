@@ -57,7 +57,7 @@
   --safe-top: env(safe-area-inset-top, 0px);
 
   /* --- Layout --- */
-  --tab-bar-height: 44px;
+  --tab-bar-height: 56px;
   --header-height: 48px;
 }
 
