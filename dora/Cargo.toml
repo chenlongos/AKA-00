@@ -1,0 +1,3 @@
+[workspace]
+members = ["display-node", "dora-c-ffi"]
+resolver = "2"

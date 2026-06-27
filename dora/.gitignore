@@ -1,2 +1,4 @@
-target
-out
+target/
+out/
+camera-node/camera-node
+.DS_Store

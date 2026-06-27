@@ -1,0 +1,14 @@
+nodes:
+  - id: camera
+    build: make -C camera-node
+    path: camera-node/camera-node
+    inputs:
+      tick: dora/timer/millis/33
+    outputs:
+      - image
+
+  - id: display
+    build: cargo build -p display-node --release
+    path: target/release/display-node
+    inputs:
+      image: camera/image
