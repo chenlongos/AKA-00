@@ -118,6 +118,11 @@ class TtPidChassis:
         self.ser.flush()
         return self._recv_frame(timeout)
 
+    def _send_cmd_noresp(self, cmd: int, payload: bytes = b"") -> None:
+        """Fire-and-forget: 发送指令但不等待回复，避免阻塞事件循环。"""
+        self.ser.write(self._build_frame(cmd, payload))
+        self.ser.flush()
+
     def _init(self) -> bool:
         rsp = self._send_cmd(CMD_INIT)
         return rsp is not None and rsp["cmd"] == RSP_ACK
@@ -142,17 +147,17 @@ class TtPidChassis:
         self._set_speeds(left_pwm, right_pwm)
 
     def _set_speeds(self, left: int, right: int) -> None:
-        """同时设置左右轮速度（单帧命令）"""
+        """同时设置左右轮速度（单帧命令，fire-and-forget）"""
         payload = struct.pack(">hh", left, right)
-        self._send_cmd(CMD_SET_SPEEDS, payload)
+        self._send_cmd_noresp(CMD_SET_SPEEDS, payload)
 
     def brake(self) -> None:
-        """刹车两个电机（单帧，motor_id=2 同时刹两个）。"""
-        self._send_cmd(CMD_BRAKE, bytes([2]))
+        """刹车两个电机（fire-and-forget）。"""
+        self._send_cmd_noresp(CMD_BRAKE, bytes([2]))
 
     def sleep(self) -> None:
-        """滑行停止两个电机（单帧，motor_id=2 同时停两个）。"""
-        self._send_cmd(CMD_STOP, bytes([2]))
+        """滑行停止两个电机（fire-and-forget）。"""
+        self._send_cmd_noresp(CMD_STOP, bytes([2]))
 
     def get_rpm(self) -> Optional[RpmData]:
         """获取左右轮 RPM（mid=2 返回两个电机数据帧）。"""

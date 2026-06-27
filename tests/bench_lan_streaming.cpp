@@ -465,6 +465,7 @@ private:
         std::string recv_buf;
         bool is_stream = false;     // MJPEG stream client
         uint64_t last_frame_seq = 0;
+        uint64_t last_failed_seq = 0;  // don't retry this frame
     };
 
     void _detect_ip() {
@@ -618,7 +619,7 @@ private:
         ev.data.fd = fd;
         epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &ev);
 
-        clients.push_back({fd, "", false, 0});
+        clients.push_back({fd, "", false, 0, 0});
         _stats.active_clients = (int)clients.size();
     }
 
@@ -648,7 +649,7 @@ private:
         int sndbuf = 256 * 1024;
         setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
 
-        clients.push_back({fd, "", false, 0});
+        clients.push_back({fd, "", false, 0, 0});
         _stats.active_clients = (int)clients.size();
     }
 
@@ -791,6 +792,12 @@ private:
             if (!c.is_stream) continue;
             if (c.last_frame_seq == seq) continue;
 
+            // Don't retry a frame that already failed on this client.
+            // Wait for a new frame from the camera instead.
+            if (c.last_failed_seq == seq) continue;
+            // New frame arrived — clear the failure mark
+            c.last_failed_seq = 0;
+
             double send_t0 = now_us();
 
             // TCP_CORK: tell the kernel to hold packets until we uncork,
@@ -805,8 +812,10 @@ private:
                 // Success — record timing
                 c.last_frame_seq = seq;
                 _stats.send_latency_us.push(send_t1 - send_t0);
+            } else if (rc == -1) {
+                // EAGAIN — skip, don't retry same frame, wait for next one
+                c.last_failed_seq = seq;
             }
-            // rc == -1: EAGAIN — socket buffer full, silently skip frame
             // rc == -2: real error — client will be cleaned by next epoll cycle
         }
     }
@@ -850,7 +859,7 @@ private:
             ssize_t n = writev(fd, iov_ptr, iov_remain);
             if (n < 0) {
                 if (errno == EAGAIN || errno == EWOULDBLOCK)
-                    return -1;   // socket buffer full — caller should skip this frame
+                    return -1;   // socket buffer full — skip frame, catch next one
                 return -2;       // real error — caller should close client
             }
             written += n;

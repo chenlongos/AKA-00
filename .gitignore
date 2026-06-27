@@ -3,5 +3,4 @@ __pycache__/
 static
 output/
 checkpoints/
-dora
 dist/
