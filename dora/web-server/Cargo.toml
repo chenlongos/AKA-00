@@ -1,0 +1,18 @@
+[package]
+name = "web-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dora-node-api = "0.5"
+dora-message = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+axum = "0.7"
+async-stream = "0.3"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors"] }
+image = "0.25"
+arrow = "54"
+eyre = "0.6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

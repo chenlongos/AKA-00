@@ -7,8 +7,8 @@ nodes:
     outputs:
       - image
 
-  - id: display
-    build: cargo build -p display-node --release
-    path: target/release/display-node
+  - id: web-server
+    build: cargo build -p web-server --release
+    path: target/release/web-server
     inputs:
       image: camera/image
