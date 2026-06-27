@@ -22,7 +22,7 @@ int main() {
     }
     std::cout << "[camera-cpp] Dora context initialized" << std::endl;
 
-    // ── 2. 打开摄像头 ──
+    // ── 2. 打开摄像头（始终保持打开，避免 reopen 延迟）──
     cv::VideoCapture cap(0);
     if (!cap.isOpened()) {
         std::cerr << "[camera-cpp] Failed to open camera" << std::endl;
@@ -37,19 +37,20 @@ int main() {
     int actual_w = (int)cap.get(cv::CAP_PROP_FRAME_WIDTH);
     int actual_h = (int)cap.get(cv::CAP_PROP_FRAME_HEIGHT);
     std::cout << "[camera-cpp] Camera opened " << actual_w << "x" << actual_h
-              << ", waiting for ticks..." << std::endl;
+              << ", waiting for start command..." << std::endl;
 
     // ── 3. 事件循环 ──
     cv::Mat frame, rgb;
-    uint64_t tick_count = 0;
-    auto last_report = std::chrono::steady_clock::now();
+    bool    capturing   = false;   // 由 control 输入控制
+    uint64_t tick_count  = 0;
+    auto     last_report = std::chrono::steady_clock::now();
     uint64_t fps_counter = 0;
 
     while (true) {
         void *event = dora_next_event(ctx);
         if (!event) continue;
 
-        int ev_type = read_dora_event_type((void *)event);  // cast away const for C API
+        int ev_type = read_dora_event_type((void *)event);
 
         if (ev_type == DoraEventType_Stop) {
             std::cout << "[camera-cpp] Stop received, exiting" << std::endl;
@@ -58,16 +59,33 @@ int main() {
         }
 
         if (ev_type == DoraEventType_Input) {
-            // 读取 input ID
             char *id_ptr = nullptr;
             size_t id_len = 0;
             read_dora_input_id(event, &id_ptr, &id_len);
             std::string id(id_ptr, id_len);
 
-            if (id == "tick") {
+            // ── control 输入：start / stop ──
+            if (id == "control") {
+                char *data_ptr = nullptr;
+                size_t data_len = 0;
+                read_dora_input_data(event, &data_ptr, &data_len);
+                std::string cmd(data_ptr, data_len);
+
+                if (cmd == "start") {
+                    capturing = true;
+                    std::cout << "[camera-cpp] ▶  capture started" << std::endl;
+                } else if (cmd == "stop") {
+                    capturing = false;
+                    std::cout << "[camera-cpp] ⏸  capture stopped" << std::endl;
+                }
+                free_dora_event(event);
+                continue;
+            }
+
+            // ── tick 输入：只在 capturing 时抓帧 ──
+            if (id == "tick" && capturing) {
                 auto t0 = std::chrono::steady_clock::now();
 
-                // 捕获一帧
                 cap >> frame;
                 if (frame.empty()) {
                     free_dora_event(event);
@@ -79,7 +97,6 @@ int main() {
 
                 int data_len = rgb.total() * rgb.elemSize();
 
-                // 发送原始 RGB 数据
                 dora_send_output(
                     ctx,
                     (char *)"image", 5,
@@ -112,6 +129,6 @@ int main() {
     // ── 4. 清理 ──
     cap.release();
     free_dora_context(ctx);
-    std::cout << "[camera-cpp] Shutting down (" << tick_count << " ticks)" << std::endl;
+    std::cout << "[camera-cpp] Shutting down (" << tick_count << " frames)" << std::endl;
     return 0;
 }
