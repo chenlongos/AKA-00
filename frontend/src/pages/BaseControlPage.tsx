@@ -2,6 +2,7 @@ import {useEffect, useRef, useState} from "react";
 import {controlSocket} from "../api";
 import ControlButton from "../components/ControlButton.tsx";
 import CameraToggle from "../components/CameraToggle";
+import FullscreenButton from "../components/FullscreenButton";
 import Page from "../components/Page";
 import AlertDialog from "../components/AlertDialog";
 import {S} from "../styles";
@@ -174,6 +175,7 @@ const BaseControlPage = () => {
                                     <span style={S.muted}>{status}</span>
                                 </div>
                                 <div style={{...S.row, gap: scalePx(6)}}>
+                                    <FullscreenButton />
                                     <span style={S.muted}>摄像头</span>
                                     <CameraToggle />
                                 </div>
@@ -209,6 +211,7 @@ const BaseControlPage = () => {
                     <span style={S.muted}>{status}</span>
                 </div>
                 <div style={{...S.row, gap: scalePx(6)}}>
+                    <FullscreenButton />
                     <span style={S.muted}>摄像头</span>
                     <CameraToggle />
                 </div>

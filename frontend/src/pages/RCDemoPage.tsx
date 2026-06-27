@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import {api, controlSocket} from "../api";
 import CameraToggle from "../components/CameraToggle";
+import FullscreenButton from "../components/FullscreenButton";
 import TabBar from "../components/TabBar";
 import Page from "../components/Page";
 import {S} from "../styles";
@@ -263,9 +264,9 @@ const RCDemoPage = () => {
     if (isLandscape) {
         // 读取实际 safe-area-inset-bottom（iPhone 横条 ~34px，普通设备 0）
         const safeBottomPx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--safe-bottom")) || 0;
-        const scaledTabBarPx = Math.round(34 * scale);  // 缩放后的 tab bar 基础高度
+        const scaledTabBarPx = Math.round(44 * scale);  // 跟随全局 --tab-bar-height
         const tabBarHeight = scaledTabBarPx + safeBottomPx;  // 总高度 = 基础 + 安全区
-        const joyAreaBottom = Math.round(20 * scale);
+        const joyAreaBottom = Math.round(12 * scale);
         const navBarOffset = bottomOpen ? tabBarHeight : 0;
         const throttleH = Math.min((vh - joyAreaBottom - navBarOffset) * 0.65, Math.round(300 * scale));
         const rotH = Math.round(64 * scale);
@@ -289,7 +290,8 @@ const RCDemoPage = () => {
                 {/* 顶部信息 */}
                 <div style={{position: "absolute", top: 0, left: 0, right: 0, zIndex: 2,
                     padding: `${scalePx(6)} ${scalePx(12)}`, display: "flex",
-                    justifyContent: "flex-end", alignItems: "center", pointerEvents: "auto"}}>
+                    justifyContent: "flex-end", alignItems: "center", gap: scalePx(8), pointerEvents: "auto"}}>
+                    <FullscreenButton />
                     <div style={{display: "flex", gap: scalePx(10), fontSize: scalePx(11), color: "#fff"}}>
                         <span>左 <b style={{color: "#4ade80"}}>{leftSpeed >= 0 ? "+" : ""}{leftSpeed.toFixed(1)}</b></span>
                         <span>右 <b style={{color: "#4ade80"}}>{rightSpeed >= 0 ? "+" : ""}{rightSpeed.toFixed(1)}</b></span>
@@ -390,7 +392,8 @@ const RCDemoPage = () => {
                 {/* 顶部栏 */}
                 <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", height: topH, marginTop: "5px"}}>
                     <CameraBar scalePx={scalePx} cameraOn={cameraOn} fpsIndex={fpsIndex} onStatusChange={setCameraOn} onFpsChange={() => setFpsIndex(i => (i + 1) % 3)} syncKey={cameraSyncKey} />
-                    <div style={{display: "flex", gap: scalePx(8), fontSize: scalePx(10), whiteSpace: "nowrap"}}>
+                    <div style={{display: "flex", gap: scalePx(8), fontSize: scalePx(10), whiteSpace: "nowrap", alignItems: "center"}}>
+                        <FullscreenButton />
                         <span>左 <b style={S.success}>{leftSpeed >= 0 ? "+" : ""}{leftSpeed.toFixed(1)}</b></span>
                         <span>右 <b style={S.success}>{rightSpeed >= 0 ? "+" : ""}{rightSpeed.toFixed(1)}</b></span>
                         <span style={S.dot(wsConnected)} />
