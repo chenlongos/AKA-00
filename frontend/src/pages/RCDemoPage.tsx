@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useRef, useState} from "react";
-import {controlSocket} from "../api";
+import {api, controlSocket} from "../api";
 import CameraToggle from "../components/CameraToggle";
 import TabBar from "../components/TabBar";
 import Page from "../components/Page";
@@ -10,16 +10,17 @@ const FPS_OPTIONS = [30, 20, 10];
 const FPS_LABELS = ["高清", "均衡", "省流"];
 
 const CameraBar = ({
-    scalePx, cameraOn, fpsIndex, onStatusChange, onFpsChange,
+    scalePx, cameraOn, fpsIndex, onStatusChange, onFpsChange, syncKey,
 }: {
     scalePx: (px: number) => string;
     cameraOn: boolean;
     fpsIndex: number;
     onStatusChange: (on: boolean) => void;
     onFpsChange: () => void;
+    syncKey: number;
 }) => (
     <div style={{display: "flex", alignItems: "center", gap: scalePx(6)}}>
-        <CameraToggle onStatusChange={onStatusChange} />
+        <CameraToggle key={syncKey} onStatusChange={onStatusChange} />
         {cameraOn && (
             <button onClick={onFpsChange} style={{
                 background: fpsIndex > 0 ? "var(--color-success)" : "var(--color-bg-elevated)",
@@ -41,6 +42,7 @@ const RCDemoPage = () => {
     const [throttle, setThrottle] = useState(0);
     const [rotation, setRotation] = useState(0);
     const [cameraOn, setCameraOn] = useState(false);
+    const [cameraSyncKey, setCameraSyncKey] = useState(0);
     const [fpsIndex, setFpsIndex] = useState(0);
     const [wsConnected, setWsConnected] = useState(false);
     const [isLandscape, setIsLandscape] = useState(() => window.innerWidth > window.innerHeight);
@@ -205,12 +207,19 @@ const RCDemoPage = () => {
                 style={{
                     width: w, height: h,
                     borderRadius: scalePx(16),
-                    background: `rgba(255,255,255,${active ? 0.12 : 0.06})`,
                     border: `2px solid ${active ? color : "rgba(255,255,255,0.15)"}`,
                     position: "relative", touchAction: "none", cursor: "pointer", flexShrink: 0,
-                    backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)",
+                    overflow: "hidden",
                 }}
             >
+                {/* 毛玻璃背景层 — 只改 opacity，不触发 repaint/blur 重算 */}
+                <div style={{
+                    position: "absolute", inset: 0,
+                    background: "rgba(255,255,255,0.12)",
+                    backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)",
+                    opacity: active ? 1 : 0.5,
+                    transition: "opacity 0.15s ease",
+                }}/>
                 <div style={{
                     position: "absolute",
                     left: vert ? "50%" : 0, top: vert ? 0 : "50%",
@@ -269,8 +278,10 @@ const RCDemoPage = () => {
                         <img src={`/api/camera/stream?fps=${FPS_OPTIONS[fpsIndex]}`}
                              style={{width: "100%", height: "100%", objectFit: "cover", display: "block"}} alt="" />
                     ) : (
-                        <div style={{display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--color-text-muted)", fontSize: scalePx(16)}}>
-                            摄像头关闭
+                        <div
+                            onPointerDown={e => { e.stopPropagation(); api.camera.open().then(d => { setCameraOn(d.camera_on); setCameraSyncKey(k => k + 1); }); }}
+                            style={{display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--color-text-muted)", fontSize: scalePx(16), cursor: "pointer"}}>
+                            摄像头关闭 — 点击开启
                         </div>
                     )}
                 </div>
@@ -305,7 +316,7 @@ const RCDemoPage = () => {
                 <div style={{position: "absolute", right: joySide, bottom: joyAreaBottom + navBarOffset + Math.round(vh * 0.04),
                     zIndex: 2, display: "flex", flexDirection: "column", alignItems: "center", gap: scalePx(6)}}>
                     <div style={{display: "flex", alignItems: "center", gap: scalePx(6), alignSelf: "flex-end"}}>
-                        <CameraToggle onStatusChange={setCameraOn} />
+                        <CameraToggle key={cameraSyncKey} onStatusChange={setCameraOn} />
                         {cameraOn && (
                             <button onClick={() => setFpsIndex(i => (i + 1) % 3)} style={{
                                 background: fpsIndex > 0 ? "var(--color-success)" : "rgba(255,255,255,0.15)",
@@ -351,7 +362,9 @@ const RCDemoPage = () => {
 
                 {/* 横屏内嵌 TabBar — 覆盖 --tab-bar-height 跟随缩放 */}
                 {bottomOpen && (
-                    <div style={{
+                    <div
+                        onPointerDown={e => e.stopPropagation()}
+                        style={{
                         position: "absolute", bottom: 0, left: 0, right: 0, zIndex: 3,
                         "--tab-bar-height": `${scaledTabBarPx}px`,
                     } as React.CSSProperties}>
@@ -376,7 +389,7 @@ const RCDemoPage = () => {
             <div style={{...S.col, gap, alignItems: "center", width: pVideoW}}>
                 {/* 顶部栏 */}
                 <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", height: topH, marginTop: "5px"}}>
-                    <CameraBar scalePx={scalePx} cameraOn={cameraOn} fpsIndex={fpsIndex} onStatusChange={setCameraOn} onFpsChange={() => setFpsIndex(i => (i + 1) % 3)} />
+                    <CameraBar scalePx={scalePx} cameraOn={cameraOn} fpsIndex={fpsIndex} onStatusChange={setCameraOn} onFpsChange={() => setFpsIndex(i => (i + 1) % 3)} syncKey={cameraSyncKey} />
                     <div style={{display: "flex", gap: scalePx(8), fontSize: scalePx(10), whiteSpace: "nowrap"}}>
                         <span>左 <b style={S.success}>{leftSpeed >= 0 ? "+" : ""}{leftSpeed.toFixed(1)}</b></span>
                         <span>右 <b style={S.success}>{rightSpeed >= 0 ? "+" : ""}{rightSpeed.toFixed(1)}</b></span>
