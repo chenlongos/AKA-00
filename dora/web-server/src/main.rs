@@ -11,7 +11,6 @@ mod services;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::{routing::get, Router};
 use dora_node_api::{self, DoraNode, Event};
 use dora_node_api::futures::StreamExt;
 use eyre::{Context, Result};
@@ -38,12 +37,7 @@ async fn run() -> Result<()> {
     let static_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/static");
     println!("[web-server] Static files: {}", static_dir);
 
-    let app = Router::new()
-        .route("/api/camera/status", get(routes::camera::status))
-        .route("/api/camera/open", axum::routing::post(routes::camera::open))
-        .route("/api/camera/close", axum::routing::post(routes::camera::close))
-        .route("/api/camera/stream", get(routes::camera::stream))
-        .route("/api/camera/snapshot", get(routes::camera::snapshot))
+    let app = routes::camera::router()
         .fallback_service(ServeDir::new(static_dir))
         .with_state(camera_svc.clone());
 

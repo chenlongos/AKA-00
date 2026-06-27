@@ -9,11 +9,22 @@ use axum::{
     body::Body,
     extract::{Query, State},
     http::{header, Response, StatusCode},
-    Json,
+    routing::{get, post},
+    Json, Router,
 };
 use serde::Deserialize;
 
 use crate::services::camera::CameraService;
+
+/// 注册所有 camera 路由（仿 Flask blueprint）
+pub fn router() -> Router<Arc<CameraService>> {
+    Router::new()
+        .route("/api/camera/status", get(status))
+        .route("/api/camera/open", post(open))
+        .route("/api/camera/close", post(close))
+        .route("/api/camera/stream", get(stream))
+        .route("/api/camera/snapshot", get(snapshot))
+}
 
 const BOUNDARY: &str = "dora-frame";
 
