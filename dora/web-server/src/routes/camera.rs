@@ -1,9 +1,8 @@
-//! Camera API handlers — 路径和响应格式完全匹配 frontend/src/api.ts
+//! Camera HTTP 路由 —— 薄层，只做参数解析和序列化，业务逻辑委托给 CameraService
 //!
-//! 不做任何前端改动，只需将 Vite build 产物放到 static/ 即可使用。
+//! 对应 Python 项目 `app/routes/camera.py` 的职责。
+//! API 契约完全匹配 frontend/src/api.ts，不修改前端代码。
 
-use std::collections::BTreeMap;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use axum::{
@@ -14,61 +13,44 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::AppState;
+use crate::services::camera::CameraService;
 
 const BOUNDARY: &str = "dora-frame";
 
 // ── 响应类型 ──
 
-/// 前端期望的 camera status / open / close 响应格式
 #[derive(serde::Serialize)]
-pub(crate) struct CameraStatus {
+pub struct CameraStatus {
     pub camera_on: bool,
 }
 
 // ── GET /api/camera/status ──
 
-pub async fn status(State(state): State<Arc<AppState>>) -> Json<CameraStatus> {
+pub async fn status(State(svc): State<Arc<CameraService>>) -> Json<CameraStatus> {
     Json(CameraStatus {
-        camera_on: state.camera_active.load(Ordering::Relaxed),
+        camera_on: svc.is_active(),
     })
 }
 
 // ── POST /api/camera/open ──
 
-pub async fn open(State(state): State<Arc<AppState>>) -> Result<Json<CameraStatus>, StatusCode> {
-    if state.camera_active.swap(true, Ordering::Relaxed) {
-        // 已经开启，直接返回
-        return Ok(Json(CameraStatus { camera_on: true }));
-    }
-
-    let mut node = state.node.lock().await;
-    node.send_output_bytes("control".into(), BTreeMap::new(), 5, b"start")
-        .map_err(|e| {
-            eprintln!("[web-server] send start failed: {:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-    println!("[web-server] 📷 camera on");
+pub async fn open(State(svc): State<Arc<CameraService>>) -> Result<Json<CameraStatus>, StatusCode> {
+    svc.open().await.map_err(|e| {
+        eprintln!("[camera-route] open failed: {:?}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
     Ok(Json(CameraStatus { camera_on: true }))
 }
 
 // ── POST /api/camera/close ──
 
-pub async fn close(State(state): State<Arc<AppState>>) -> Result<Json<CameraStatus>, StatusCode> {
-    if !state.camera_active.swap(false, Ordering::Relaxed) {
-        // 已经关闭
-        return Ok(Json(CameraStatus { camera_on: false }));
-    }
-
-    let mut node = state.node.lock().await;
-    node.send_output_bytes("control".into(), BTreeMap::new(), 4, b"stop")
-        .map_err(|e| {
-            eprintln!("[web-server] send stop failed: {:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-    println!("[web-server] ⏸  camera off");
+pub async fn close(
+    State(svc): State<Arc<CameraService>>,
+) -> Result<Json<CameraStatus>, StatusCode> {
+    svc.close().await.map_err(|e| {
+        eprintln!("[camera-route] close failed: {:?}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
     Ok(Json(CameraStatus { camera_on: false }))
 }
 
@@ -76,18 +58,17 @@ pub async fn close(State(state): State<Arc<AppState>>) -> Result<Json<CameraStat
 
 #[derive(Deserialize, Default)]
 pub struct StreamParams {
+    #[allow(dead_code)]
     fps: Option<u32>,
 }
 
 pub async fn stream(
-    State(state): State<Arc<AppState>>,
-    Query(params): Query<StreamParams>,
+    State(svc): State<Arc<CameraService>>,
+    Query(_params): Query<StreamParams>,
 ) -> Response<Body> {
-    let _fps = params.fps.unwrap_or(30);
-    let mut rx = state.frame_tx.subscribe();
+    let mut rx = svc.subscribe();
 
     let stream = async_stream::stream! {
-        // 立即发送当前帧
         {
             let jpeg = rx.borrow_and_update().clone();
             if !jpeg.is_empty() {
@@ -119,9 +100,12 @@ pub async fn stream(
         .unwrap()
 }
 
-/// GET /api/camera/snapshot — 当前帧的 base64 JPEG（兼容老 API）
-pub async fn snapshot(State(state): State<Arc<AppState>>) -> Result<Json<serde_json::Value>, StatusCode> {
-    let jpeg = state.frame_tx.borrow().clone();
+// ── GET /api/camera/snapshot ──
+
+pub async fn snapshot(
+    State(svc): State<Arc<CameraService>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let jpeg = svc.current_frame();
     if jpeg.is_empty() {
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
