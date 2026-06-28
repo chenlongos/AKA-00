@@ -46,12 +46,20 @@ fn main() -> Result<()> {
 }
 
 async fn run() -> Result<()> {
+    let config = dora_config::Config::load();
+
     let (node, mut events) = DoraNode::init_from_env()
         .wrap_err("Failed to init dora node")?;
     println!("[motor-bridge] Dora node initialized");
 
+    let driver_config = DriverConfig {
+        backend: Some(config.motor.backend),
+        port: Some(config.motor.port),
+        baudrate: Some(config.motor.baudrate),
+        ppr: Some(config.motor.ppr),
+    };
     let driver: Arc<Mutex<Box<dyn MotorDriver>>> =
-        Arc::new(Mutex::new(create_driver(&DriverConfig::default())));
+        Arc::new(Mutex::new(create_driver(&driver_config)));
     println!("[motor-bridge] Driver ready");
 
     // 定时回报电机状态（每 200ms，与 WebSocket 0xBB 同步）

@@ -38,6 +38,9 @@ fn main() -> Result<()> {
 }
 
 async fn run() -> Result<()> {
+    // ── 读取配置 ──
+    let config = dora_config::Config::load();
+
     // ── dora 初始化 ──
     let (node, mut events) = DoraNode::init_from_env()
         .wrap_err("Failed to init dora node")?;
@@ -47,7 +50,7 @@ async fn run() -> Result<()> {
 
     // ── 服务层 ──
     let state = Arc::new(AppState {
-        camera: Arc::new(CameraService::new(dora.clone())),
+        camera: Arc::new(CameraService::new(dora.clone(), config.camera.clone())),
         motor: Arc::new(MotorService::new(dora)),
     });
 
@@ -62,9 +65,9 @@ async fn run() -> Result<()> {
         .with_state(state.clone());
 
     // ── 启动 HTTP ──
-    let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
+    let addr = SocketAddr::from(([0, 0, 0, 0], config.web.port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    println!("[web-server] Listening on http://0.0.0.0:8080");
+    println!("[web-server] Listening on http://0.0.0.0:{}", config.web.port);
 
     let server_handle = tokio::spawn(async { axum::serve(listener, app).await.unwrap() });
 

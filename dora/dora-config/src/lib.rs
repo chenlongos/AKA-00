@@ -1,0 +1,70 @@
+//! dora 统一配置 — 对应 app/config.py 的 HardwareConfig
+//!
+//! 所有节点通过 `dora_config::load()` 读取同一份 config.toml。
+
+use serde::Deserialize;
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Config {
+    pub camera: CameraConfig,
+    pub motor: MotorConfig,
+    pub arm: ArmConfig,
+    pub web: WebConfig,
+    pub calibration: CalibrationConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CameraConfig {
+    pub width: u32,
+    pub height: u32,
+    pub fps: u32,
+    pub jpeg_quality: u8,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MotorConfig {
+    pub backend: String,
+    pub port: String,
+    pub baudrate: u32,
+    pub ppr: i32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ArmConfig {
+    pub backend: String,
+    pub port: String,
+    pub baudrate: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WebConfig {
+    pub port: u16,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CalibrationConfig {
+    pub m: f64,
+    pub c: f64,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            camera: CameraConfig { width: 640, height: 480, fps: 30, jpeg_quality: 70 },
+            motor: MotorConfig { backend: "dev".into(), port: "/dev/ttyS1".into(), baudrate: 115200, ppr: 4680 },
+            arm: ArmConfig { backend: "dev".into(), port: "/dev/ttyS2".into(), baudrate: 115200 },
+            web: WebConfig { port: 8080 },
+            calibration: CalibrationConfig { m: 2671.82, c: -2.82 },
+        }
+    }
+}
+
+impl Config {
+    /// 从当前目录的 config.toml 加载，文件不存在则返回默认值
+    pub fn load() -> Self {
+        std::fs::read_to_string("config.toml")
+            .ok()
+            .and_then(|s| toml::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+}

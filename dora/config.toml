@@ -1,0 +1,29 @@
+# dora 机器人配置文件
+# 对应 app/config.py 的 HardwareConfig
+
+[camera]
+width = 640
+height = 480
+fps = 30
+jpeg_quality = 70
+
+[motor]
+# 底盘驱动类型："dev" (开发模式), "tt_pid" (真实硬件)
+backend = "dev"
+port = "/dev/ttyS1"
+baudrate = 115200
+ppr = 4680
+
+[arm]
+# 机械臂驱动类型："dev" (开发模式), "zp10s" (真实硬件)
+backend = "dev"
+port = "/dev/ttyS2"
+baudrate = 115200
+
+[web]
+port = 8080
+
+[calibration]
+# 距离标定: D = m / P + c
+m = 2671.82
+c = -2.82

@@ -10,10 +10,6 @@ use dora_node_api::DoraNode;
 use eyre::Context;
 use tokio::sync::{watch, Mutex};
 
-const SRC_WIDTH: u32 = 640;
-const SRC_HEIGHT: u32 = 480;
-const JPEG_QUALITY: u8 = 70;
-
 /// 摄像头服务：单例，被 routes 和 dora 事件循环共享
 pub struct CameraService {
     /// MJPEG 帧广播
@@ -22,10 +18,12 @@ pub struct CameraService {
     active: Arc<AtomicBool>,
     /// dora 节点句柄，用于发送 control 消息到 camera 节点
     node: Arc<Mutex<DoraNode>>,
+    /// 配置（分辨率、JPEG 质量）
+    config: dora_config::CameraConfig,
 }
 
 impl CameraService {
-    pub fn new(node: Arc<Mutex<DoraNode>>) -> Self {
+    pub fn new(node: Arc<Mutex<DoraNode>>, config: dora_config::CameraConfig) -> Self {
         let (frame_tx, _rx) = watch::channel(Vec::new());
         std::mem::forget(_rx);
 
@@ -33,6 +31,7 @@ impl CameraService {
             frame_tx,
             active: Arc::new(AtomicBool::new(false)),
             node,
+            config,
         }
     }
 
@@ -95,7 +94,7 @@ impl CameraService {
             return;
         }
 
-        if let Some(jpeg) = Self::rgb_to_jpeg(data) {
+        if let Some(jpeg) = self.rgb_to_jpeg(data) {
             self.frame_tx.send_replace(jpeg);
         }
     }
@@ -103,26 +102,23 @@ impl CameraService {
 
 impl CameraService {
     /// Arrow UInt8 RGB → JPEG bytes
-    fn rgb_to_jpeg(data: &dora_node_api::ArrowData) -> Option<Vec<u8>> {
+    fn rgb_to_jpeg(&self, data: &dora_node_api::ArrowData) -> Option<Vec<u8>> {
         use arrow::array::AsArray;
         let uint8_arr = data.as_primitive::<arrow::datatypes::UInt8Type>();
         let rgb = uint8_arr.values();
 
-        let expected = (SRC_WIDTH * SRC_HEIGHT * 3) as usize;
+        let w = self.config.width;
+        let h = self.config.height;
+        let expected = (w * h * 3) as usize;
         if rgb.len() < expected {
             return None;
         }
 
         let mut buf = Vec::new();
         let mut enc =
-            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, JPEG_QUALITY);
-        enc.encode(
-            &rgb[..expected],
-            SRC_WIDTH,
-            SRC_HEIGHT,
-            image::ExtendedColorType::Rgb8,
-        )
-        .ok()?;
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, self.config.jpeg_quality);
+        enc.encode(&rgb[..expected], w, h, image::ExtendedColorType::Rgb8)
+            .ok()?;
         Some(buf)
     }
 }
