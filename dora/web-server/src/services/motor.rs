@@ -18,6 +18,7 @@ pub struct MotorStatus {
 
 /// 控制动作
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Action {
     Up,
     Down,

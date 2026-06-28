@@ -16,3 +16,11 @@ nodes:
     outputs:
       - control
       - motor_cmd
+
+  - id: motor-bridge
+    build: cargo build -p motor-bridge --release
+    path: target/release/motor-bridge
+    inputs:
+      motor_cmd: web-server/motor_cmd
+    outputs:
+      - motor_status
