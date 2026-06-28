@@ -42,6 +42,10 @@ impl CameraService {
     pub fn is_active(&self) -> bool {
         self.active.load(Ordering::Relaxed)
     }
+    /// 从 state-node 同步摄像头状态
+    pub fn set_active(&self, on: bool) {
+        self.active.store(on, Ordering::Relaxed);
+    }
 
     /// 订阅帧流（供 /stream 使用）
     pub fn subscribe(&self) -> watch::Receiver<Vec<u8>> {

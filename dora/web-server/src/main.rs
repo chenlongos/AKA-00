@@ -73,12 +73,18 @@ async fn run() -> Result<()> {
         match event {
             Event::Input { id, data, .. } => match id.to_string().as_str() {
                 "image" => state.camera.push_frame(&data),
-                "motor_status" => {
+                "robot_state" => {
                     let uint8_arr = data.as_primitive::<arrow::datatypes::UInt8Type>();
                     if let Ok(v) = serde_json::from_slice::<serde_json::Value>(uint8_arr.values()) {
-                        let left = v["left_rpm"].as_i64().unwrap_or(0) as i32;
-                        let right = v["right_rpm"].as_i64().unwrap_or(0) as i32;
-                        state.motor.update_rpm(left, right);
+                        // 电机状态
+                        state.motor.update_rpm(
+                            v["motor_left_rpm"].as_i64().unwrap_or(0) as i32,
+                            v["motor_right_rpm"].as_i64().unwrap_or(0) as i32,
+                        );
+                        // 摄像头状态
+                        if let Some(on) = v["camera_on"].as_bool() {
+                            state.camera.set_active(on);
+                        }
                     }
                 }
                 _ => {}

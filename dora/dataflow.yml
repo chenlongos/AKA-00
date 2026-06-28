@@ -8,16 +8,6 @@ nodes:
     outputs:
       - image
 
-  - id: web-server
-    build: cargo build -p web-server --release
-    path: target/release/web-server
-    inputs:
-      image: camera/image
-      motor_status: motor-bridge/motor_status
-    outputs:
-      - control
-      - motor_cmd
-
   - id: motor-bridge
     build: cargo build -p motor-bridge --release
     path: target/release/motor-bridge
@@ -25,3 +15,21 @@ nodes:
       motor_cmd: web-server/motor_cmd
     outputs:
       - motor_status
+
+  - id: state-node
+    build: cargo build -p state-node --release
+    path: target/release/state-node
+    inputs:
+      motor_status: motor-bridge/motor_status
+    outputs:
+      - robot_state
+
+  - id: web-server
+    build: cargo build -p web-server --release
+    path: target/release/web-server
+    inputs:
+      image: camera/image
+      robot_state: state-node/robot_state
+    outputs:
+      - control
+      - motor_cmd
