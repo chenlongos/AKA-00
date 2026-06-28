@@ -7,10 +7,11 @@ edition = "2021"
 dora-node-api = "0.5"
 dora-message = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
-axum = "0.7"
+axum = { version = "0.7", features = ["ws"] }
 async-stream = "0.3"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "fs"] }
+futures-util = "0.3"
 image = "0.25"
 arrow = "54"
 eyre = "0.6"

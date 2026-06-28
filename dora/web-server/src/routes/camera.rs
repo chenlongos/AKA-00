@@ -14,10 +14,10 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::services::camera::CameraService;
+use crate::AppState;
 
 /// 注册所有 camera 路由（仿 Flask blueprint）
-pub fn router() -> Router<Arc<CameraService>> {
+pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/camera/status", get(status))
         .route("/api/camera/open", post(open))
@@ -37,16 +37,16 @@ pub struct CameraStatus {
 
 // ── GET /api/camera/status ──
 
-pub async fn status(State(svc): State<Arc<CameraService>>) -> Json<CameraStatus> {
+pub async fn status(State(s): State<Arc<AppState>>) -> Json<CameraStatus> {
     Json(CameraStatus {
-        camera_on: svc.is_active(),
+        camera_on: s.camera.is_active(),
     })
 }
 
 // ── POST /api/camera/open ──
 
-pub async fn open(State(svc): State<Arc<CameraService>>) -> Result<Json<CameraStatus>, StatusCode> {
-    svc.open().await.map_err(|e| {
+pub async fn open(State(s): State<Arc<AppState>>) -> Result<Json<CameraStatus>, StatusCode> {
+    s.camera.open().await.map_err(|e| {
         eprintln!("[camera-route] open failed: {:?}", e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
@@ -56,9 +56,9 @@ pub async fn open(State(svc): State<Arc<CameraService>>) -> Result<Json<CameraSt
 // ── POST /api/camera/close ──
 
 pub async fn close(
-    State(svc): State<Arc<CameraService>>,
+    State(s): State<Arc<AppState>>,
 ) -> Result<Json<CameraStatus>, StatusCode> {
-    svc.close().await.map_err(|e| {
+    s.camera.close().await.map_err(|e| {
         eprintln!("[camera-route] close failed: {:?}", e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
@@ -74,10 +74,10 @@ pub struct StreamParams {
 }
 
 pub async fn stream(
-    State(svc): State<Arc<CameraService>>,
+    State(s): State<Arc<AppState>>,
     Query(_params): Query<StreamParams>,
 ) -> Response<Body> {
-    let mut rx = svc.subscribe();
+    let mut rx = s.camera.subscribe();
 
     let stream = async_stream::stream! {
         {
@@ -114,9 +114,9 @@ pub async fn stream(
 // ── GET /api/camera/snapshot ──
 
 pub async fn snapshot(
-    State(svc): State<Arc<CameraService>>,
+    State(s): State<Arc<AppState>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let jpeg = svc.current_frame();
+    let jpeg = s.camera.current_frame();
     if jpeg.is_empty() {
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }

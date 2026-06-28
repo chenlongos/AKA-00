@@ -25,15 +25,14 @@ pub struct CameraService {
 }
 
 impl CameraService {
-    pub fn new(node: DoraNode) -> Self {
+    pub fn new(node: Arc<Mutex<DoraNode>>) -> Self {
         let (frame_tx, _rx) = watch::channel(Vec::new());
-        // _rx 保持存活，确保 channel 不会因为没有 subscriber 而丢弃数据
         std::mem::forget(_rx);
 
         Self {
             frame_tx,
             active: Arc::new(AtomicBool::new(false)),
-            node: Arc::new(Mutex::new(node)),
+            node,
         }
     }
 
