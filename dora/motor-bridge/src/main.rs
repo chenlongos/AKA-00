@@ -1,22 +1,25 @@
-//! dora motor-bridge — 接收 web-server 控制命令，驱动底盘电机
+//! dora motor-bridge — 接收控制命令，驱动底盘电机，回报状态
 //!
 //! 输入:  motor_cmd (JSON)     — 来自 web-server
-//! 输出:  motor_status (JSON)  — 回报实时速度（待实现双向通信）
+//! 输出:  motor_status (JSON)  — 每 200ms 回报真实 RPM
 //!
 //! 硬件层：driver/ 屏蔽底层差异
-//!   dev::DevMotor   — 开发环境，打印命令到 stdout
-//!   tt_pid::TtPidDriver — 真实硬件，UART 协议对接 ESP32-C3
+//!   driver/dev.rs     — 开发环境，打印命令
+//!   driver/tt_pid.rs  — 真实硬件，UART 对接 ESP32-C3
 
 mod driver;
+
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 
 use arrow::array::AsArray;
 use dora_node_api::{self, DoraNode, Event};
 use dora_node_api::futures::StreamExt;
-use driver::{create_driver, DriverConfig};
+use driver::{create_driver, DriverConfig, MotorDriver};
 use eyre::{Context, Result};
 use serde::Deserialize;
 
-// ── 命令解析（与 web-server services/motor.rs 对应）──
+// ── 命令解析 ──
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "command")]
@@ -27,16 +30,13 @@ enum MotorCmd {
     Direct { left: i32, right: i32, duration: u32 },
     #[serde(rename = "joystick")]
     Joystick { x: i8, y: i8 },
-    #[serde(rename = "raw_command")]
-    RawCommand { cmd: String },
 }
 
-/// 摇杆 → 坦克转向 (x,y: -127..127)
 fn joystick_to_tank(x: i8, y: i8) -> (i32, i32) {
     let fy = (y as f32) / 127.0;
     let fx = (x as f32) / 127.0;
-    let clamp = |v: f32| (v * 100.0).clamp(-100.0, 100.0) as i32;
-    (clamp(fy + fx), clamp(fy - fx))
+    let c = |v: f32| (v * 100.0).clamp(-100.0, 100.0) as i32;
+    (c(fy + fx), c(fy - fx))
 }
 
 fn main() -> Result<()> {
@@ -46,15 +46,43 @@ fn main() -> Result<()> {
 }
 
 async fn run() -> Result<()> {
-    let (_node, mut events) = DoraNode::init_from_env()
+    let (node, mut events) = DoraNode::init_from_env()
         .wrap_err("Failed to init dora node")?;
     println!("[motor-bridge] Dora node initialized");
 
-    // 根据环境变量或配置选择驱动（默认 dev）
-    let config = DriverConfig::default();
-    let mut driver = create_driver(&config);
-    println!("[motor-bridge] Driver: {:?} backend", config.backend.as_deref().unwrap_or("dev"));
+    let driver: Arc<Mutex<Box<dyn MotorDriver>>> =
+        Arc::new(Mutex::new(create_driver(&DriverConfig::default())));
+    println!("[motor-bridge] Driver ready");
 
+    // 定时回报电机状态（每 200ms，与 WebSocket 0xBB 同步）
+    let driver_rpt = driver.clone();
+    let node_rpt = std::sync::Arc::new(tokio::sync::Mutex::new(node));
+    let node_clone = node_rpt.clone();
+
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_millis(200));
+        loop {
+            tick.tick().await;
+            let (left, right) = {
+                let d = driver_rpt.lock().unwrap();
+                d.rpm()
+            };
+            let status = serde_json::json!({
+                "left_rpm": left,
+                "right_rpm": right,
+            });
+            let bytes = serde_json::to_vec(&status).unwrap_or_default();
+            let mut node = node_clone.lock().await;
+            let _ = node.send_output_bytes(
+                "motor_status".into(),
+                BTreeMap::new(),
+                bytes.len(),
+                &bytes,
+            );
+        }
+    });
+
+    // 事件循环
     while let Some(event) = events.next().await {
         match event {
             Event::Input { id, data, .. } if id.to_string() == "motor_cmd" => {
@@ -62,11 +90,12 @@ async fn run() -> Result<()> {
                 let cmd: MotorCmd = match serde_json::from_slice(uint8_arr.values()) {
                     Ok(c) => c,
                     Err(e) => {
-                        eprintln!("[motor-bridge] parse error: {:?}", e);
+                        eprintln!("[motor-bridge] parse: {:?}", e);
                         continue;
                     }
                 };
 
+                let mut d = driver.lock().unwrap();
                 match cmd {
                     MotorCmd::Action { action, speed, duration } => {
                         let (l, r) = match action.as_str() {
@@ -75,30 +104,26 @@ async fn run() -> Result<()> {
                             "left" => (-(speed as i32), speed as i32),
                             "right" => (speed as i32, -(speed as i32)),
                             "stop" => (0, 0),
-                            _ => {
-                                eprintln!("[motor-bridge] unknown action: {}", action);
-                                continue;
-                            }
+                            _ => continue,
                         };
-                        driver.set_speeds(l, r);
+                        d.set_speeds(l, r);
+                        drop(d);
                         if duration > 0 {
                             tokio::time::sleep(std::time::Duration::from_millis(duration as u64)).await;
-                            driver.stop();
+                            driver.lock().unwrap().stop();
                         }
                     }
                     MotorCmd::Direct { left, right, duration } => {
-                        driver.set_speeds(left, right);
+                        d.set_speeds(left, right);
+                        drop(d);
                         if duration > 0 {
                             tokio::time::sleep(std::time::Duration::from_millis(duration as u64)).await;
-                            driver.stop();
+                            driver.lock().unwrap().stop();
                         }
                     }
                     MotorCmd::Joystick { x, y } => {
                         let (l, r) = joystick_to_tank(x, y);
-                        driver.set_speeds(l, r);
-                    }
-                    MotorCmd::RawCommand { cmd } => {
-                        println!("[motor-bridge] raw_command: {}", cmd);
+                        d.set_speeds(l, r);
                     }
                 }
             }
@@ -110,7 +135,7 @@ async fn run() -> Result<()> {
         }
     }
 
-    driver.stop();
+    driver.lock().unwrap().stop();
     println!("[motor-bridge] Shutdown");
     Ok(())
 }

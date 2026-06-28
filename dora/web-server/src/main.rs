@@ -14,6 +14,7 @@ mod services;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use arrow::array::AsArray;
 use dora_node_api::{self, DoraNode, Event};
 use dora_node_api::futures::StreamExt;
 use eyre::{Context, Result};
@@ -70,9 +71,18 @@ async fn run() -> Result<()> {
     // ── dora 事件循环 ──
     while let Some(event) = events.next().await {
         match event {
-            Event::Input { id, data, .. } if id.to_string() == "image" => {
-                state.camera.push_frame(&data);
-            }
+            Event::Input { id, data, .. } => match id.to_string().as_str() {
+                "image" => state.camera.push_frame(&data),
+                "motor_status" => {
+                    let uint8_arr = data.as_primitive::<arrow::datatypes::UInt8Type>();
+                    if let Ok(v) = serde_json::from_slice::<serde_json::Value>(uint8_arr.values()) {
+                        let left = v["left_rpm"].as_i64().unwrap_or(0) as i32;
+                        let right = v["right_rpm"].as_i64().unwrap_or(0) as i32;
+                        state.motor.update_rpm(left, right);
+                    }
+                }
+                _ => {}
+            },
             Event::Stop(cause) => {
                 println!("[web-server] Stop: {:?}, exiting", cause);
                 break;

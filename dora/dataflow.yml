@@ -13,6 +13,7 @@ nodes:
     path: target/release/web-server
     inputs:
       image: camera/image
+      motor_status: motor-bridge/motor_status
     outputs:
       - control
       - motor_cmd

@@ -79,10 +79,10 @@ async fn handle_ws(socket: WebSocket, motor: Arc<crate::services::motor::MotorSe
         let mut tick = interval(Duration::from_millis(200));
         loop {
             tick.tick().await;
-            let status = motor_tx.status();
+            let s = motor_tx.status();
             let mut buf = vec![0xBBu8];
-            buf.extend_from_slice(&((status.left * 1000.0) as i16).to_be_bytes());
-            buf.extend_from_slice(&((status.right * 1000.0) as i16).to_be_bytes());
+            buf.extend_from_slice(&(s.left_rpm as i16).to_be_bytes());
+            buf.extend_from_slice(&(s.right_rpm as i16).to_be_bytes());
             if tx.send(Message::Binary(buf.into())).await.is_err() {
                 break;
             }

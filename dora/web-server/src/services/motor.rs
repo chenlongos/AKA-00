@@ -9,11 +9,11 @@ use dora_node_api::DoraNode;
 use serde::Serialize;
 use tokio::sync::Mutex as TokioMutex;
 
-/// 电机实时状态
+/// 电机实时状态（对应 Python StateCollector 的 get_status()）
 #[derive(Debug, Clone, Serialize)]
 pub struct MotorStatus {
-    pub left: f32,   // 左轮速度 m/s
-    pub right: f32,  // 右轮速度 m/s
+    pub left_rpm: i32,    // 左轮 RPM
+    pub right_rpm: i32,   // 右轮 RPM
 }
 
 /// 控制动作
@@ -39,8 +39,8 @@ impl MotorService {
         Self {
             node,
             status: Arc::new(Mutex::new(MotorStatus {
-                left: 0.0,
-                right: 0.0,
+                left_rpm: 0,
+                right_rpm: 0,
             })),
         }
     }
@@ -86,11 +86,11 @@ impl MotorService {
         self.send_control(&json).await;
     }
 
-    /// 更新状态（由 motor-bridge 回报）
-    pub fn update_status(&self, left: f32, right: f32) {
+    /// 从 motor-bridge 回报更新 RPM
+    pub fn update_rpm(&self, left: i32, right: i32) {
         let mut s = self.status.lock().unwrap();
-        s.left = left;
-        s.right = right;
+        s.left_rpm = left;
+        s.right_rpm = right;
     }
 
     async fn send_control(&self, data: &serde_json::Value) {
