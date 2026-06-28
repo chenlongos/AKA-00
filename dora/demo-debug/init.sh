@@ -17,6 +17,10 @@ echo "╔═══════════════════════�
 echo "║   dora debug demo               ║"
 echo "╚══════════════════════════════════╝"
 
+# 当前配置
+BACKEND=$(grep 'backend' "$DORA_DIR/config.toml" 2>/dev/null | head -1 | cut -d'"' -f2)
+echo "   motor backend: ${BACKEND:-dev}"
+
 # ── 1. 编译 ──
 echo ""
 echo "🔨 Building nodes..."
