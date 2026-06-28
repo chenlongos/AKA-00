@@ -1,6 +1,6 @@
 #!/bin/sh
 set -e
-echo "🛑 Stopping dora demo..."
+echo "🛑 Stopping dora..."
 dora stop 2>/dev/null || true
 dora destroy 2>/dev/null || true
 for name in camera-node web-server motor-bridge state-node dora-daemon dora-coordinator; do

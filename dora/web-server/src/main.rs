@@ -79,15 +79,13 @@ async fn run() -> Result<()> {
                 "robot_state" => {
                     let uint8_arr = data.as_primitive::<arrow::datatypes::UInt8Type>();
                     if let Ok(v) = serde_json::from_slice::<serde_json::Value>(uint8_arr.values()) {
-                        // 电机状态
+                        // 电机状态 — 来自 motor-bridge 的真实 RPM
                         state.motor.update_rpm(
                             v["motor_left_rpm"].as_i64().unwrap_or(0) as i32,
                             v["motor_right_rpm"].as_i64().unwrap_or(0) as i32,
                         );
-                        // 摄像头状态
-                        if let Some(on) = v["camera_on"].as_bool() {
-                            state.camera.set_active(on);
-                        }
+                        // 注意：camera_on 由 CameraService 自己管理（open/close API）
+                        // state-node 的 camera_on 仅供参考，不可覆盖本地状态
                     }
                 }
                 _ => {}
