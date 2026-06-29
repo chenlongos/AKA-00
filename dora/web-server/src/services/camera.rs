@@ -88,35 +88,42 @@ impl CameraService {
 
     // ── 帧处理 ──
 
-    /// 接收 dora 原始 RGB 帧，编码 JPEG 并广播到所有 /stream 订阅者
+    /// 接收 dora 帧数据，广播到所有 /stream 订阅者
+    /// 数据可能是 JPEG（camera-node 直接发）或原始 RGB（旧版兼容）
     pub fn push_frame(&self, data: &dora_node_api::ArrowData) {
         if !self.active.load(Ordering::Relaxed) {
             return;
         }
 
-        if let Some(jpeg) = self.rgb_to_jpeg(data) {
+        use arrow::array::AsArray;
+        let raw = data.as_primitive::<arrow::datatypes::UInt8Type>().values();
+
+        if raw.is_empty() {
+            return;
+        }
+
+        // 已经是 JPEG（camera-node 直接输出 MJPEG/JPEG）→ 原样广播
+        if raw.len() >= 2 && raw[0] == 0xFF && raw[1] == 0xD8 {
+            self.frame_tx.send_replace(raw.to_vec());
+            return;
+        }
+
+        // 旧版 RGB → 编码 JPEG
+        if let Some(jpeg) = Self::encode_rgb_to_jpeg(raw, self.config.width, self.config.height, self.config.jpeg_quality) {
             self.frame_tx.send_replace(jpeg);
         }
     }
 }
 
 impl CameraService {
-    /// Arrow UInt8 RGB → JPEG bytes
-    fn rgb_to_jpeg(&self, data: &dora_node_api::ArrowData) -> Option<Vec<u8>> {
-        use arrow::array::AsArray;
-        let uint8_arr = data.as_primitive::<arrow::datatypes::UInt8Type>();
-        let rgb = uint8_arr.values();
-
-        let w = self.config.width;
-        let h = self.config.height;
+    fn encode_rgb_to_jpeg(rgb: &[u8], w: u32, h: u32, quality: u8) -> Option<Vec<u8>> {
         let expected = (w * h * 3) as usize;
         if rgb.len() < expected {
             return None;
         }
-
         let mut buf = Vec::new();
         let mut enc =
-            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, self.config.jpeg_quality);
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, quality);
         enc.encode(&rgb[..expected], w, h, image::ExtendedColorType::Rgb8)
             .ok()?;
         Some(buf)

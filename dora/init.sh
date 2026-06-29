@@ -43,7 +43,7 @@ for i in $(seq 1 15); do
         echo "╔══════════════════════════════════╗"
         echo "║  🟢 Ready!                      ║"
         echo "║                                ║"
-        echo "║  📷 http://localhost:8080       ║"
+        echo "║  📷 http://localhost:80       ║"
         echo "║  Stop: ./stop.sh               ║"
         echo "╚══════════════════════════════════╝"
         exit 0
