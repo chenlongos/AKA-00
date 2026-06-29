@@ -1,0 +1,9 @@
+# 交叉编译配置 — 由 build_release.sh 生成
+# 目标: SG2002 / CV1812 (riscv64 musl, Xuantie C906)
+
+[target.riscv64gc-unknown-linux-musl]
+linker = "rust-lld"
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.x86_64-apple-darwin]
+# 保持默认 (host)

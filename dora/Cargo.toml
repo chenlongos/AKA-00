@@ -1,3 +1,3 @@
 [workspace]
-members = ["dora-config", "display-node", "dora-c-ffi", "web-server", "motor-bridge", "state-node"]
+members = ["dora-config", "dora-c-ffi", "web-server", "motor-bridge", "state-node"]
 resolver = "2"

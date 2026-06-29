@@ -1,5 +1,7 @@
 target/
 out/
+dist/
+build-cross/
 camera-node/camera-node
 .DS_Store
 */static
