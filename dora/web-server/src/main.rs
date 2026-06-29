@@ -55,8 +55,21 @@ async fn run() -> Result<()> {
     });
 
     // ── HTTP 路由 ──
-    let static_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/static");
-    println!("[web-server] Static files: {}", static_dir);
+    // 从二进制位置推算:  bin/web-server -> ../static
+    // 部署时: /root/dora-riscv64/bin/web-server -> /root/dora-riscv64/static
+    // 开发时: target/release/web-server -> CARGO_MANIFEST_DIR/static
+    let static_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| {
+            exe.parent()          // bin/
+                .and_then(|p| p.parent())  // $DORA_HOME/
+                .map(|root| root.join("static"))
+        })
+        .filter(|d| d.exists())
+        .unwrap_or_else(|| {
+            std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/static"))
+        });
+    println!("[web-server] Static files: {}", static_dir.display());
 
     let app = routes::camera::router()
         .merge(routes::control::router())

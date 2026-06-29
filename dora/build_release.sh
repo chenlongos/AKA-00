@@ -211,10 +211,9 @@ else
 fi
 
 if ! $TOOLCHAIN_OK; then
-    warn "交叉工具链未找到 ($RISCV64_GCC)"
-    warn "  Rust 节点将使用 rust-lld 链接器"
-    warn "  camera-node 将被跳过"
-    SKIP_CAMERA=true
+    fail "交叉工具链未找到 ($RISCV64_GCC)"
+    fail "  交叉工具链是编译 camera-node 的必需条件"
+    exit 1
 fi
 
 # 检查 OpenCV
@@ -238,8 +237,7 @@ if $OPENCV_OK; then
     info "  可用库: $OPENCV_LIBS"
 else
     warn "OpenCV 未找到或不可用 ($RISCV64_OPENCV)"
-    warn "  camera-node 将被跳过"
-    SKIP_CAMERA=true
+    warn "  camera-node 已改用 V4L2 直接采集，无需 OpenCV"
 fi
 
 # 检查 Rust musl target
@@ -318,6 +316,23 @@ cross_compile_dora_runtime() {
     else
         info "使用已缓存的 dora-rs 源码: $dora_src"
     fi
+
+    # Fix: 强制 Zenoh IPv4 监听 (SG2002 内核无 IPv6)
+    _orb python3 -c "
+src = open('$dora_src/libraries/core/src/topics.rs', 'r').read()
+if 'SG2002: 强制 IPv4' not in src:
+    src = src.replace(
+        'let mut zenoh_config = zenoh::Config::default();',
+        'let mut zenoh_config = zenoh::Config::default();\n'
+        '            // SG2002: 强制 IPv4（内核无 IPv6）\n'
+        '            zenoh_config.insert_json5(\"listen/endpoints\", r#\"[\"tcp/0.0.0.0:0\"]\"#).ok();'
+    )
+    src = src.replace('tcp/[::]', 'tcp/0.0.0.0')
+    open('$dora_src/libraries/core/src/topics.rs', 'w').write(src)
+    print('  [patch] OK: [::] -> 0.0.0.0 + listen/endpoints')
+else:
+    print('  [patch] SKIP: 已 patch 过')
+" 2>&1
 
     # 配置交叉编译: rust-lld linker + Xuantie sysroot lib 路径 (供 libdl 等)
     local sysroot_lib="/home/junbo_dai/riscv64-linux-musl-x86_64/sysroot/usr/lib64v0p7_xthead/lp64d"
@@ -459,10 +474,7 @@ CARGO_EOF
         done
     fi
 
-    # libdora_c_ffi.a 仅编译时使用，运行时不需要
-    rm -f "$PACKAGE_DIR/lib/libdora_c_ffi.a" 2>/dev/null || true
-    rmdir "$PACKAGE_DIR/lib" 2>/dev/null || true
-
+    # libdora_c_ffi.a 保留在 PACKAGE_DIR/lib 中，Phase 3 (camera-node) 编译时需要
     cd "$SCRIPT_DIR"
     $all_ok || return 1
 }
@@ -473,31 +485,62 @@ build_phase "Rust 项目节点" "fatal" cross_compile_rust_nodes
 
 cross_compile_camera_node() {
     if $SKIP_CAMERA; then
-        skip "camera-node (已跳过)"
-        return 0
-    fi
-
-    if ! $TOOLCHAIN_OK; then
-        skip "camera-node (无交叉工具链)"
+        skip "camera-node (--skip-camera)"
         return 0
     fi
 
     local camera_dir="$SCRIPT_DIR/camera-node"
-    local opencv_include="$RISCV64_OPENCV/include"
-    local opencv_lib="$RISCV64_OPENCV/lib"
     local dora_ffi_lib="$PACKAGE_DIR/lib/libdora_c_ffi.a"
 
     if [ ! -f "$dora_ffi_lib" ]; then
-        warn "libdora_c_ffi.a 未找到，camera-node 跳过"
-        return 0
+        fail "libdora_c_ffi.a 未找到 ($dora_ffi_lib)"
+        fail "  请确保 Phase 2 (Rust 项目节点) 编译成功"
+        return 1
     fi
 
-    info "编译 camera-node..."
+    info "编译 camera-node (V4L2, 无 OpenCV 依赖)..."
+
+    # camera-node 直接用 V4L2 采集 MJPEG，不需要 OpenCV
+    # 参考: tests/bench_camera_v4l2.cpp
+    #
+    # 关键: libdora_c_ffi.a 由 Rust (LLVM 19) 编译，包含了现代 ISA 扩展
+    # (如 zifencei)，而 Xuantie GCC 10.2 的 ld 只认识旧的扩展名。
+    # 修复: 用 objcopy 清除 .riscv.attributes 段，消掉 ISA 版本冲突。
+
+    local camera_fixed_ffi="$BUILD_DIR/libdora_c_ffi_fixed.a"
+    local objcopy_bin="$RISCV64_TOOLCHAIN/bin/riscv64-unknown-linux-musl-objcopy"
+
+    info "修复 libdora_c_ffi.a (清除 .riscv.attributes)..."
+    if $HAS_ORB; then
+        _orb bash -c "
+            set -e
+            tmp=\$(mktemp -d)
+            cd \"\$tmp\"
+            ar x '$dora_ffi_lib'
+            for f in *.o; do
+                '$objcopy_bin' --remove-section=.riscv.attributes \"\$f\" 2>/dev/null || true
+            done
+            ar rcs '$camera_fixed_ffi' *.o
+            rm -rf \"\$tmp\"
+        " 2>&1
+    else
+        tmp=$(mktemp -d)
+        cd "$tmp"
+        ar x "$dora_ffi_lib"
+        for f in *.o; do
+            "$objcopy_bin" --remove-section=.riscv.attributes "$f" 2>/dev/null || true
+        done
+        ar rcs "$camera_fixed_ffi" *.o
+        rm -rf "$tmp"
+    fi
+    ok "已生成兼容版本: $camera_fixed_ffi"
 
     # 生成交叉编译 Makefile
     cat > "$BUILD_DIR/Makefile.camera" << MAKEFILE_EOF
 # 交叉编译 camera-node — 由 build_release.sh 生成
 # 目标: riscv64 musl, SG2002/CV1812
+# 无 OpenCV 依赖，直接用 V4L2 + dora C FFI
+# 参考: tests/bench_camera_v4l2.cpp
 
 CXX      := $RISCV64_GXX
 CXXFLAGS := -std=c++17 -O3 -Wall -mcpu=c906fdv -mabi=lp64d
@@ -505,75 +548,56 @@ LDFLAGS  := -static
 
 TARGET   := $PACKAGE_DIR/bin/camera-node
 
-# OpenCV (交叉编译)
-OPENCV_INCLUDE := $opencv_include
-OPENCV_LIB     := $opencv_lib
+# dora C FFI (.riscv.attributes 已清除)
+DORA_FFI_LIB := $camera_fixed_ffi
 
-# dora C FFI
-DORA_FFI_LIB   := $dora_ffi_lib
-
-INCLUDES := -I\$(OPENCV_INCLUDE)/opencv4 -I\$(OPENCV_INCLUDE) -I$camera_dir
-
-# 尝试静态链接，如果没有 .a 文件则回退到动态
-OPENCV_LIBS := \$(OPENCV_LIB)/libopencv_core.a \
-               \$(OPENCV_LIB)/libopencv_imgproc.a \
-               \$(OPENCV_LIB)/libopencv_imgcodecs.a \
-               \$(OPENCV_LIB)/libopencv_videoio.a
-
-# 静态链接系统库
-SYS_LIBS := -lpthread -ldl -lz
+INCLUDES := -I$camera_dir
 
 .PHONY: all clean
 
 all: \$(TARGET)
 
 \$(TARGET): $camera_dir/main.cc \$(DORA_FFI_LIB)
-	@echo "  [camera] \$@"
-	\$(CXX) \$(CXXFLAGS) \$(LDFLAGS) \$(INCLUDES) \\
+	@printf '  %b[CC]%b  camera-node\n' '\033[0;36m' '\033[0m'
+	@\$(CXX) \$(CXXFLAGS) \$(LDFLAGS) \$(INCLUDES) \\
 		-o \$@ $camera_dir/main.cc \\
-		\$(DORA_FFI_LIB) \\
-		\$(OPENCV_LIBS) \\
-		\$(SYS_LIBS) 2>&1 || \\
-		(echo "  [camera] 静态链接失败，尝试动态链接..." && \\
-		 \$(CXX) \$(CXXFLAGS) \$(INCLUDES) \\
-			-o \$@ $camera_dir/main.cc \\
-			\$(DORA_FFI_LIB) \\
-			-L\$(OPENCV_LIB) -lopencv_core -lopencv_imgproc -lopencv_imgcodecs \\
-			\$(SYS_LIBS))
+		\$(DORA_FFI_LIB) -lpthread
 
 clean:
 	rm -f \$(TARGET)
 MAKEFILE_EOF
 
-    # 在 orbstack 中执行 make (因为工具链在 orbstack 中)
     if $HAS_ORB; then
-        # 将 Makefile 复制到 orbstack 可访问的路径，然后编译
-        local orb_build="/tmp/dora-camera-build"
-        _orb mkdir -p "$orb_build"
-        # 用 orb 执行: 设置 PATH 包含工具链，make
         if _orb bash -c "
             export PATH=\"$RISCV64_TOOLCHAIN/bin:\$PATH\"
-            cd \"$camera_dir\"
             make -f \"$BUILD_DIR/Makefile.camera\" 2>&1
         "; then
             ok "camera-node 编译完成"
         else
-            warn "camera-node 编译失败 (非致命)"
+            fail "camera-node 编译失败"
             return 1
         fi
     else
-        # 直接在本地执行 (假设工具链在 PATH 中)
         export PATH="$RISCV64_TOOLCHAIN/bin:$PATH"
         if make -f "$BUILD_DIR/Makefile.camera" 2>&1 | sed 's/^/    /'; then
             ok "camera-node 编译完成"
         else
-            warn "camera-node 编译失败 (非致命)"
+            fail "camera-node 编译失败"
             return 1
         fi
     fi
+
+    # 清理临时 .a
+    rm -f "$camera_fixed_ffi"
+
+    # 编译完成后清理 .a 文件 (运行时不需要)
+    rm -f "$PACKAGE_DIR/lib/libdora_c_ffi.a" 2>/dev/null || true
+    rmdir "$PACKAGE_DIR/lib" 2>/dev/null || true
+
+    return 0
 }
 
-build_phase "camera-node (C++)" "warn" cross_compile_camera_node
+build_phase "camera-node (C++)" "fatal" cross_compile_camera_node
 
 # ── Phase 4: 生成板子适配文件 ─────────────────────────────────────────────────
 
@@ -584,20 +608,33 @@ info "复制配置文件..."
 cp "$SCRIPT_DIR/config.toml" "$PACKAGE_DIR/etc/"
 ok "etc/config.toml"
 
-# 生成 dataflow.yml (去掉 build: 字段，使用 bin/ 路径)
-cat > "$PACKAGE_DIR/etc/dataflow.yml" << 'EOF'
-# dora 数据流 — SG2002 板子部署版
-# 由 build_release.sh 自动生成
+# 复制前端静态文件 (web-server 从 ./static/ 读取)
+info "复制静态文件..."
+cp -r "$SCRIPT_DIR/web-server/static" "$PACKAGE_DIR/"
+ok "static/"
 
-nodes:
-  - id: camera
+# 生成 dataflow.yml (去掉 build: 字段，使用 bin/ 路径)
+# 注意: camera-node 如果没有编译则省略
+if [ -f "$PACKAGE_DIR/bin/camera-node" ]; then
+    CAMERA_NODE="  - id: camera
     path: bin/camera-node
     inputs:
       tick: dora/timer/millis/33
       control: web-server/control
     outputs:
-      - image
+      - image"
+    WEB_IMAGE_INPUT="image: camera/image"
+else
+    CAMERA_NODE=""
+    WEB_IMAGE_INPUT=""
+fi
 
+cat > "$PACKAGE_DIR/etc/dataflow.yml" << EOF
+# dora 数据流 — SG2002 板子部署版
+# 由 build_release.sh 自动生成
+
+nodes:
+${CAMERA_NODE}
   - id: motor-bridge
     path: bin/motor-bridge
     inputs:
@@ -615,7 +652,7 @@ nodes:
   - id: web-server
     path: bin/web-server
     inputs:
-      image: camera/image
+${WEB_IMAGE_INPUT:+      image: camera/image}
       robot_state: state-node/robot_state
     outputs:
       - control
@@ -705,10 +742,10 @@ echo ""
 echo "Launching dataflow..."
 
 if [ -f "$DORA_BIN" ]; then
-    "$DORA_BIN" start "$DORA_HOME/etc/dataflow.yml" --detach 2>/dev/null &
+    "$DORA_BIN" run "$DORA_HOME/etc/dataflow.yml" &
     DORA_RUN_PID=$!
 else
-    dora start "$DORA_HOME/etc/dataflow.yml" --detach 2>/dev/null &
+    dora run "$DORA_HOME/etc/dataflow.yml" &
     DORA_RUN_PID=$!
 fi
 
@@ -718,8 +755,8 @@ echo "Waiting for web-server..."
 WEB_PORT=$(grep 'port' "$DORA_HOME/etc/config.toml" 2>/dev/null | grep -oE '[0-9]+' | head -1)
 WEB_PORT="${WEB_PORT:-80}"
 
-for i in $(seq 1 20); do
-    sleep 0.5
+for i in $(seq 1 60); do
+    sleep 1
     if curl -s "http://localhost:${WEB_PORT}/api/camera/status" > /dev/null 2>&1; then
         echo ""
         echo "========================================"
