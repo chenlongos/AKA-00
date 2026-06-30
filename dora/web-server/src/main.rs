@@ -19,7 +19,7 @@ use dora_node_api::{self, DoraNode, Event};
 use dora_node_api::futures::StreamExt;
 use eyre::{Context, Result};
 use tokio::sync::Mutex;
-use tower_http::services::ServeDir;
+use tower_http::services::{ServeDir, ServeFile};
 
 use services::camera::CameraService;
 use services::motor::MotorService;
@@ -74,7 +74,10 @@ async fn run() -> Result<()> {
     let app = routes::camera::router()
         .merge(routes::control::router())
         .merge(routes::motor::router())
-        .fallback_service(ServeDir::new(static_dir))
+        .fallback_service(
+            ServeDir::new(&static_dir)
+                .fallback(ServeFile::new(static_dir.join("index.html")))
+        )
         .with_state(state.clone());
 
     // ── 启动 HTTP ──

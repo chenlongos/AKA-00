@@ -539,32 +539,37 @@ cross_compile_camera_node() {
     cat > "$BUILD_DIR/Makefile.camera" << MAKEFILE_EOF
 # 交叉编译 camera-node — 由 build_release.sh 生成
 # 目标: riscv64 musl, SG2002/CV1812
-# 无 OpenCV 依赖，直接用 V4L2 + dora C FFI
-# 参考: tests/bench_camera_v4l2.cpp
+# 源文件: main.cc + camera_v4l2.cpp（V4L2，无 OpenCV）
 
 CXX      := $RISCV64_GXX
 CXXFLAGS := -std=c++17 -O3 -Wall -mcpu=c906fdv -mabi=lp64d
 LDFLAGS  := -static
 
 TARGET   := $PACKAGE_DIR/bin/camera-node
+SRCS     := $camera_dir/main.cc $camera_dir/camera_v4l2.cpp
+OBJS     := $BUILD_DIR/camera-main.o $BUILD_DIR/camera-v4l2.o
 
-# dora C FFI (.riscv.attributes 已清除)
 DORA_FFI_LIB := $camera_fixed_ffi
-
 INCLUDES := -I$camera_dir
 
 .PHONY: all clean
 
 all: \$(TARGET)
 
-\$(TARGET): $camera_dir/main.cc \$(DORA_FFI_LIB)
-	@printf '  %b[CC]%b  camera-node\n' '\033[0;36m' '\033[0m'
-	@\$(CXX) \$(CXXFLAGS) \$(LDFLAGS) \$(INCLUDES) \\
-		-o \$@ $camera_dir/main.cc \\
-		\$(DORA_FFI_LIB) -lpthread
+$BUILD_DIR/camera-main.o: $camera_dir/main.cc $camera_dir/camera.h
+	@printf '  %b[CC]%b  main.cc\n' '\033[0;36m' '\033[0m'
+	@\$(CXX) \$(CXXFLAGS) \$(INCLUDES) -c -o \$@ $camera_dir/main.cc
+
+$BUILD_DIR/camera-v4l2.o: $camera_dir/camera_v4l2.cpp $camera_dir/camera.h
+	@printf '  %b[CC]%b  camera_v4l2.cpp\n' '\033[0;36m' '\033[0m'
+	@\$(CXX) \$(CXXFLAGS) \$(INCLUDES) -c -o \$@ $camera_dir/camera_v4l2.cpp
+
+\$(TARGET): \$(OBJS) \$(DORA_FFI_LIB)
+	@printf '  %b[LD]%b  camera-node\n' '\033[0;36m' '\033[0m'
+	@\$(CXX) \$(CXXFLAGS) \$(LDFLAGS) -o \$@ \$(OBJS) \$(DORA_FFI_LIB) -lpthread
 
 clean:
-	rm -f \$(TARGET)
+	rm -f \$(TARGET) \$(OBJS)
 MAKEFILE_EOF
 
     if $HAS_ORB; then

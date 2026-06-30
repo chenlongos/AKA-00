@@ -91,26 +91,42 @@ impl CameraService {
     /// 接收 dora 帧数据，广播到所有 /stream 订阅者
     /// 数据可能是 JPEG（camera-node 直接发）或原始 RGB（旧版兼容）
     pub fn push_frame(&self, data: &dora_node_api::ArrowData) {
-        if !self.active.load(Ordering::Relaxed) {
+        use arrow::array::AsArray;
+        use std::sync::atomic::Ordering;
+
+        let active = self.active.load(Ordering::Relaxed);
+        if !active {
+            eprintln!("[camera-svc] push_frame: NOT active, dropping");
             return;
         }
 
-        use arrow::array::AsArray;
         let raw = data.as_primitive::<arrow::datatypes::UInt8Type>().values();
+        eprintln!("[camera-svc] push_frame: active={active}, len={}", raw.len());
 
         if raw.is_empty() {
+            eprintln!("[camera-svc] push_frame: empty data, dropping");
             return;
         }
 
         // 已经是 JPEG（camera-node 直接输出 MJPEG/JPEG）→ 原样广播
-        if raw.len() >= 2 && raw[0] == 0xFF && raw[1] == 0xD8 {
+        let is_jpeg = raw.len() >= 2 && raw[0] == 0xFF && raw[1] == 0xD8;
+        eprintln!("[camera-svc] push_frame: is_jpeg={is_jpeg}, header=[{:02X} {:02X}]",
+            raw.first().unwrap_or(&0), raw.get(1).unwrap_or(&0));
+
+        if is_jpeg {
+            eprintln!("[camera-svc] push_frame: JPEG pass-through, broadcasting {} bytes", raw.len());
             self.frame_tx.send_replace(raw.to_vec());
             return;
         }
 
         // 旧版 RGB → 编码 JPEG
+        eprintln!("[camera-svc] push_frame: trying RGB->JPEG encode...");
         if let Some(jpeg) = Self::encode_rgb_to_jpeg(raw, self.config.width, self.config.height, self.config.jpeg_quality) {
+            eprintln!("[camera-svc] push_frame: RGB->JPEG ok, broadcasting {} bytes", jpeg.len());
             self.frame_tx.send_replace(jpeg);
+        } else {
+            eprintln!("[camera-svc] push_frame: RGB->JPEG FAILED (len={}, need={})",
+                raw.len(), (self.config.width * self.config.height * 3));
         }
     }
 }
