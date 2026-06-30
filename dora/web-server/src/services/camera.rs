@@ -96,37 +96,32 @@ impl CameraService {
 
         let active = self.active.load(Ordering::Relaxed);
         if !active {
-            eprintln!("[camera-svc] push_frame: NOT active, dropping");
+            println!("[camera-svc] push_frame: NOT active, dropping");
             return;
         }
 
         let raw = data.as_primitive::<arrow::datatypes::UInt8Type>().values();
-        eprintln!("[camera-svc] push_frame: active={active}, len={}", raw.len());
 
         if raw.is_empty() {
-            eprintln!("[camera-svc] push_frame: empty data, dropping");
+            println!("[camera-svc] push_frame: empty data (len=0), dropping");
             return;
         }
 
-        // 已经是 JPEG（camera-node 直接输出 MJPEG/JPEG）→ 原样广播
+        // JPEG 头部检测
         let is_jpeg = raw.len() >= 2 && raw[0] == 0xFF && raw[1] == 0xD8;
-        eprintln!("[camera-svc] push_frame: is_jpeg={is_jpeg}, header=[{:02X} {:02X}]",
-            raw.first().unwrap_or(&0), raw.get(1).unwrap_or(&0));
-
         if is_jpeg {
-            eprintln!("[camera-svc] push_frame: JPEG pass-through, broadcasting {} bytes", raw.len());
             self.frame_tx.send_replace(raw.to_vec());
             return;
         }
 
-        // 旧版 RGB → 编码 JPEG
-        eprintln!("[camera-svc] push_frame: trying RGB->JPEG encode...");
+        println!("[camera-svc] push_frame: not JPEG, header=[{:02X} {:02X}], len={}",
+            raw.first().unwrap_or(&0), raw.get(1).unwrap_or(&0), raw.len());
+
+        // 旧版 RGB → JPEG
         if let Some(jpeg) = Self::encode_rgb_to_jpeg(raw, self.config.width, self.config.height, self.config.jpeg_quality) {
-            eprintln!("[camera-svc] push_frame: RGB->JPEG ok, broadcasting {} bytes", jpeg.len());
             self.frame_tx.send_replace(jpeg);
         } else {
-            eprintln!("[camera-svc] push_frame: RGB->JPEG FAILED (len={}, need={})",
-                raw.len(), (self.config.width * self.config.height * 3));
+            println!("[camera-svc] push_frame: not JPEG, RGB encode failed (len={})", raw.len());
         }
     }
 }
