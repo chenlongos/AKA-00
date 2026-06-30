@@ -74,7 +74,13 @@ int main() {
                 auto [data, len] = cam.read_frame();
                 if (!data || len == 0) continue;
 
-                dora_send_output(ctx, (char*)"image", 5, (char*)data, (size_t)len);
+                int rc = dora_send_output(ctx, (char*)"image", 5, (char*)data, (size_t)len);
+                if (rc != 0) {
+                    static int send_errs = 0;
+                    if (send_errs++ < 3 || send_errs % 100 == 0)
+                        std::printf("[camera-cpp] dora_send_output FAILED (rc=%d, err#%d)\n", rc, send_errs);
+                    continue;
+                }
 
                 tick_count++;
                 fps_counter++;
