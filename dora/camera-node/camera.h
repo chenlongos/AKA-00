@@ -1,23 +1,24 @@
 // camera.h — 跨平台摄像头接口
-//   Linux:   V4L2 直接采集 MJPEG
+//   Linux:   V4L2 直接采集 MJPEG（支持多种分辨率）
 //   macOS:   OpenCV VideoCapture → JPEG 编码
 #pragma once
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <utility>
 #include <vector>
-
-constexpr int TARGET_WIDTH  = 640;
-constexpr int TARGET_HEIGHT = 480;
-constexpr int TARGET_FPS    = 30;
 
 class Camera {
 public:
     Camera();
     ~Camera();
 
-    bool open(const char* device = nullptr);
+    /// 从环境变量读取目标配置：CAMERA_WIDTH, CAMERA_HEIGHT
+    /// 默认 640x480
+    static std::pair<int,int> target_resolution();
+
+    bool open(const char* device = nullptr, int target_w = 640, int target_h = 480);
     void close();
     bool good() const;
     int  fd() const;          // Linux V4L2 poll fd，macOS 返回 -1
@@ -28,8 +29,8 @@ public:
     std::pair<const uint8_t*, size_t> read_frame();
 
 private:
-    int _width  = TARGET_WIDTH;
-    int _height = TARGET_HEIGHT;
+    int _width  = 640;
+    int _height = 480;
     std::vector<uint8_t> _frame;   // 帧缓冲
 
 #ifdef __linux__
@@ -41,6 +42,7 @@ private:
     unsigned _n_bufs = 0;
 
     bool _try_fmt(int& w, int& h);
+    bool _probe_fmt(uint32_t fmt, int& w, int& h);
     void _init_buffers();
     void _start_stream();
     void _stop_stream();

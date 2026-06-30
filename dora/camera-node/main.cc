@@ -25,6 +25,10 @@ int main() {
     auto     last_report = std::chrono::steady_clock::now();
     uint64_t fps_counter = 0;
 
+    // 从环境变量读取目标分辨率
+    auto [target_w, target_h] = Camera::target_resolution();
+    std::cout << "[camera-cpp] target: " << target_w << "x" << target_h << std::endl;
+
     while (true) {
         void* event = dora_next_event(ctx);
         if (!event) continue;
@@ -50,7 +54,7 @@ int main() {
                 std::string cmd(data_ptr, data_len);
 
                 if (cmd == "start") {
-                    if (!cam.good() && !cam.open()) {
+                    if (!cam.good() && !cam.open(nullptr, target_w, target_h)) {
                         std::cerr << "[camera-cpp] Failed to open camera" << std::endl;
                         free_dora_event(event);
                         continue;

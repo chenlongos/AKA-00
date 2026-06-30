@@ -12,7 +12,18 @@
 Camera::Camera()  = default;
 Camera::~Camera() { close(); }
 
-bool Camera::open(const char* /*unused*/) {
+std::pair<int,int> Camera::target_resolution() {
+    int w = 640, h = 480;
+    const char* env_w = std::getenv("CAMERA_WIDTH");
+    const char* env_h = std::getenv("CAMERA_HEIGHT");
+    if (env_w) w = std::atoi(env_w);
+    if (env_h) h = std::atoi(env_h);
+    if (w <= 0)  w = 640;
+    if (h <= 0)  h = 480;
+    return {w, h};
+}
+
+bool Camera::open(const char* /*unused*/, int target_w, int target_h) {
     auto* cap = new cv::VideoCapture();
     _cap = cap;
 
@@ -22,9 +33,9 @@ bool Camera::open(const char* /*unused*/) {
         delete cap; _cap = nullptr;
         return false;
     }
-    cap->set(cv::CAP_PROP_FRAME_WIDTH,  TARGET_WIDTH);
-    cap->set(cv::CAP_PROP_FRAME_HEIGHT, TARGET_HEIGHT);
-    cap->set(cv::CAP_PROP_FPS, TARGET_FPS);
+    cap->set(cv::CAP_PROP_FRAME_WIDTH,  (double)target_w);
+    cap->set(cv::CAP_PROP_FRAME_HEIGHT, (double)target_h);
+    cap->set(cv::CAP_PROP_FPS, 30.0);
 
     // 预热：丢弃前几帧
     cv::Mat tmp;

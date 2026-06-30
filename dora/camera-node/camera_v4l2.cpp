@@ -18,7 +18,71 @@
 Camera::Camera()  = default;
 Camera::~Camera() { close(); }
 
-bool Camera::open(const char* device) {
+// ── 环境变量配置（所有平台共享）──
+
+std::pair<int,int> Camera::target_resolution() {
+    int w = 640, h = 480;
+    const char* env_w = std::getenv("CAMERA_WIDTH");
+    const char* env_h = std::getenv("CAMERA_HEIGHT");
+    if (env_w) w = std::atoi(env_w);
+    if (env_h) h = std::atoi(env_h);
+    if (w <= 0)  w = 640;
+    if (h <= 0)  h = 480;
+    return {w, h};
+}
+
+// ── 枚举摄像头支持的所有格式（调试用）──
+static void _enumerate_formats(int fd) {
+    std::cout << "[camera] Supported formats:" << std::endl;
+    v4l2_fmtdesc fmtdesc; CLEAR(fmtdesc);
+    fmtdesc.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    while (ioctl(fd, VIDIOC_ENUM_FMT, &fmtdesc) == 0) {
+        // 枚举该格式下的分辨率
+        v4l2_frmsizeenum frmsize; CLEAR(frmsize);
+        frmsize.pixel_format = fmtdesc.pixelformat;
+        frmsize.index = 0;
+        if (ioctl(fd, VIDIOC_ENUM_FRAMESIZES, &frmsize) == 0) {
+            if (frmsize.type == V4L2_FRMSIZE_TYPE_DISCRETE) {
+                std::cout << "  " << (char)(fmtdesc.pixelformat)
+                          << (char)(fmtdesc.pixelformat >> 8)
+                          << (char)(fmtdesc.pixelformat >> 16)
+                          << (char)(fmtdesc.pixelformat >> 24)
+                          << " " << frmsize.discrete.width << "x"
+                          << frmsize.discrete.height << std::endl;
+            }
+        } else {
+            std::cout << "  " << (char)(fmtdesc.pixelformat)
+                      << (char)(fmtdesc.pixelformat >> 8)
+                      << (char)(fmtdesc.pixelformat >> 16)
+                      << (char)(fmtdesc.pixelformat >> 24)
+                      << " (unknown sizes)" << std::endl;
+        }
+        fmtdesc.index++;
+    }
+}
+
+// ── 设置 MJPEG 编码参数（best-effort）──
+static void _configure_mjpeg(int fd) {
+    // 标准 V4L2 JPEG 质量控制（SG2002 驱动不支持，但不报错）
+    v4l2_control ctrl;
+    CLEAR(ctrl);
+    ctrl.id = V4L2_CID_JPEG_COMPRESSION_QUALITY;
+    ctrl.value = 60;
+    if (ioctl(fd, VIDIOC_S_CTRL, &ctrl) == 0)
+        std::cout << "[camera] V4L2 JPEG quality set to " << ctrl.value << std::endl;
+
+    // 尝试 MPEG 码率控制（部分 MJPEG 编码器复用此接口）
+    v4l2_streamparm parm; CLEAR(parm);
+    parm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if (ioctl(fd, VIDIOC_G_PARM, &parm) == 0 &&
+        parm.parm.capture.capability & V4L2_CAP_TIMEPERFRAME) {
+        parm.parm.capture.timeperframe.numerator   = 1;
+        parm.parm.capture.timeperframe.denominator = 30;
+        ioctl(fd, VIDIOC_S_PARM, &parm);
+    }
+}
+
+bool Camera::open(const char* device, int target_w, int target_h) {
     if (!device) device = "/dev/video0";
     _fd = ::open(device, O_RDWR | O_NONBLOCK);
     if (_fd < 0) {
@@ -36,31 +100,34 @@ bool Camera::open(const char* device) {
         close(); return false;
     }
 
-    // 优先 MJPEG → YUYV
+    std::cout << "[camera] V4L2 driver: " << cap.driver
+              << " card: " << cap.card << std::endl;
+
+    _enumerate_formats(_fd);
+
+    // ── 1. 尝试 MJPEG @ 目标分辨率 ──
+    std::cout << "[camera] trying MJPEG " << target_w << "x" << target_h << "..." << std::endl;
+    _width = target_w;
+    _height = target_h;
     _fmt = V4L2_PIX_FMT_MJPEG;
-    _try_fmt(_width, _height);
-    if (_width != 640 || _height != 480) {
-        std::fprintf(stderr, "[camera] V4L2: MJPEG gives %dx%d, retry YUYV...\n", _width, _height);
-        _fmt = V4L2_PIX_FMT_YUYV;
-        _width = 640; _height = 480;
-        _try_fmt(_width, _height);
+    bool mjpeg_ok = _probe_fmt(_fmt, _width, _height);
+
+    if (!mjpeg_ok) {
+        std::fprintf(stderr, "[camera] MJPEG not supported by this device\n");
+        close(); return false;
     }
 
-    // 降低 MJPEG 压缩质量以减小帧大小（SG2002 硬件编码器默认质量偏高）
-    if (_fmt == V4L2_PIX_FMT_MJPEG) {
-        v4l2_control ctrl;
-        CLEAR(ctrl);
-        ctrl.id = V4L2_CID_JPEG_COMPRESSION_QUALITY;
-        ctrl.value = 50;  // 0-100，默认 80-90 → 50 可把 75KB 压到 ~35KB
-        if (ioctl(_fd, VIDIOC_S_CTRL, &ctrl) == 0)
-            std::cout << "[camera] V4L2 JPEG quality: " << ctrl.value << std::endl;
-    }
+    // ── 3. 设置 MJPEG 编码参数 ──
+    if (_fmt == V4L2_PIX_FMT_MJPEG)
+        _configure_mjpeg(_fd);
 
+    // ── 4. 初始化缓冲区并启动流 ──
     _init_buffers();
     _start_stream();
 
-    const char* name = (_fmt == V4L2_PIX_FMT_MJPEG) ? "MJPEG" : "YUYV";
-    std::cout << "[camera] V4L2 " << _width << "x" << _height << " " << name << std::endl;
+    std::cout << "[camera] V4L2 " << _width << "x" << _height
+              << " MJPEG (target was " << target_w << "x"
+              << target_h << ")" << std::endl;
     return true;
 }
 
@@ -99,16 +166,22 @@ std::pair<const uint8_t*, size_t> Camera::read_frame() {
 
 // ── private ──
 
+/// 尝试设置像素格式和分辨率，返回实际协商结果
+bool Camera::_probe_fmt(uint32_t fmt, int& w, int& h) {
+    _fmt = fmt;
+    return _try_fmt(w, h);
+}
+
 bool Camera::_try_fmt(int& w, int& h) {
     v4l2_format fmt; CLEAR(fmt);
     fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    fmt.fmt.pix.width       = w;
-    fmt.fmt.pix.height      = h;
+    fmt.fmt.pix.width       = (unsigned)w;
+    fmt.fmt.pix.height      = (unsigned)h;
     fmt.fmt.pix.pixelformat = _fmt;
     fmt.fmt.pix.field       = V4L2_FIELD_ANY;
     if (ioctl(_fd, VIDIOC_S_FMT, &fmt) < 0) return false;
-    w = fmt.fmt.pix.width;
-    h = fmt.fmt.pix.height;
+    w = (int)fmt.fmt.pix.width;
+    h = (int)fmt.fmt.pix.height;
     return fmt.fmt.pix.pixelformat == _fmt;
 }
 

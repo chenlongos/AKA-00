@@ -703,6 +703,13 @@ else
     rm -f /dev/shm/zenoh-* 2>/dev/null || true
 fi
 
+# ── 1.5. 摄像头分辨率（camera-node 从环境变量读取）──
+CAM_WIDTH=$(grep -E '^\s*width\s*=' "$DORA_HOME/etc/config.toml" 2>/dev/null | grep -oE '[0-9]+' | head -1)
+CAM_HEIGHT=$(grep -E '^\s*height\s*=' "$DORA_HOME/etc/config.toml" 2>/dev/null | grep -oE '[0-9]+' | head -1)
+export CAMERA_WIDTH="${CAM_WIDTH:-640}"
+export CAMERA_HEIGHT="${CAM_HEIGHT:-480}"
+echo "  camera: ${CAMERA_WIDTH}x${CAMERA_HEIGHT} MJPEG"
+
 # ── 2. 验证二进制文件 ──
 echo ""
 echo "Verifying binaries..."
