@@ -110,6 +110,22 @@ impl CameraService {
         // JPEG 头部检测
         let is_jpeg = raw.len() >= 2 && raw[0] == 0xFF && raw[1] == 0xD8;
         if is_jpeg {
+            // 大帧重压缩：降低质量以减少 HTTP MJPEG 传输开销
+            const RECOMPRESS_THRESHOLD: usize = 50 * 1024; // 50 KB
+            if raw.len() > RECOMPRESS_THRESHOLD {
+                match Self::recompress_jpeg(raw, self.config.jpeg_quality) {
+                    Ok(smaller) => {
+                        println!("[camera-svc] recompressed: {}KB -> {}KB (q={})",
+                            raw.len() / 1024, smaller.len() / 1024, self.config.jpeg_quality);
+                        self.frame_tx.send_replace(smaller);
+                        return;
+                    }
+                    Err(e) => {
+                        println!("[camera-svc] recompress failed ({}KB): {:?}, sending original",
+                            raw.len() / 1024, e);
+                    }
+                }
+            }
             self.frame_tx.send_replace(raw.to_vec());
             return;
         }
@@ -127,6 +143,19 @@ impl CameraService {
 }
 
 impl CameraService {
+    /// JPEG 重压缩：解压后以指定质量重新编码，减小大帧的体积
+    fn recompress_jpeg(data: &[u8], quality: u8) -> Result<Vec<u8>, image::ImageError> {
+        let img = image::load_from_memory(data)?;
+        let rgb = img.to_rgb8();
+        let (w, h) = rgb.dimensions();
+        let raw = rgb.into_raw();
+
+        let mut buf = Vec::new();
+        let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, quality);
+        enc.encode(&raw, w, h, image::ExtendedColorType::Rgb8)?;
+        Ok(buf)
+    }
+
     fn encode_rgb_to_jpeg(rgb: &[u8], w: u32, h: u32, quality: u8) -> Option<Vec<u8>> {
         let expected = (w * h * 3) as usize;
         if rgb.len() < expected {
