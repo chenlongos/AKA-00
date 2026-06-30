@@ -693,7 +693,13 @@ echo "  motor backend: ${BACKEND:-dev}"
 
 DORA_BIN="$DORA_HOME/bin/dora"
 
-# ── 1. 验证二进制文件 ──
+# ── 1. 确保 /dev/shm 已挂载（dora 零拷贝共享内存需要）──
+if [ ! -d /dev/shm ] || ! mountpoint -q /dev/shm 2>/dev/null; then
+    echo "Mounting /dev/shm (required by dora shared memory)..."
+    mkdir -p /dev/shm && mount -t tmpfs tmpfs /dev/shm
+fi
+
+# ── 2. 验证二进制文件 ──
 echo ""
 echo "Verifying binaries..."
 MISSING=""
@@ -720,12 +726,12 @@ if [ -n "$MISSING" ]; then
     exit 1
 fi
 
-# ── 2. 设置库路径 (如果有 OpenCV .so) ──
+# ── 3. 设置库路径 (如果有 OpenCV .so) ──
 if [ -d "$DORA_HOME/lib" ]; then
     export LD_LIBRARY_PATH="$DORA_HOME/lib:$DORA_HOME/lib/opencv:${LD_LIBRARY_PATH:-}"
 fi
 
-# ── 3. 启动 dora 运行时 ──
+# ── 4. 启动 dora 运行时 ──
 echo ""
 echo "Starting dora runtime..."
 
@@ -742,7 +748,7 @@ else
     sleep 2
 fi
 
-# ── 4. 启动数据流 ──
+# ── 5. 启动数据流 ──
 echo ""
 echo "Launching dataflow..."
 
@@ -754,7 +760,7 @@ else
     DORA_RUN_PID=$!
 fi
 
-# ── 5. 等待就绪 ──
+# ── 6. 等待就绪 ──
 echo ""
 echo "Waiting for web-server..."
 WEB_PORT=$(grep 'port' "$DORA_HOME/etc/config.toml" 2>/dev/null | grep -oE '[0-9]+' | head -1)
