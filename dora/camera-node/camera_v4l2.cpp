@@ -46,6 +46,16 @@ bool Camera::open(const char* device) {
         _try_fmt(_width, _height);
     }
 
+    // 降低 MJPEG 压缩质量以减小帧大小（SG2002 硬件编码器默认质量偏高）
+    if (_fmt == V4L2_PIX_FMT_MJPEG) {
+        v4l2_control ctrl;
+        CLEAR(ctrl);
+        ctrl.id = V4L2_CID_JPEG_COMPRESSION_QUALITY;
+        ctrl.value = 50;  // 0-100，默认 80-90 → 50 可把 75KB 压到 ~35KB
+        if (ioctl(_fd, VIDIOC_S_CTRL, &ctrl) == 0)
+            std::cout << "[camera] V4L2 JPEG quality: " << ctrl.value << std::endl;
+    }
+
     _init_buffers();
     _start_stream();
 

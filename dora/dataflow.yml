@@ -3,7 +3,7 @@ nodes:
     build: make -C camera-node
     path: camera-node/camera-node
     inputs:
-      tick: dora/timer/millis/33
+      tick: dora/timer/millis/42
       control: web-server/control
     outputs:
       - image

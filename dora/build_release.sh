@@ -624,7 +624,7 @@ if [ -f "$PACKAGE_DIR/bin/camera-node" ]; then
     CAMERA_NODE="  - id: camera
     path: bin/camera-node
     inputs:
-      tick: dora/timer/millis/33
+      tick: dora/timer/millis/42
       control: web-server/control
     outputs:
       - image"
@@ -693,10 +693,14 @@ echo "  motor backend: ${BACKEND:-dev}"
 
 DORA_BIN="$DORA_HOME/bin/dora"
 
-# ── 1. 确保 /dev/shm 已挂载（dora 零拷贝共享内存需要）──
+# ── 1. 确保 /dev/shm 已挂载并清理残留（dora 零拷贝共享内存需要）──
 if [ ! -d /dev/shm ] || ! mountpoint -q /dev/shm 2>/dev/null; then
     echo "Mounting /dev/shm (required by dora shared memory)..."
     mkdir -p /dev/shm && mount -t tmpfs tmpfs /dev/shm
+else
+    echo "Cleaning stale dora shared memory from previous run..."
+    rm -f /dev/shm/dora-* 2>/dev/null || true
+    rm -f /dev/shm/zenoh-* 2>/dev/null || true
 fi
 
 # ── 2. 验证二进制文件 ──
@@ -837,6 +841,13 @@ done
 WEB_PORT=$(grep 'port' "$DORA_HOME/etc/config.toml" 2>/dev/null | grep -oE '[0-9]+' | head -1)
 WEB_PORT="${WEB_PORT:-80}"
 fuser -k "${WEB_PORT}/tcp" 2>/dev/null || true
+
+# ── 清理 dora 共享内存残留（防止下次启动变慢）──
+if [ -d /dev/shm ]; then
+    echo "Cleaning /dev/shm (dora shared memory)..."
+    rm -f /dev/shm/dora-* 2>/dev/null || true
+    rm -f /dev/shm/zenoh-* 2>/dev/null || true
+fi
 
 echo "Done"
 STOPEOF

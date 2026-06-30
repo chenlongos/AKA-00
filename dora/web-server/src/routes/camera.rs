@@ -80,6 +80,7 @@ pub async fn stream(
     let mut rx = s.camera.subscribe();
 
     let stream = async_stream::stream! {
+        // 发送第一帧（如果有）
         {
             let jpeg = rx.borrow_and_update().clone();
             if !jpeg.is_empty() {
@@ -87,14 +88,20 @@ pub async fn stream(
             }
         }
         loop {
-            match rx.changed().await {
-                Ok(()) => {
-                    let jpeg = rx.borrow_and_update().clone();
-                    if !jpeg.is_empty() {
-                        yield mjpeg_part(&jpeg);
-                    }
+            // 等待新帧
+            if rx.changed().await.is_err() {
+                break;
+            }
+            // 取最新帧发送，发送完检查是否有更新的帧积压
+            loop {
+                let jpeg = rx.borrow_and_update().clone();
+                if !jpeg.is_empty() {
+                    yield mjpeg_part(&jpeg);
                 }
-                Err(_) => break,
+                // 当前帧发送期间如果来了新帧，跳过等待直接取最新
+                if !rx.has_changed().unwrap_or(false) {
+                    break;
+                }
             }
         }
     };
