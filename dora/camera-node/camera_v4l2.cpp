@@ -140,6 +140,28 @@ void Camera::close() {
     std::cout << "[camera] V4L2 closed" << std::endl;
 }
 
+// 仅停流，保留 fd 和设备状态（反复 start/stop 时避免 reopen 开销）
+void Camera::stop_stream() {
+    if (_fd < 0 || _n_bufs == 0) return;
+    v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    ioctl(_fd, VIDIOC_STREAMOFF, &type);
+}
+
+// 恢复流（重新 QBUF + STREAMON）
+void Camera::start_stream() {
+    if (_fd < 0 || _n_bufs == 0) return;
+    // 重新入队所有 buffer
+    for (unsigned i = 0; i < _n_bufs; i++) {
+        v4l2_buffer buf; CLEAR(buf);
+        buf.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        buf.memory = V4L2_MEMORY_MMAP;
+        buf.index  = i;
+        ioctl(_fd, VIDIOC_QBUF, &buf);
+    }
+    v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    ioctl(_fd, VIDIOC_STREAMON, &type);
+}
+
 bool Camera::good()    const { return _fd >= 0; }
 int  Camera::fd()      const { return _fd; }
 int  Camera::width()   const { return _width; }

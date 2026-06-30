@@ -19,7 +19,9 @@ public:
     static std::pair<int,int> target_resolution();
 
     bool open(const char* device = nullptr, int target_w = 640, int target_h = 480);
-    void close();
+    void close();               // 彻底释放设备（进程退出时调用）
+    void stop_stream();         // 仅停流，保留 fd 和 buffer（start/stop 切换用）
+    void start_stream();        // 恢复流（必须在 stop_stream() 之后，设备已 open）
     bool good() const;
     int  fd() const;          // Linux V4L2 poll fd，macOS 返回 -1
     int  width()  const;

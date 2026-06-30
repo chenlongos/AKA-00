@@ -63,6 +63,9 @@ int  Camera::width()   const { return _width; }
 int  Camera::height()  const { return _height; }
 bool Camera::is_mjpeg() const { return true; }
 
+void Camera::stop_stream()  { /* macOS OpenCV 无需停流 */ }
+void Camera::start_stream() { /* macOS OpenCV 无需恢复 */ }
+
 bool Camera::wait_frame(int timeout_ms) {
     (void)timeout_ms;
     if (!_warmed) { std::this_thread::sleep_for(std::chrono::milliseconds(100)); _warmed = true; }

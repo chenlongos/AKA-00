@@ -54,16 +54,22 @@ int main() {
                 std::string cmd(data_ptr, data_len);
 
                 if (cmd == "start") {
-                    if (!cam.good() && !cam.open(nullptr, target_w, target_h)) {
-                        std::cerr << "[camera-cpp] Failed to open camera" << std::endl;
-                        free_dora_event(event);
-                        continue;
+                    if (!cam.good()) {
+                        // 首次打开设备
+                        if (!cam.open(nullptr, target_w, target_h)) {
+                            std::cerr << "[camera-cpp] Failed to open camera" << std::endl;
+                            free_dora_event(event);
+                            continue;
+                        }
+                    } else {
+                        // 设备已打开，只需恢复流（避免 reopen 开销）
+                        cam.start_stream();
                     }
                     capturing = true;
                     std::cout << "[camera-cpp] ▶  capture started" << std::endl;
                 } else if (cmd == "stop") {
                     capturing = false;
-                    if (cam.good()) cam.close();
+                    cam.stop_stream();  // 只停流，保留 fd 和 buffer
                     std::cout << "[camera-cpp] ⏸  capture stopped" << std::endl;
                 }
                 free_dora_event(event);
