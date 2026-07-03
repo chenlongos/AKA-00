@@ -27,3 +27,11 @@ port = 80
 # 距离标定: D = m / P + c
 m = 2671.82
 c = -2.82
+
+[logging]
+# 日志级别: error / warn / info / debug / trace
+# info —— 生命周期 + 错误（默认）
+# debug —— 加上 set_speeds / GET_STATUS / TX-RX hex 帧（5Hz 刷屏）
+# trace —— 同 debug + 内部解析细节
+# 想临时覆盖可用环境变量 RUST_LOG（如 RUST_LOG=motor_bridge=debug）
+level = "info"

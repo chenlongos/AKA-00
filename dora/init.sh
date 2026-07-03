@@ -25,6 +25,13 @@ cargo build -p state-node --release 2>&1 | grep -E "Compiling|Finished|error" ||
 make -C camera-node 2>&1 | grep -E "error|warning" | head -3 || true
 echo "   ✅ done"
 
+# ── 1.5. 摄像头日志级别（camera-node 从环境变量读取）──
+# info 静默，debug 启 fps 报告。从 [logging] level 读
+CAM_LOG_LEVEL=$(grep -A 5 '^\[logging\]' config.toml 2>/dev/null \
+    | grep -E '^\s*level\s*=' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+export CAMERA_LOG_LEVEL="${CAM_LOG_LEVEL:-info}"
+echo "   camera log level: ${CAMERA_LOG_LEVEL}"
+
 # ── 2. 启动 ──
 echo ""
 echo "🚀 Starting dora..."

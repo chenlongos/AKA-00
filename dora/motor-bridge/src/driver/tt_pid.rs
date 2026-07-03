@@ -4,17 +4,19 @@
 //! 协议完全匹配：帧格式 0xAA 0x55 <cmd> <len> <payload...> <chk>
 //! 校验：cmd ^ len ^ payload[0] ^ ... ^ payload[last]
 //!
-//! 日志约定（统一走 stderr，方便 dora 捕获）：
-//!   [motor-tt_pid]      — 生命周期 / 状态变更
-//!   [motor-tt_pid/tx]   — 发出的帧（hex）
-//!   [motor-tt_pid/rx]   — 收到的帧（hex）或超时
-//!   [motor-tt_pid/err]  — 错误 / 降级
+//! 日志约定（统一走 stderr，方便 dora 捕获；通过 env_logger 控级别）：
+//!   error!  — 硬错误（端口丢失、chk 不匹配、IO 错误）
+//!   warn!   — 降级/异常（stub 回退、超时、NACK、未应答、payload 异常）
+//!   info!   — 生命周期（开串口、握手起止、STOP 用户动作）
+//!   debug!  — 高频/详尽协议细节（TX/RX hex、set_speeds、GET_STATUS、RPM 数值）
 //!
-//! 想静音可设环境变量 `MOTOR_TT_PID_QUIET=1`（仍保留 error/降级日志）。
+//! 启用 DEBUG：在 shell 里 `export RUST_LOG=motor_bridge=debug` 再启动 dora。
 
 use std::io::{Read, Write};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+
+use log::{debug, error, info, warn};
 
 use super::MotorDriver;
 
@@ -40,13 +42,7 @@ const SPEED_MAX: i32 = 100;
 /// STOP payload 中"双电机同时停"的魔数（固件 p[0]==2 走 motorCoast(0)+motorCoast(1)）
 const STOP_BOTH: u8 = 2;
 
-// ── 日志工具 ──
-
-fn quiet() -> bool {
-    std::env::var("MOTOR_TT_PID_QUIET")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
-}
+// ── 工具 ──
 
 fn hex(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 3);
@@ -85,13 +81,13 @@ struct StubDriver;
 
 impl MotorDriver for StubDriver {
     fn set_speeds(&mut self, left: i32, right: i32) {
-        eprintln!(
-            "[motor-tt_pid/stub] set_speeds left={} right={} (port unavailable, no-op)",
+        debug!(
+            "[tt_pid/stub] set_speeds left={} right={} (port unavailable, no-op)",
             left, right
         );
     }
     fn stop(&mut self) {
-        eprintln!("[motor-tt_pid/stub] stop (port unavailable, no-op)");
+        debug!("[tt_pid/stub] stop (port unavailable, no-op)");
     }
 }
 
@@ -103,8 +99,8 @@ pub struct TtPidDriver {
 
 impl TtPidDriver {
     pub fn new(port_path: &str, baudrate: u32, ppr: i32) -> Box<dyn MotorDriver> {
-        eprintln!(
-            "[motor-tt_pid] opening port {} @ {} baud (8N1)...",
+        info!(
+            "[tt_pid] opening port {} @ {} baud (8N1)...",
             port_path, baudrate
         );
         let port = match serialport::new(port_path, baudrate)
@@ -116,18 +112,17 @@ impl TtPidDriver {
         {
             Ok(p) => p,
             Err(e) => {
-                eprintln!(
-                    "[motor-tt_pid/err] open {} @ {} baud failed: {}. \
-                     Falling back to stub driver — wheel commands will be logged but NOT sent. \
-                     Check cable / port path / permissions.",
+                warn!(
+                    "[tt_pid] open {} @ {} baud failed: {}. Falling back to stub driver — \
+                     wheel commands will be logged but NOT sent. Check cable / port path / permissions.",
                     port_path, baudrate, e
                 );
                 return Box::new(StubDriver);
             }
         };
 
-        eprintln!(
-            "[motor-tt_pid] ✓ port {} opened, ppr={} pwm_freq=20000",
+        info!(
+            "[tt_pid] ✓ port {} opened, ppr={} pwm_freq=20000",
             port_path, ppr
         );
 
@@ -136,7 +131,7 @@ impl TtPidDriver {
         };
 
         // 等 ESP32 USB-CDC 枚举完成（参照 Python `time.sleep(0.5)`）
-        eprintln!("[motor-tt_pid] waiting 500ms for ESP32 USB-CDC enumeration...");
+        debug!("[tt_pid] waiting 500ms for ESP32 USB-CDC enumeration...");
         std::thread::sleep(Duration::from_millis(500));
 
         // 清掉 boot log / 复位消息残留（参照 Python `reset_input_buffer`）
@@ -144,20 +139,20 @@ impl TtPidDriver {
             let mut guard = driver.port.lock().unwrap();
             if let Some(p) = guard.as_mut() {
                 if let Err(e) = p.clear(serialport::ClearBuffer::Input) {
-                    eprintln!(
-                        "[motor-tt_pid/err] clear input buffer failed: {} (non-fatal, continuing)",
+                    warn!(
+                        "[tt_pid] clear input buffer failed: {} (non-fatal, continuing)",
                         e
                     );
                 } else {
-                    eprintln!("[motor-tt_pid] input buffer cleared");
+                    debug!("[tt_pid] input buffer cleared");
                 }
             }
         }
 
-        eprintln!("[motor-tt_pid] >>> handshake start");
+        info!("[tt_pid] >>> handshake start");
         driver.init();
         driver.config(ppr, 20000);
-        eprintln!("[motor-tt_pid] <<< handshake done, driver ready");
+        info!("[tt_pid] <<< handshake done, driver ready");
 
         Box::new(driver)
     }
@@ -177,8 +172,8 @@ impl TtPidDriver {
         let mut guard = self.port.lock().unwrap();
         match guard.as_mut() {
             None => {
-                eprintln!(
-                    "[motor-tt_pid/err] tx {} called but port is None (stub mode?)",
+                warn!(
+                    "[tt_pid] tx {} called but port is None (stub mode?)",
                     name
                 );
             }
@@ -186,22 +181,17 @@ impl TtPidDriver {
                 // 发命令前清输入缓冲，避免上次响应残留 / 启动 boot log 干扰本次解析
                 // （对应 Python `_send_cmd` 里的 `reset_input_buffer()`）
                 if let Err(e) = port.clear(serialport::ClearBuffer::Input) {
-                    eprintln!(
-                        "[motor-tt_pid/err] tx {} clear input buffer failed: {}",
-                        name, e
-                    );
+                    warn!("[tt_pid] tx {} clear input buffer failed: {}", name, e);
                 }
                 if let Err(e) = port.write_all(&frame) {
-                    eprintln!("[motor-tt_pid/err] tx {} write failed: {}", name, e);
+                    error!("[tt_pid] tx {} write failed: {}", name, e);
                     return;
                 }
                 if let Err(e) = port.flush() {
-                    eprintln!("[motor-tt_pid/err] tx {} flush failed: {}", name, e);
+                    error!("[tt_pid] tx {} flush failed: {}", name, e);
                     return;
                 }
-                if !quiet() {
-                    eprintln!("[motor-tt_pid/tx] {} len={} -> {}", name, len, hex(&frame));
-                }
+                debug!("[tt_pid/tx] {} len={} -> {}", name, len, hex(&frame));
             }
         }
     }
@@ -214,10 +204,7 @@ impl TtPidDriver {
         let port = match guard.as_mut() {
             Some(p) => p,
             None => {
-                eprintln!(
-                    "[motor-tt_pid/err] read_frame({}) called but port is None",
-                    label
-                );
+                error!("[tt_pid] read_frame({}) called but port is None", label);
                 return None;
             }
         };
@@ -226,15 +213,15 @@ impl TtPidDriver {
         let mut header = [0u8; 4];
         if let Err(e) = port.read_exact(&mut header) {
             let elapsed_ms = started.elapsed().as_millis();
-            eprintln!(
-                "[motor-tt_pid/rx] {} header TIMEOUT after {}ms: {} (ESP32 not responding?)",
+            warn!(
+                "[tt_pid/rx] {} header TIMEOUT after {}ms: {} (ESP32 not responding?)",
                 label, elapsed_ms, e
             );
             return None;
         }
         if header[0] != FRAME_H1 || header[1] != FRAME_H2 {
-            eprintln!(
-                "[motor-tt_pid/rx] {} bad header: {} (want AA 55 ?? ??)",
+            warn!(
+                "[tt_pid/rx] {} bad header: {} (want AA 55 ?? ??)",
                 label,
                 hex(&header)
             );
@@ -248,8 +235,8 @@ impl TtPidDriver {
         if len > 0 {
             if let Err(e) = port.read_exact(&mut payload) {
                 let elapsed_ms = started.elapsed().as_millis();
-                eprintln!(
-                    "[motor-tt_pid/rx] {} payload TIMEOUT after {}ms (len={}): {}",
+                warn!(
+                    "[tt_pid/rx] {} payload TIMEOUT after {}ms (len={}): {}",
                     label, elapsed_ms, len, e
                 );
                 return None;
@@ -260,8 +247,8 @@ impl TtPidDriver {
         let mut chk_byte = [0u8; 1];
         if let Err(e) = port.read_exact(&mut chk_byte) {
             let elapsed_ms = started.elapsed().as_millis();
-            eprintln!(
-                "[motor-tt_pid/rx] {} chk TIMEOUT after {}ms: {}",
+            warn!(
+                "[tt_pid/rx] {} chk TIMEOUT after {}ms: {}",
                 label, elapsed_ms, e
             );
             return None;
@@ -273,8 +260,8 @@ impl TtPidDriver {
             expected ^= b;
         }
         if expected != chk_byte[0] {
-            eprintln!(
-                "[motor-tt_pid/rx] {} chk mismatch: got {:02X} expected {:02X} \
+            error!(
+                "[tt_pid/rx] {} chk mismatch: got {:02X} expected {:02X} \
                  (rsp=0x{:02X} len={} payload={})",
                 label,
                 chk_byte[0],
@@ -287,17 +274,14 @@ impl TtPidDriver {
         }
 
         let elapsed_ms = started.elapsed().as_millis();
-        let quiet_ok = quiet() && rsp == RSP_ACK;
-        if !quiet_ok {
-            eprintln!(
-                "[motor-tt_pid/rx] {} {} in {}ms, payload=[{}] (len={})",
-                label,
-                rsp_name(rsp),
-                elapsed_ms,
-                hex(&payload),
-                len
-            );
-        }
+        debug!(
+            "[tt_pid/rx] {} {} in {}ms, payload=[{}] (len={})",
+            label,
+            rsp_name(rsp),
+            elapsed_ms,
+            hex(&payload),
+            len
+        );
 
         Some((rsp, payload))
     }
@@ -307,29 +291,29 @@ impl TtPidDriver {
         match self.read_frame("INIT") {
             Some((RSP_ACK, payload)) => {
                 if !payload.is_empty() {
-                    eprintln!(
-                        "[motor-tt_pid] INIT ACK payload=[{}] ({} bytes) — status code from firmware?",
+                    debug!(
+                        "[tt_pid] INIT ACK payload=[{}] ({} bytes) — status code from firmware?",
                         hex(&payload),
                         payload.len()
                     );
                 }
             }
             Some((RSP_NACK, payload)) => {
-                eprintln!(
-                    "[motor-tt_pid/err] INIT NACK payload=[{}] (firmware rejected init)",
+                warn!(
+                    "[tt_pid] INIT NACK payload=[{}] (firmware rejected init)",
                     hex(&payload)
                 );
             }
             Some((other, payload)) => {
-                eprintln!(
-                    "[motor-tt_pid/err] INIT unexpected rsp=0x{:02X} payload=[{}]",
+                warn!(
+                    "[tt_pid] INIT unexpected rsp=0x{:02X} payload=[{}]",
                     other,
                     hex(&payload)
                 );
             }
             None => {
-                eprintln!(
-                    "[motor-tt_pid/err] INIT did not get a valid response. \
+                warn!(
+                    "[tt_pid] INIT did not get a valid response. \
                      Common causes: wrong baudrate, ESP32 in download mode (GPIO0 low), \
                      wrong firmware, or /dev/tty path points to a different device."
                 );
@@ -352,31 +336,31 @@ impl TtPidDriver {
         match self.read_frame("CONFIG") {
             Some((RSP_ACK, payload)) => {
                 if !payload.is_empty() {
-                    eprintln!(
-                        "[motor-tt_pid] CONFIG ACK payload=[{}] ({} bytes)",
+                    debug!(
+                        "[tt_pid] CONFIG ACK payload=[{}] ({} bytes)",
                         hex(&payload),
                         payload.len()
                     );
                 }
             }
             Some((RSP_NACK, payload)) => {
-                eprintln!(
-                    "[motor-tt_pid/err] CONFIG NACK payload=[{}] (firmware rejected ppr={} pwm_freq={})",
+                warn!(
+                    "[tt_pid] CONFIG NACK payload=[{}] (firmware rejected ppr={} pwm_freq={})",
                     hex(&payload),
                     ppr,
                     pwm_freq
                 );
             }
             Some((other, payload)) => {
-                eprintln!(
-                    "[motor-tt_pid/err] CONFIG unexpected rsp=0x{:02X} payload=[{}]",
+                warn!(
+                    "[tt_pid] CONFIG unexpected rsp=0x{:02X} payload=[{}]",
                     other,
                     hex(&payload)
                 );
             }
             None => {
-                eprintln!(
-                    "[motor-tt_pid/err] CONFIG did not get a valid response. \
+                warn!(
+                    "[tt_pid] CONFIG did not get a valid response. \
                      Check ppr={} and pwm_freq={} are accepted by firmware.",
                     ppr, pwm_freq
                 );
@@ -389,9 +373,7 @@ impl MotorDriver for TtPidDriver {
     fn set_speeds(&mut self, left: i32, right: i32) {
         let l = left.clamp(SPEED_MIN, SPEED_MAX);
         let r = right.clamp(SPEED_MIN, SPEED_MAX);
-        if !quiet() {
-            eprintln!("[motor-tt_pid] set_speeds left={} right={}", l, r);
-        }
+        debug!("[tt_pid] set_speeds left={} right={}", l, r);
         let p = [
             (l >> 8) as u8,
             l as u8,
@@ -402,7 +384,7 @@ impl MotorDriver for TtPidDriver {
     }
 
     fn stop(&mut self) {
-        eprintln!("[motor-tt_pid] stop (both motors coast)");
+        info!("[tt_pid] stop (both motors coast)");
         // 固件 p[0]==2 表示双电机同时滑行停止
         self.send_cmd(CMD_STOP, &[STOP_BOTH]);
     }
@@ -417,17 +399,15 @@ impl MotorDriver for TtPidDriver {
                 let status = payload[0];
                 let m1 = i16::from_be_bytes([payload[1], payload[2]]) as i32;
                 let m2 = i16::from_be_bytes([payload[3], payload[4]]) as i32;
-                if !quiet() {
-                    eprintln!(
-                        "[motor-tt_pid] status=0x{:02X} M1={} RPM M2={} RPM",
-                        status, m1, m2
-                    );
-                }
+                debug!(
+                    "[tt_pid] status=0x{:02X} M1={} RPM M2={} RPM",
+                    status, m1, m2
+                );
                 (m1, m2)
             }
             Some((rsp, payload)) => {
-                eprintln!(
-                    "[motor-tt_pid/err] GET_STATUS unexpected rsp=0x{:02X} payload=[{}] (len={})",
+                warn!(
+                    "[tt_pid] GET_STATUS unexpected rsp=0x{:02X} payload=[{}] (len={})",
                     rsp,
                     hex(&payload),
                     payload.len()

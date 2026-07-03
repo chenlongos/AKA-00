@@ -40,8 +40,19 @@ fn joystick_to_tank(x: i8, y: i8) -> (i32, i32) {
 }
 
 fn main() -> Result<()> {
+    // 日志初始化：[logging] level 作为默认 filter；RUST_LOG 可临时覆盖
+    //   level = "info"  → 仅生命周期 + 错误
+    //   level = "debug" → + set_speeds / GET_STATUS / TX-RX hex
+    //   level = "trace" → + 内部解析细节
+    let config_for_log = dora_config::Config::load();
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or(&config_for_log.logging.level),
+    )
+    .format_timestamp_millis()
+    .init();
+
     let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(run()).unwrap_or_else(|e| eprintln!("motor-bridge error: {:?}", e));
+    rt.block_on(run()).unwrap_or_else(|e| log::error!("motor-bridge error: {:?}", e));
     Ok(())
 }
 
@@ -50,8 +61,9 @@ async fn run() -> Result<()> {
 
     let (node, mut events) = DoraNode::init_from_env()
         .wrap_err("Failed to init dora node")?;
-    println!("[motor-bridge] Dora node initialized");
+    log::info!("[motor-bridge] Dora node initialized");
 
+    let backend_name = config.motor.backend.clone();
     let driver_config = DriverConfig {
         backend: Some(config.motor.backend),
         port: Some(config.motor.port),
@@ -60,7 +72,7 @@ async fn run() -> Result<()> {
     };
     let driver: Arc<Mutex<Box<dyn MotorDriver>>> =
         Arc::new(Mutex::new(create_driver(&driver_config)));
-    println!("[motor-bridge] Driver ready");
+    log::info!("[motor-bridge] Driver ready (backend={})", backend_name);
 
     // 定时回报电机状态（每 200ms，与 WebSocket 0xBB 同步）
     let driver_rpt = driver.clone();
@@ -98,7 +110,7 @@ async fn run() -> Result<()> {
                 let cmd: MotorCmd = match serde_json::from_slice(uint8_arr.values()) {
                     Ok(c) => c,
                     Err(e) => {
-                        eprintln!("[motor-bridge] parse: {:?}", e);
+                        log::warn!("[motor-bridge] parse motor_cmd: {:?}", e);
                         continue;
                     }
                 };
@@ -136,7 +148,7 @@ async fn run() -> Result<()> {
                 }
             }
             Event::Stop(cause) => {
-                println!("[motor-bridge] Stop: {:?}, exiting", cause);
+                log::info!("[motor-bridge] Stop: {:?}, exiting", cause);
                 break;
             }
             _ => {}
@@ -144,6 +156,6 @@ async fn run() -> Result<()> {
     }
 
     driver.lock().unwrap().stop();
-    println!("[motor-bridge] Shutdown");
+    log::info!("[motor-bridge] Shutdown");
     Ok(())
 }
