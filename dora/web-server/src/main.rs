@@ -60,7 +60,7 @@ async fn run() -> Result<()> {
     // ── 服务层 ──
     let state = Arc::new(AppState {
         camera: Arc::new(CameraService::new(dora.clone(), config.camera.clone())),
-        motor: Arc::new(MotorService::new(dora)),
+        motor: Arc::new(MotorService::new(dora, config.chassis.clone())),
     });
 
     // ── HTTP 路由 ──
@@ -104,13 +104,13 @@ async fn run() -> Result<()> {
                 "robot_state" => {
                     let uint8_arr = data.as_primitive::<arrow::datatypes::UInt8Type>();
                     if let Ok(v) = serde_json::from_slice::<serde_json::Value>(uint8_arr.values()) {
-                        // 电机状态 — 来自 motor-bridge 的真实 RPM
-                        state.motor.update_rpm(
-                            v["motor_left_rpm"].as_i64().unwrap_or(0) as i32,
-                            v["motor_right_rpm"].as_i64().unwrap_or(0) as i32,
+                        // state-node 已是 m/s（Python RobotStatus 字段名）
+                        state.motor.update_speed(
+                            v["left_speed"].as_f64().unwrap_or(0.0) as f32,
+                            v["right_speed"].as_f64().unwrap_or(0.0) as f32,
                         );
-                        // 注意：camera_on 由 CameraService 自己管理（open/close API）
-                        // state-node 的 camera_on 仅供参考，不可覆盖本地状态
+                        // 注：camera_on 由 CameraService 自己管理（open/close API）
+                        // 注：left_target / gripper_status / timestamp_ms 等暂未用到
                     }
                 }
                 _ => {}

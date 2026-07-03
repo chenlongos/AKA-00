@@ -28,6 +28,12 @@ port = 80
 m = 2671.82
 c = -2.82
 
+[chassis]
+# 底盘物理参数 — 用于把编码器 RPM 换算成线速度 m/s
+# 1:90 减速比对应 PPR=4680（TT 马达典型值，base_control.ino 固件）
+wheel_diameter_mm = 62
+gear_ratio = 90
+
 [logging]
 # 日志级别: error / warn / info / debug / trace
 # info —— 生命周期 + 错误（默认）

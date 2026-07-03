@@ -11,6 +11,7 @@ pub struct Config {
     pub arm: ArmConfig,
     pub web: WebConfig,
     pub calibration: CalibrationConfig,
+    pub chassis: ChassisConfig,
     pub logging: LoggingConfig,
 }
 
@@ -55,14 +56,26 @@ pub struct LoggingConfig {
     pub level: String,
 }
 
+/// 底盘物理参数 —— 用于把电机 RPM 换算成线速度 m/s：
+///   wheel_rpm       = motor_rpm / gear_ratio
+///   linear_speed_ms = wheel_rpm × π × (wheel_diameter_mm / 1000) / 60
+#[derive(Debug, Clone, Deserialize)]
+pub struct ChassisConfig {
+    /// 轮子直径（mm）
+    pub wheel_diameter_mm: f64,
+    /// 减速比（电机转 N 圈轮子转 1 圈，填 N）。PPR=4680 的 TT 马达典型 1:90
+    pub gear_ratio: u32,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
             camera: CameraConfig { width: 640, height: 480, fps: 30, jpeg_quality: 70 },
             motor: MotorConfig { backend: "dev".into(), port: "/dev/ttyS1".into(), baudrate: 115200, ppr: 4680 },
             arm: ArmConfig { backend: "dev".into(), port: "/dev/ttyS2".into(), baudrate: 115200 },
-            web: WebConfig { port: 8080 },
+            web: WebConfig { port: 80 },
             calibration: CalibrationConfig { m: 2671.82, c: -2.82 },
+            chassis: ChassisConfig { wheel_diameter_mm: 62.0, gear_ratio: 90 },
             logging: LoggingConfig { level: "info".into() },
         }
     }

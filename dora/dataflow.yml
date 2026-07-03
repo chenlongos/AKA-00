@@ -21,6 +21,7 @@ nodes:
     path: target/release/state-node
     inputs:
       motor_status: motor-bridge/motor_status
+      motor_cmd: web-server/motor_cmd
     outputs:
       - robot_state
 

@@ -74,15 +74,19 @@ async fn handle_ws(socket: WebSocket, motor: Arc<crate::services::motor::MotorSe
     let (mut tx, mut rx) = socket.split();
     let motor_tx = motor.clone();
 
-    // 发送任务：每 200ms 推送电机状态
+    // 发送任务：每 200ms 推送电机状态（左/右轮线速度 m/s）
     let send_task = tokio::spawn(async move {
         let mut tick = interval(Duration::from_millis(200));
         loop {
             tick.tick().await;
             let s = motor_tx.status();
             let mut buf = vec![0xBBu8];
-            buf.extend_from_slice(&(s.left_rpm as i16).to_be_bytes());
-            buf.extend_from_slice(&(s.right_rpm as i16).to_be_bytes());
+            // 前端 (api.ts:125) 把 int16 当作 mm/s 读（再除以 1000 得 m/s）
+            // 这里把 float m/s × 1000 编码成 int16 mm/s，精度 1mm/s
+            let left_mmps = (s.left_speed * 1000.0).round() as i16;
+            let right_mmps = (s.right_speed * 1000.0).round() as i16;
+            buf.extend_from_slice(&left_mmps.to_be_bytes());
+            buf.extend_from_slice(&right_mmps.to_be_bytes());
             if tx.send(Message::Binary(buf.into())).await.is_err() {
                 break;
             }

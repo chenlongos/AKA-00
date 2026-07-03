@@ -1,13 +1,14 @@
 //! dora state-node — 统一机器人状态管理
 //!
-//! 对应 `src/state/__init__.py` 的 StateCollector。
+//! 对应 `src/state/__init__.py` 的 `StateCollector` / `RobotStatus`。
 //! 聚合所有子系统的状态，每 200ms 发布一次 robot_state。
 //!
-//! 输入:  motor_status, camera_status, arm_status (future)
-//! 输出:  robot_state (JSON)
+//! 输入:  motor_status (来自 motor-bridge)
+//! 输出:  robot_state (JSON) — 字段名 / 类型与 Python `RobotStatus` 一致
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use arrow::array::AsArray;
 use dora_node_api::{self, DoraNode, Event};
@@ -15,30 +16,48 @@ use dora_node_api::futures::StreamExt;
 use eyre::{Context, Result};
 use serde::Serialize;
 
-// ── 统一状态 ──
+// ── 统一状态（与 Python `RobotStatus` 一一对应）──
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize)]
 struct RobotState {
-    // 电机
-    motor_left_rpm: i32,
-    motor_right_rpm: i32,
-    // 摄像头
-    camera_on: bool,
-    camera_fps: u32,
-    // 机械臂 (future)
-    arm_angles: Vec<i32>,
-    // 系统
-    uptime_secs: u64,
+    /// 左轮线速度 (m/s)
+    left_speed: f32,
+    /// 右轮线速度 (m/s)
+    right_speed: f32,
+    /// 左轮目标速度（由 motor_cmd 解析得到；当前未连入 input，置 0）
+    left_target: f32,
+    /// 右轮目标速度
+    right_target: f32,
+    /// 夹爪状态: "open" / "closed" / "moving" / "unknown"
+    gripper_status: String,
+    /// 夹爪目标: 0=释放, 1=夹取（zp10s 暂未对接，置 0）
+    gripper_target: i32,
+    /// unix 时间戳毫秒（对齐 Python `int(time.time() * 1000)`）
+    timestamp_ms: i64,
+}
+
+impl Default for RobotState {
+    fn default() -> Self {
+        Self {
+            left_speed: 0.0,
+            right_speed: 0.0,
+            left_target: 0.0,
+            right_target: 0.0,
+            gripper_status: "unknown".into(),
+            gripper_target: 0,
+            timestamp_ms: 0,
+        }
+    }
 }
 
 struct StateStore {
     state: Mutex<RobotState>,
-    started: std::time::Instant,
+    chassis: dora_config::ChassisConfig,
 }
 
 impl StateStore {
-    fn new() -> Self {
-        Self { state: Mutex::new(RobotState::default()), started: std::time::Instant::now() }
+    fn new(chassis: dora_config::ChassisConfig) -> Self {
+        Self { state: Mutex::new(RobotState::default()), chassis }
     }
 
     fn update<T: FnOnce(&mut RobotState)>(&self, f: T) {
@@ -46,11 +65,100 @@ impl StateStore {
         f(&mut s);
     }
 
+    /// 取快照并刷上当前时间戳。
     fn snapshot(&self) -> RobotState {
         let mut s = self.state.lock().unwrap().clone();
-        s.uptime_secs = self.started.elapsed().as_secs();
+        s.timestamp_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
         s
     }
+
+    /// 把 motor-bridge 上报的 motor_rpm 换算成 m/s 再存。
+    fn update_motor_rpm(&self, left_motor_rpm: i32, right_motor_rpm: i32) {
+        let left_mps = rpm_to_mps(left_motor_rpm, &self.chassis);
+        let right_mps = rpm_to_mps(right_motor_rpm, &self.chassis);
+        self.update(|s| {
+            s.left_speed = left_mps;
+            s.right_speed = right_mps;
+        });
+    }
+
+    /// 更新目标速度（m/s）。来自 web-server 的 motor_cmd 解析。
+    fn update_target(&self, left_target: f32, right_target: f32) {
+        self.update(|s| {
+            s.left_target = left_target;
+            s.right_target = right_target;
+        });
+    }
+}
+
+/// motor_rpm → m/s，与 web-server 端 `MotorService::rpm_to_mps` 公式一致：
+///   wheel_rpm = motor_rpm / gear_ratio
+///   linear_m_per_s = wheel_rpm × π × (wheel_diameter_mm/1000) / 60
+fn rpm_to_mps(motor_rpm: i32, chassis: &dora_config::ChassisConfig) -> f32 {
+    let wheel_rpm = (motor_rpm as f32) / (chassis.gear_ratio as f32);
+    let diameter_m = (chassis.wheel_diameter_mm as f32) / 1000.0;
+    wheel_rpm * std::f32::consts::PI * diameter_m / 60.0
+}
+
+/// PWM 百分比 (-100..100) → 期望线速度 m/s（当前未用——target 存原始 PWM%）。
+/// 保留供以后若想把 target 也换成 m/s 显示时用。
+/// 公式与 ESP32 固件 `setMotorSpeed` 内 `target_rpm = speed * 150 / 100` 一致：
+///   target_motor_rpm = pwm * 150 / 100
+///   wheel_rpm        = target_motor_rpm / gear_ratio
+///   m_per_s          = wheel_rpm * π * wheel_diameter / 60
+#[allow(dead_code)]
+fn pwm_to_mps(pwm: f32, chassis: &dora_config::ChassisConfig) -> f32 {
+    let target_motor_rpm = pwm * 150.0 / 100.0;
+    let wheel_rpm = target_motor_rpm / (chassis.gear_ratio as f32);
+    let diameter_m = (chassis.wheel_diameter_mm as f32) / 1000.0;
+    wheel_rpm * std::f32::consts::PI * diameter_m / 60.0
+}
+
+/// 解析 web-server 发来的 motor_cmd JSON，得到 (left_target, right_target)。
+/// 与 Python `set_target_speed` 一致：存原始 PWM% (-100..100)，不是 m/s。
+///   - `action`     up=(+s,+s), down=(-s,-s), left=(-s,+s), right=(+s,-s), stop=(0,0)
+///   - `direct`     取 payload 的 left/right
+///   - `joystick`   与 motor-bridge `joystick_to_tank` 公式一致：i8 /127 ×100 夹到 ±100
+/// `grab` / `release` 是夹爪命令，不影响 wheel target，返回 None。
+fn parse_motor_cmd_target(bytes: &[u8]) -> Option<(f32, f32)> {
+    let v: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    let command = v.get("command")?.as_str()?;
+
+    let pair: (f32, f32) = match command {
+        "action" => {
+            let action = v.get("action")?.as_str()?;
+            let speed = v.get("speed")?.as_f64()? as f32;
+            match action {
+                "up" => (speed, speed),
+                "down" => (-speed, -speed),
+                "left" => (-speed, speed),
+                "right" => (speed, -speed),
+                "stop" => (0.0, 0.0),
+                "grab" | "release" => return None, // 夹爪指令
+                _ => return None,
+            }
+        }
+        "direct" => {
+            let l = v.get("left")?.as_f64()? as f32;
+            let r = v.get("right")?.as_f64()? as f32;
+            (l, r)
+        }
+        "joystick" => {
+            // 与 motor-bridge `joystick_to_tank` 完全一致
+            let x = v.get("x").and_then(|x| x.as_i64()).unwrap_or(0) as i8 as f32;
+            let y = v.get("y").and_then(|x| x.as_i64()).unwrap_or(0) as i8 as f32;
+            let fy = y / 127.0;
+            let fx = x / 127.0;
+            let c = |v: f32| (v * 100.0).clamp(-100.0, 100.0);
+            (c(fy + fx), c(fy - fx))
+        }
+        _ => return None,
+    };
+
+    Some(pair)
 }
 
 fn main() -> Result<()> {
@@ -69,14 +177,16 @@ fn main() -> Result<()> {
 }
 
 async fn run() -> Result<()> {
+    let config = dora_config::Config::load();
+
     let (node, mut events) = DoraNode::init_from_env()
         .wrap_err("Failed to init dora node")?;
     log::info!("[state] Dora node initialized");
 
-    let store = std::sync::Arc::new(StateStore::new());
+    let store = std::sync::Arc::new(StateStore::new(config.chassis.clone()));
     let node = std::sync::Arc::new(tokio::sync::Mutex::new(node));
 
-    // 每 200ms 发布聚合状态
+    // 每 200ms 发布聚合状态（带时间戳）
     let store_pub = store.clone();
     let node_pub = node.clone();
     tokio::spawn(async move {
@@ -95,7 +205,7 @@ async fn run() -> Result<()> {
         }
     });
 
-    // 接收各子系统状态更新
+    // 接收 motor-bridge 的 motor_status + web-server 的 motor_cmd
     while let Some(event) = events.next().await {
         if let Event::Input { id, data, .. } = event {
             let uint8_arr = data.as_primitive::<arrow::datatypes::UInt8Type>();
@@ -104,23 +214,21 @@ async fn run() -> Result<()> {
             match id.to_string().as_str() {
                 "motor_status" => {
                     if let Ok(v) = serde_json::from_slice::<serde_json::Value>(bytes) {
-                        store.update(|s| {
-                            s.motor_left_rpm = v["left_rpm"].as_i64().unwrap_or(0) as i32;
-                            s.motor_right_rpm = v["right_rpm"].as_i64().unwrap_or(0) as i32;
-                        });
+                        let left = v["left_rpm"].as_i64().unwrap_or(0) as i32;
+                        let right = v["right_rpm"].as_i64().unwrap_or(0) as i32;
+                        store.update_motor_rpm(left, right);
                     }
                 }
-                "camera_status" => {
-                    if let Ok(v) = serde_json::from_slice::<serde_json::Value>(bytes) {
-                        store.update(|s| {
-                            s.camera_on = v["camera_on"].as_bool().unwrap_or(false);
-                            if let Some(fps) = v["fps"].as_u64() {
-                                s.camera_fps = fps as u32;
-                            }
-                        });
+                "motor_cmd" => {
+                    // 解析 action/direct/joystick 算出 left_target/right_target (PWM%)
+                    if let Some((l, r)) = parse_motor_cmd_target(bytes) {
+                        store.update_target(l, r);
                     }
+                    // grab / release / 解析失败：不影响 wheel target
                 }
-                _ => {}
+                _ => {
+                    // arm_status 等暂未对接
+                }
             }
         } else if let Event::Stop(cause) = event {
             log::info!("[state] Stop: {:?}, exiting", cause);

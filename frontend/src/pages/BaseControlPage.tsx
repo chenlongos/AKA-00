@@ -88,7 +88,7 @@ const BaseControlPage = () => {
     const contentW = Math.min(window.innerWidth - Math.max(60, window.innerWidth * 0.08), Math.round(400 * scale));
     const dpadBtn = (dir: string, label: string, bgColor: string) => (
         <button
-            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); handlePressStart(dir, dir === "left" || dir === "right" ? 35 : 50); }}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); handlePressStart(dir, dir === "left" || dir === "right" ? 50 : 50); }}
             onPointerUp={(e) => { e.preventDefault(); handlePressEnd(); }}
             onPointerLeave={handlePressEnd}
             onPointerCancel={handlePressEnd}
