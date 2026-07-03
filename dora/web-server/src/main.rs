@@ -32,8 +32,17 @@ pub struct AppState {
 }
 
 fn main() -> Result<()> {
+    // 日志：[logging] level 作为默认 filter；RUST_LOG 可临时覆盖
+    let config_for_log = dora_config::Config::load();
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or(&config_for_log.logging.level),
+    )
+    .format_timestamp_millis()
+    .init();
+
     let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(run()).unwrap_or_else(|e| eprintln!("web-server error: {:?}", e));
+    rt.block_on(run())
+        .unwrap_or_else(|e| log::error!("web-server error: {:?}", e));
     Ok(())
 }
 
@@ -44,7 +53,7 @@ async fn run() -> Result<()> {
     // ── dora 初始化 ──
     let (node, mut events) = DoraNode::init_from_env()
         .wrap_err("Failed to init dora node")?;
-    println!("[web-server] Dora node initialized");
+    log::info!("[web-server] Dora node initialized");
 
     let dora = Arc::new(Mutex::new(node));
 
@@ -69,7 +78,7 @@ async fn run() -> Result<()> {
         .unwrap_or_else(|| {
             std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/static"))
         });
-    println!("[web-server] Static files: {}", static_dir.display());
+    log::info!("[web-server] Static files: {}", static_dir.display());
 
     let app = routes::camera::router()
         .merge(routes::control::router())
@@ -83,7 +92,7 @@ async fn run() -> Result<()> {
     // ── 启动 HTTP ──
     let addr = SocketAddr::from(([0, 0, 0, 0], config.web.port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    println!("[web-server] Listening on http://0.0.0.0:{}", config.web.port);
+    log::info!("[web-server] Listening on http://0.0.0.0:{}", config.web.port);
 
     let server_handle = tokio::spawn(async { axum::serve(listener, app).await.unwrap() });
 
@@ -107,7 +116,7 @@ async fn run() -> Result<()> {
                 _ => {}
             },
             Event::Stop(cause) => {
-                println!("[web-server] Stop: {:?}, exiting", cause);
+                log::info!("[web-server] Stop: {:?}, exiting", cause);
                 break;
             }
             _ => {}
@@ -115,6 +124,6 @@ async fn run() -> Result<()> {
     }
 
     server_handle.abort();
-    println!("[web-server] Shutdown");
+    log::info!("[web-server] Shutdown");
     Ok(())
 }

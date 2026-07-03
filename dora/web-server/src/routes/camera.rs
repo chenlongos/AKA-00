@@ -47,7 +47,7 @@ pub async fn status(State(s): State<Arc<AppState>>) -> Json<CameraStatus> {
 
 pub async fn open(State(s): State<Arc<AppState>>) -> Result<Json<CameraStatus>, StatusCode> {
     s.camera.open().await.map_err(|e| {
-        eprintln!("[camera-route] open failed: {:?}", e);
+        log::error!("[camera-route] open failed: {:?}", e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
     Ok(Json(CameraStatus { camera_on: true }))
@@ -59,7 +59,7 @@ pub async fn close(
     State(s): State<Arc<AppState>>,
 ) -> Result<Json<CameraStatus>, StatusCode> {
     s.camera.close().await.map_err(|e| {
-        eprintln!("[camera-route] close failed: {:?}", e);
+        log::error!("[camera-route] close failed: {:?}", e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
     Ok(Json(CameraStatus { camera_on: false }))

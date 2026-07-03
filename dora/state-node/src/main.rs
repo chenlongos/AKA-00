@@ -54,15 +54,24 @@ impl StateStore {
 }
 
 fn main() -> Result<()> {
+    // 日志：[logging] level 作为默认 filter；RUST_LOG 可临时覆盖
+    let config_for_log = dora_config::Config::load();
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or(&config_for_log.logging.level),
+    )
+    .format_timestamp_millis()
+    .init();
+
     let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(run()).unwrap_or_else(|e| eprintln!("state-node error: {:?}", e));
+    rt.block_on(run())
+        .unwrap_or_else(|e| log::error!("state-node error: {:?}", e));
     Ok(())
 }
 
 async fn run() -> Result<()> {
     let (node, mut events) = DoraNode::init_from_env()
         .wrap_err("Failed to init dora node")?;
-    println!("[state] Dora node initialized");
+    log::info!("[state] Dora node initialized");
 
     let store = std::sync::Arc::new(StateStore::new());
     let node = std::sync::Arc::new(tokio::sync::Mutex::new(node));
@@ -114,11 +123,11 @@ async fn run() -> Result<()> {
                 _ => {}
             }
         } else if let Event::Stop(cause) = event {
-            println!("[state] Stop: {:?}, exiting", cause);
+            log::info!("[state] Stop: {:?}, exiting", cause);
             break;
         }
     }
 
-    println!("[state] Shutdown");
+    log::info!("[state] Shutdown");
     Ok(())
 }

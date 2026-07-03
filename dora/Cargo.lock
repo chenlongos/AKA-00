@@ -3430,8 +3430,11 @@ name = "state-node"
 version = "0.1.0"
 dependencies = [
  "arrow",
+ "dora-config",
  "dora-node-api",
+ "env_logger",
  "eyre",
+ "log",
  "serde",
  "serde_json",
  "tokio",
@@ -4210,9 +4213,11 @@ dependencies = [
  "dora-config",
  "dora-message",
  "dora-node-api",
+ "env_logger",
  "eyre",
  "futures-util",
  "image",
+ "log",
  "serde",
  "serde_json",
  "tokio",

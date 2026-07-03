@@ -69,7 +69,7 @@ async fn ws_handler(ws: WebSocketUpgrade, State(s): State<Arc<AppState>>) -> imp
 }
 
 async fn handle_ws(socket: WebSocket, motor: Arc<crate::services::motor::MotorService>) {
-    println!("[ws] client connected");
+    log::info!("[ws] client connected");
 
     let (mut tx, mut rx) = socket.split();
     let motor_tx = motor.clone();
@@ -118,5 +118,5 @@ async fn handle_ws(socket: WebSocket, motor: Arc<crate::services::motor::MotorSe
     }
 
     send_task.abort();
-    println!("[ws] client disconnected");
+    log::info!("[ws] client disconnected");
 }

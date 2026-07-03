@@ -68,7 +68,7 @@ impl CameraService {
         node.send_output_bytes("control".into(), BTreeMap::new(), 5, b"start")
             .wrap_err("send dora start")?;
 
-        println!("[camera-service] 📷 on");
+        log::info!("[camera-service] 📷 on");
         Ok(())
     }
 
@@ -82,7 +82,7 @@ impl CameraService {
         node.send_output_bytes("control".into(), BTreeMap::new(), 4, b"stop")
             .wrap_err("send dora stop")?;
 
-        println!("[camera-service] ⏸  off");
+        log::info!("[camera-service] ⏸  off");
         Ok(())
     }
 
@@ -102,7 +102,7 @@ impl CameraService {
         let raw = data.as_primitive::<arrow::datatypes::UInt8Type>().values();
 
         if raw.is_empty() {
-            println!("[camera-svc] push_frame: empty data (len=0), dropping");
+            log::warn!("[camera-svc] push_frame: empty data (len=0), dropping");
             return;
         }
 
@@ -113,14 +113,18 @@ impl CameraService {
             return;
         }
 
-        println!("[camera-svc] push_frame: not JPEG, header=[{:02X} {:02X}], len={}",
-            raw.first().unwrap_or(&0), raw.get(1).unwrap_or(&0), raw.len());
+        log::warn!(
+            "[camera-svc] push_frame: not JPEG, header=[{:02X} {:02X}], len={}",
+            raw.first().unwrap_or(&0),
+            raw.get(1).unwrap_or(&0),
+            raw.len()
+        );
 
         // 旧版 RGB → JPEG
         if let Some(jpeg) = Self::encode_rgb_to_jpeg(raw, self.config.width, self.config.height, self.config.jpeg_quality) {
             self.frame_tx.send_replace(jpeg);
         } else {
-            println!("[camera-svc] push_frame: not JPEG, RGB encode failed (len={})", raw.len());
+            log::warn!("[camera-svc] push_frame: not JPEG, RGB encode failed (len={})", raw.len());
         }
     }
 }
