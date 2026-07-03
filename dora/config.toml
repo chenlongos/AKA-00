@@ -9,7 +9,7 @@ jpeg_quality = 70
 
 [motor]
 # 底盘驱动类型："dev" (开发模式), "tt_pid" (真实硬件)
-backend = "dev"
+backend = "tt_pid"
 port = "/dev/ttyS1"
 baudrate = 115200
 ppr = 4680

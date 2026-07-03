@@ -64,7 +64,7 @@ async fn run() -> Result<()> {
 
     // 定时回报电机状态（每 200ms，与 WebSocket 0xBB 同步）
     let driver_rpt = driver.clone();
-    let node_rpt = std::sync::Arc::new(tokio::sync::Mutex::new(node));
+    let node_rpt = Arc::new(tokio::sync::Mutex::new(node));
     let node_clone = node_rpt.clone();
 
     tokio::spawn(async move {

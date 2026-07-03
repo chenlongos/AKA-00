@@ -22,7 +22,9 @@ pub fn create_driver(config: &DriverConfig) -> Box<dyn MotorDriver> {
         Some("tt_pid") => {
             let port = config.port.as_deref().unwrap_or("/dev/ttyS1");
             let baudrate = config.baudrate.unwrap_or(115200);
-            Box::new(tt_pid::TtPidDriver::new(port, baudrate, config.ppr.unwrap_or(4680)))
+            // TtPidDriver::new 内部自带串口失败回退到 stub 的逻辑，
+            // 这样 dev 机上没接底盘时整个 dataflow 不会因为一个节点 panic 反复重启。
+            tt_pid::TtPidDriver::new(port, baudrate, config.ppr.unwrap_or(4680))
         }
         _ => Box::new(dev::DevMotor::new()),
     }

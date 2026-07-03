@@ -38,13 +38,13 @@ DORA_PID=$!
 echo "⏳ Waiting for web-server..."
 for i in $(seq 1 15); do
     sleep 0.5
-    if curl -s http://localhost:8080/api/camera/status > /dev/null 2>&1; then
+    if curl -s http://localhost:80/api/camera/status > /dev/null 2>&1; then
         echo ""
         echo "╔══════════════════════════════════╗"
-        echo "║  🟢 Ready!                      ║"
-        echo "║                                ║"
-        echo "║  📷 http://localhost:80       ║"
-        echo "║  Stop: ./stop.sh               ║"
+        echo "║  🟢 Ready!                       ║"
+        echo "║                                  ║"
+        echo "║  📷 http://localhost:80          ║"
+        echo "║  Stop: ./stop.sh                 ║"
         echo "╚══════════════════════════════════╝"
         exit 0
     fi
