@@ -103,20 +103,6 @@ fn rpm_to_mps(motor_rpm: i32, chassis: &dora_config::ChassisConfig) -> f32 {
     wheel_rpm * std::f32::consts::PI * diameter_m / 60.0
 }
 
-/// PWM 百分比 (-100..100) → 期望线速度 m/s（当前未用——target 存原始 PWM%）。
-/// 保留供以后若想把 target 也换成 m/s 显示时用。
-/// 公式与 ESP32 固件 `setMotorSpeed` 内 `target_rpm = speed * 150 / 100` 一致：
-///   target_motor_rpm = pwm * 150 / 100
-///   wheel_rpm        = target_motor_rpm / gear_ratio
-///   m_per_s          = wheel_rpm * π * wheel_diameter / 60
-#[allow(dead_code)]
-fn pwm_to_mps(pwm: f32, chassis: &dora_config::ChassisConfig) -> f32 {
-    let target_motor_rpm = pwm * 150.0 / 100.0;
-    let wheel_rpm = target_motor_rpm / (chassis.gear_ratio as f32);
-    let diameter_m = (chassis.wheel_diameter_mm as f32) / 1000.0;
-    wheel_rpm * std::f32::consts::PI * diameter_m / 60.0
-}
-
 /// 解析 web-server 发来的 motor_cmd JSON，得到 (left_target, right_target)。
 /// 与 Python `set_target_speed` 一致：存原始 PWM% (-100..100)，不是 m/s。
 ///   - `action`     up=(+s,+s), down=(-s,-s), left=(-s,+s), right=(+s,-s), stop=(0,0)

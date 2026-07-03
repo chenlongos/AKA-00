@@ -60,7 +60,7 @@ async fn run() -> Result<()> {
     // ── 服务层 ──
     let state = Arc::new(AppState {
         camera: Arc::new(CameraService::new(dora.clone(), config.camera.clone())),
-        motor: Arc::new(MotorService::new(dora, config.chassis.clone())),
+        motor: Arc::new(MotorService::new(dora)),
     });
 
     // ── HTTP 路由 ──

@@ -61,11 +61,23 @@ async fn control_action(
 //   Client→Server: 0xAA x(int8) y(int8)  — 摇杆
 //   Client→Server: 0xDD JSON...           — JSON 命令
 //   Server→Client: 0xBB left(int16) right(int16) — 电机状态（每200ms）
-//   Server→Client: 0xDD JSON...           — JSON 响应
+//   Server→Client: 0xDD JSON...           — JSON 响应（开场白 = {"type":"ip", "ip":"..."}）
 
 async fn ws_handler(ws: WebSocketUpgrade, State(s): State<Arc<AppState>>) -> impl IntoResponse {
     let motor = s.motor.clone();
     ws.on_upgrade(move |socket| handle_ws(socket, motor))
+}
+
+/// 取本机 IP（用于 ws 开场白里的 `ip` 字段；前端用它跳转 labs.chenlongrobot.com）。
+/// 通过 UDP connect 探测拿到出口网卡 IP，不真正发包。失败则回落到 0.0.0.0。
+fn detect_local_ip() -> String {
+    use std::net::UdpSocket;
+    UdpSocket::bind("0.0.0.0:0")
+        .and_then(|s| s.connect("8.8.8.8:80").map(|_| s))
+        .ok()
+        .and_then(|s| s.local_addr().ok())
+        .map(|a| a.ip().to_string())
+        .unwrap_or_else(|| "0.0.0.0".to_string())
 }
 
 async fn handle_ws(socket: WebSocket, motor: Arc<crate::services::motor::MotorService>) {
@@ -73,6 +85,25 @@ async fn handle_ws(socket: WebSocket, motor: Arc<crate::services::motor::MotorSe
 
     let (mut tx, mut rx) = socket.split();
     let motor_tx = motor.clone();
+
+    // 开场白：触发前端 wsReady 状态机（BaseControlPage.tsx:35-39）
+    // 不发这一条，前端卡在 wsReady=false，init useEffect 不跑，
+    // sendPwmChannels / sendReinitialize / hash-routing 全都失效。
+    let local_ip = detect_local_ip();
+    let welcome = serde_json::json!({ "type": "ip", "ip": local_ip });
+    match serde_json::to_vec(&welcome) {
+        Ok(json_bytes) => {
+            let mut buf = Vec::with_capacity(1 + json_bytes.len());
+            buf.push(0xDD);
+            buf.extend_from_slice(&json_bytes);
+            if tx.send(Message::Binary(buf.into())).await.is_err() {
+                log::warn!("[ws] failed to send welcome message");
+            } else {
+                log::info!("[ws] welcome sent (ip={})", local_ip);
+            }
+        }
+        Err(e) => log::warn!("[ws] serialize welcome: {:?}", e),
+    }
 
     // 发送任务：每 200ms 推送电机状态（左/右轮线速度 m/s）
     let send_task = tokio::spawn(async move {

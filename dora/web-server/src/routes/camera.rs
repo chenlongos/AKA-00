@@ -7,12 +7,11 @@ use std::sync::Arc;
 
 use axum::{
     body::Body,
-    extract::{Query, State},
+    extract::State,
     http::{header, Response, StatusCode},
     routing::{get, post},
     Json, Router,
 };
-use serde::Deserialize;
 
 use crate::AppState;
 
@@ -65,17 +64,10 @@ pub async fn close(
     Ok(Json(CameraStatus { camera_on: false }))
 }
 
-// ── GET /api/camera/stream?fps=N ──
-
-#[derive(Deserialize, Default)]
-pub struct StreamParams {
-    #[allow(dead_code)]
-    fps: Option<u32>,
-}
+// ── GET /api/camera/stream ──
 
 pub async fn stream(
     State(s): State<Arc<AppState>>,
-    Query(_params): Query<StreamParams>,
 ) -> Response<Body> {
     let mut rx = s.camera.subscribe();
 

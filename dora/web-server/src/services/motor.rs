@@ -16,10 +16,6 @@ pub struct MotorStatus {
     pub left_speed: f32,
     /// 右轮线速度 (m/s)
     pub right_speed: f32,
-    /// 左电机轴 RPM（前端 debug 用，由 speed 反推）
-    pub left_motor_rpm: i32,
-    /// 右电机轴 RPM
-    pub right_motor_rpm: i32,
 }
 
 /// 控制动作
@@ -38,28 +34,17 @@ pub enum Action {
 pub struct MotorService {
     node: Arc<TokioMutex<DoraNode>>,
     status: Arc<Mutex<MotorStatus>>,
-    /// 底盘参数：m/s ↔ motor_rpm 互推（debug / 旧 API 兼容）
-    chassis: dora_config::ChassisConfig,
 }
 
 impl MotorService {
-    pub fn new(node: Arc<TokioMutex<DoraNode>>, chassis: dora_config::ChassisConfig) -> Self {
+    pub fn new(node: Arc<TokioMutex<DoraNode>>) -> Self {
         Self {
             node,
             status: Arc::new(Mutex::new(MotorStatus {
                 left_speed: 0.0,
                 right_speed: 0.0,
-                left_motor_rpm: 0,
-                right_motor_rpm: 0,
             })),
-            chassis,
         }
-    }
-
-    /// m/s → motor_rpm（前端如果还要 rpm 字段，从 speed 反推）
-    fn mps_to_motor_rpm(&self, mps: f32) -> i32 {
-        let wheel_rpm = mps * 60.0 / (std::f32::consts::PI * (self.chassis.wheel_diameter_mm as f32) / 1000.0);
-        (wheel_rpm * self.chassis.gear_ratio as f32).round() as i32
     }
 
     pub fn status(&self) -> MotorStatus {
@@ -108,8 +93,6 @@ impl MotorService {
         let mut s = self.status.lock().unwrap();
         s.left_speed = left_mps;
         s.right_speed = right_mps;
-        s.left_motor_rpm = self.mps_to_motor_rpm(left_mps);
-        s.right_motor_rpm = self.mps_to_motor_rpm(right_mps);
     }
 
     async fn send_control(&self, data: &serde_json::Value) {

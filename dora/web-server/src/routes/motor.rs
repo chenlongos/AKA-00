@@ -37,9 +37,7 @@ async fn direct(
 async fn status(State(s): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let s = s.motor.status();
     Json(serde_json::json!({
-        "left_motor_rpm":  s.left_motor_rpm,
-        "right_motor_rpm": s.right_motor_rpm,
-        "left_speed":      s.left_speed,    // m/s
-        "right_speed":     s.right_speed,   // m/s
+        "left_speed":  s.left_speed,    // m/s
+        "right_speed": s.right_speed,   // m/s
     }))
 }
