@@ -32,6 +32,12 @@ struct RobotState {
     gripper_status: String,
     /// 夹爪目标: 0=释放, 1=夹取（zp10s 暂未对接，置 0）
     gripper_target: i32,
+    /// 机械臂每个舵机最近一次 set_angle 的角度（ID → 角度）
+    arm_angles: BTreeMap<u8, u16>,
+    /// 机械臂扭力状态: "on" / "off" / "unknown"
+    arm_torque: String,
+    /// 机械臂最近一次动作（前端调试用，如 "set_angle 0 150" / "grab" / "release"）
+    arm_last_action: String,
     /// unix 时间戳毫秒（对齐 Python `int(time.time() * 1000)`）
     timestamp_ms: i64,
 }
@@ -45,6 +51,9 @@ impl Default for RobotState {
             right_target: 0.0,
             gripper_status: "unknown".into(),
             gripper_target: 0,
+            arm_angles: BTreeMap::new(),
+            arm_torque: "unknown".into(),
+            arm_last_action: String::new(),
             timestamp_ms: 0,
         }
     }
@@ -212,9 +221,53 @@ async fn run() -> Result<()> {
                     }
                     // grab / release / 解析失败：不影响 wheel target
                 }
-                _ => {
-                    // arm_status 等暂未对接
+                "arm_status" => {
+                    // arm-bridge 每次命令后立刻 publish：
+                    //   { "angles": {"0":150,"1":180,...}, "torque":"on|off|unknown",
+                    //     "last_action":"set_angle 0 150" }
+                    if let Ok(v) = serde_json::from_slice::<serde_json::Value>(bytes) {
+                        let mut angles = BTreeMap::new();
+                        if let Some(obj) = v.get("angles").and_then(|x| x.as_object()) {
+                            for (k, val) in obj {
+                                if let (Ok(id), Some(a)) =
+                                    (k.parse::<u8>(), val.as_u64())
+                                {
+                                    angles.insert(id, a as u16);
+                                }
+                            }
+                        }
+                        let torque = v
+                            .get("torque")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        let last = v
+                            .get("last_action")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        store.update(|s| {
+                            s.arm_angles = angles;
+                            s.arm_torque = torque;
+                            s.arm_last_action = last;
+                        });
+                    }
                 }
+                "arm_cmd" => {
+                    // web-server 在 expand grab/release 时，最初下发的 payload 顶层
+                    // command 字段就是 "grab" / "release" / "set_angle" 等。
+                    // 把高层动作记下来给前端调试用。
+                    if let Ok(v) = serde_json::from_slice::<serde_json::Value>(bytes) {
+                        if let Some(act) = v.get("command").and_then(|x| x.as_str()) {
+                            if act == "grab" || act == "release" {
+                                store.update(|s| {
+                                    s.arm_last_action = act.to_string();
+                                });
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         } else if let Event::Stop(cause) = event {
             log::info!("[state] Stop: {:?}, exiting", cause);

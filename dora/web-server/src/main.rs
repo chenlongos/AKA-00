@@ -21,6 +21,7 @@ use eyre::{Context, Result};
 use tokio::sync::Mutex;
 use tower_http::services::{ServeDir, ServeFile};
 
+use services::arm::ArmService;
 use services::camera::CameraService;
 use services::motor::MotorService;
 
@@ -29,6 +30,7 @@ use services::motor::MotorService;
 pub struct AppState {
     pub camera: Arc<CameraService>,
     pub motor: Arc<MotorService>,
+    pub arm: Arc<ArmService>,
 }
 
 fn main() -> Result<()> {
@@ -60,7 +62,8 @@ async fn run() -> Result<()> {
     // ── 服务层 ──
     let state = Arc::new(AppState {
         camera: Arc::new(CameraService::new(dora.clone(), config.camera.clone())),
-        motor: Arc::new(MotorService::new(dora)),
+        motor: Arc::new(MotorService::new(dora.clone())),
+        arm: Arc::new(ArmService::new(dora, config.arm.clone())),
     });
 
     // ── HTTP 路由 ──
@@ -83,6 +86,7 @@ async fn run() -> Result<()> {
     let app = routes::camera::router()
         .merge(routes::control::router())
         .merge(routes::motor::router())
+        .merge(routes::arm::router())
         .fallback_service(
             ServeDir::new(&static_dir)
                 .fallback(ServeFile::new(static_dir.join("index.html")))
@@ -109,6 +113,36 @@ async fn run() -> Result<()> {
                             v["left_speed"].as_f64().unwrap_or(0.0) as f32,
                             v["right_speed"].as_f64().unwrap_or(0.0) as f32,
                         );
+
+                        // 从 robot_state 提取 arm 字段（state-node 已聚合 arm_status）。
+                        // arm_angles 是 BTreeMap<u8, u16>，JSON 序列化后 key 是字符串，
+                        // 这里把它转回 u8 key 再灌进 ArmService 缓存。
+                        let mut angles = std::collections::BTreeMap::new();
+                        if let Some(obj) = v.get("arm_angles").and_then(|x| x.as_object()) {
+                            for (k, val) in obj {
+                                if let (Ok(id), Some(a)) =
+                                    (k.parse::<u8>(), val.as_u64())
+                                {
+                                    angles.insert(id, a as u16);
+                                }
+                            }
+                        }
+                        let torque = v
+                            .get("arm_torque")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        let last_action = v
+                            .get("arm_last_action")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        state.arm.update_status(services::arm::ArmStatus {
+                            angles,
+                            torque,
+                            last_action,
+                        });
+
                         // 注：camera_on 由 CameraService 自己管理（open/close API）
                         // 注：left_target / gripper_status / timestamp_ms 等暂未用到
                     }

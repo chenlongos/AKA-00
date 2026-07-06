@@ -414,7 +414,7 @@ CARGO_EOF
         warn "无 Xuantie 工具链 — 有 C 依赖的 crate 可能编译失败"
     fi
 
-    info "编译 Rust 节点 (web-server, motor-bridge, state-node, dora-c-ffi)..."
+    info "编译 Rust 节点 (web-server, motor-bridge, arm-bridge, state-node, dora-c-ffi)..."
 
     # 在 orbstack 中编译 (使用 orbstack 中的 Rust 工具链和 Xuantie GCC)
     if $HAS_ORB; then
@@ -428,6 +428,7 @@ CARGO_EOF
                 --release \
                 -p web-server \
                 -p motor-bridge \
+                -p arm-bridge \
                 -p state-node \
                 -p dora-c-ffi \
                 2>&1 | grep -E 'Compiling|Finished|error' | sed 's/^/    /'
@@ -438,6 +439,7 @@ CARGO_EOF
             --release \
             -p web-server \
             -p motor-bridge \
+            -p arm-bridge \
             -p state-node \
             -p dora-c-ffi \
             2>&1 | grep -E "Compiling|Finished|error|warning:" | sed 's/^/    /'
@@ -447,7 +449,7 @@ CARGO_EOF
     local target_dir="target/$TARGET/release"
     local all_ok=true
 
-    for bin in web-server motor-bridge state-node; do
+    for bin in web-server motor-bridge arm-bridge state-node; do
         if [ -f "$target_dir/$bin" ]; then
             cp "$target_dir/$bin" "$PACKAGE_DIR/bin/"
             ok "$bin"
@@ -468,7 +470,7 @@ CARGO_EOF
     # Strip 二进制瘦身
     if $TOOLCHAIN_OK; then
         info "Stripping binaries..."
-        for bin in web-server motor-bridge state-node; do
+        for bin in web-server motor-bridge arm-bridge state-node; do
             _orb "$RISCV64_TOOLCHAIN/bin/riscv64-unknown-linux-musl-strip" \
                 "$PACKAGE_DIR/bin/$bin" 2>/dev/null || true
         done
@@ -618,6 +620,14 @@ info "复制静态文件..."
 cp -r "$SCRIPT_DIR/web-server/static" "$PACKAGE_DIR/"
 ok "static/"
 
+# 复制机械臂角度配置文件（web-server 启动时 cwd=arm_angles.json）
+if [ -f "$SCRIPT_DIR/../arm_angles.json" ]; then
+    cp "$SCRIPT_DIR/../arm_angles.json" "$PACKAGE_DIR/arm_angles.json"
+    ok "arm_angles.json"
+else
+    warn "arm_angles.json 不存在（arm 服务会回退到 Rust 内置默认值）"
+fi
+
 # 生成 dataflow.yml (去掉 build: 字段，使用 bin/ 路径)
 # 注意: camera-node 如果没有编译则省略
 if [ -f "$PACKAGE_DIR/bin/camera-node" ]; then
@@ -647,10 +657,20 @@ ${CAMERA_NODE}
     outputs:
       - motor_status
 
+  - id: arm-bridge
+    path: bin/arm-bridge
+    inputs:
+      arm_cmd: web-server/arm_cmd
+    outputs:
+      - arm_status
+
   - id: state-node
     path: bin/state-node
     inputs:
       motor_status: motor-bridge/motor_status
+      arm_status: arm-bridge/arm_status
+      motor_cmd: web-server/motor_cmd
+      arm_cmd: web-server/arm_cmd
     outputs:
       - robot_state
 
@@ -662,6 +682,7 @@ ${WEB_IMAGE_INPUT:+      image: camera/image}
     outputs:
       - control
       - motor_cmd
+      - arm_cmd
 EOF
 ok "etc/dataflow.yml (板子适配版)"
 
@@ -714,7 +735,7 @@ echo "  camera: ${CAMERA_WIDTH}x${CAMERA_HEIGHT} MJPEG"
 echo ""
 echo "Verifying binaries..."
 MISSING=""
-for bin in web-server motor-bridge state-node; do
+for bin in web-server motor-bridge arm-bridge state-node; do
     if [ -f "$DORA_HOME/bin/$bin" ]; then
         echo "  OK  bin/$bin"
     else
@@ -829,7 +850,7 @@ else
 fi
 
 # 兜底: 杀掉所有相关进程
-for name in camera-node web-server motor-bridge state-node dora-daemon dora-coordinator; do
+for name in camera-node web-server motor-bridge arm-bridge state-node dora-daemon dora-coordinator; do
     pgrep -f "$name" 2>/dev/null | while read pid; do
         [ -n "$pid" ] && kill "$pid" 2>/dev/null
     done
@@ -838,7 +859,7 @@ done
 sleep 0.3
 
 # 强制杀死
-for name in camera-node web-server motor-bridge state-node dora-daemon dora-coordinator; do
+for name in camera-node web-server motor-bridge arm-bridge state-node dora-daemon dora-coordinator; do
     pgrep -f "$name" 2>/dev/null | while read pid; do
         [ -n "$pid" ] && kill -9 "$pid" 2>/dev/null
     done

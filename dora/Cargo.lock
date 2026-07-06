@@ -141,6 +141,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "arm-bridge"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "dora-config",
+ "dora-node-api",
+ "env_logger",
+ "eyre",
+ "log",
+ "serde",
+ "serde_json",
+ "serialport",
+ "tokio",
+]
+
+[[package]]
 name = "arrayvec"
 version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"

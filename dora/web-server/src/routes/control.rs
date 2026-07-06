@@ -65,7 +65,8 @@ async fn control_action(
 
 async fn ws_handler(ws: WebSocketUpgrade, State(s): State<Arc<AppState>>) -> impl IntoResponse {
     let motor = s.motor.clone();
-    ws.on_upgrade(move |socket| handle_ws(socket, motor))
+    let arm = s.arm.clone();
+    ws.on_upgrade(move |socket| handle_ws(socket, motor, arm))
 }
 
 /// 取本机 IP（用于 ws 开场白里的 `ip` 字段；前端用它跳转 labs.chenlongrobot.com）。
@@ -80,7 +81,11 @@ fn detect_local_ip() -> String {
         .unwrap_or_else(|| "0.0.0.0".to_string())
 }
 
-async fn handle_ws(socket: WebSocket, motor: Arc<crate::services::motor::MotorService>) {
+async fn handle_ws(
+    socket: WebSocket,
+    motor: Arc<crate::services::motor::MotorService>,
+    arm: Arc<crate::services::arm::ArmService>,
+) {
     log::info!("[ws] client connected");
 
     let (mut tx, mut rx) = socket.split();
@@ -141,7 +146,25 @@ async fn handle_ws(socket: WebSocket, motor: Arc<crate::services::motor::MotorSe
                         if let Ok(cmd) =
                             serde_json::from_slice::<serde_json::Value>(&data[1..])
                         {
-                            motor.handle_json_cmd(&cmd).await;
+                            // 类型分流：前端用 {type, payload} 包装命令。
+                            //   {type:"arm_cmd", payload:{command:"grab", ...}} → arm 服务
+                            //   其他（含 ip / action / pwm_channels / reinitialize 等）→ motor 服务
+                            let msg_type = cmd
+                                .get("type")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            if msg_type == "arm_cmd" {
+                                let arm = arm.clone();
+                                let payload = cmd
+                                    .get("payload")
+                                    .cloned()
+                                    .unwrap_or(serde_json::Value::Null);
+                                tokio::spawn(async move {
+                                    arm.handle_json_cmd(&payload).await;
+                                });
+                            } else {
+                                motor.handle_json_cmd(&cmd).await;
+                            }
                         }
                     }
                     _ => {}

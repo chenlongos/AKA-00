@@ -16,12 +16,22 @@ nodes:
     outputs:
       - motor_status
 
+  - id: arm-bridge
+    build: cargo build -p arm-bridge --release
+    path: target/release/arm-bridge
+    inputs:
+      arm_cmd: web-server/arm_cmd
+    outputs:
+      - arm_status
+
   - id: state-node
     build: cargo build -p state-node --release
     path: target/release/state-node
     inputs:
       motor_status: motor-bridge/motor_status
+      arm_status: arm-bridge/arm_status
       motor_cmd: web-server/motor_cmd
+      arm_cmd: web-server/arm_cmd
     outputs:
       - robot_state
 
@@ -34,3 +44,4 @@ nodes:
     outputs:
       - control
       - motor_cmd
+      - arm_cmd
