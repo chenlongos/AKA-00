@@ -628,6 +628,17 @@ else
     warn "arm_angles.json 不存在（arm 服务会回退到 Rust 内置默认值）"
 fi
 
+# 复制 AP 热点 + wlan1 STA 配置脚本（首次上板手动跑一次：
+#   /root/dora-riscv64/init_ap_web.sh
+# 它会写 /etc/hostapd.conf + /etc/udhcpd.conf + /etc/init.d/S98apstart / S99webstart）
+if [ -f "$SCRIPT_DIR/init_ap_web.sh" ]; then
+    cp "$SCRIPT_DIR/init_ap_web.sh" "$PACKAGE_DIR/init_ap_web.sh"
+    chmod +x "$PACKAGE_DIR/init_ap_web.sh"
+    ok "init_ap_web.sh"
+else
+    warn "init_ap_web.sh 不存在（板子将无法启用 AP 热点）"
+fi
+
 # 生成 dataflow.yml (去掉 build: 字段，使用 bin/ 路径)
 # 注意: camera-node 如果没有编译则省略
 if [ -f "$PACKAGE_DIR/bin/camera-node" ]; then
