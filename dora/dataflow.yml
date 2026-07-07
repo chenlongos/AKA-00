@@ -35,6 +35,14 @@ nodes:
     outputs:
       - robot_state
 
+  - id: demo-node
+    build: cargo build -p demo-node --release
+    path: target/release/demo-node
+    inputs:
+      demo_cmd: web-server/demo_cmd
+    outputs:
+      - demo_status
+
   - id: web-server
     build: cargo build -p web-server --release
     path: target/release/web-server
@@ -45,3 +53,4 @@ nodes:
       - control
       - motor_cmd
       - arm_cmd
+      - demo_cmd

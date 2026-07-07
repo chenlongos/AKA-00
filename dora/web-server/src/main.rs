@@ -23,6 +23,7 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use services::arm::ArmService;
 use services::camera::CameraService;
+use services::demo::DemoService;
 use services::motor::MotorService;
 
 /// 合并所有服务的状态类型（axum 只允许一次 with_state）
@@ -31,6 +32,7 @@ pub struct AppState {
     pub camera: Arc<CameraService>,
     pub motor: Arc<MotorService>,
     pub arm: Arc<ArmService>,
+    pub demo: Arc<DemoService>,
 }
 
 fn main() -> Result<()> {
@@ -63,7 +65,8 @@ async fn run() -> Result<()> {
     let state = Arc::new(AppState {
         camera: Arc::new(CameraService::new(dora.clone(), config.camera.clone())),
         motor: Arc::new(MotorService::new(dora.clone())),
-        arm: Arc::new(ArmService::new(dora, config.arm.clone())),
+        arm: Arc::new(ArmService::new(dora.clone(), config.arm.clone())),
+        demo: Arc::new(DemoService::new(dora)),
     });
 
     // ── HTTP 路由 ──
@@ -87,6 +90,8 @@ async fn run() -> Result<()> {
         .merge(routes::control::router())
         .merge(routes::motor::router())
         .merge(routes::arm::router())
+        .merge(routes::wifi::router())
+        .merge(routes::demo::router())
         .fallback_service(
             ServeDir::new(&static_dir)
                 .fallback(ServeFile::new(static_dir.join("index.html")))

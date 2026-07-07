@@ -414,7 +414,7 @@ CARGO_EOF
         warn "无 Xuantie 工具链 — 有 C 依赖的 crate 可能编译失败"
     fi
 
-    info "编译 Rust 节点 (web-server, motor-bridge, arm-bridge, state-node, dora-c-ffi)..."
+    info "编译 Rust 节点 (web-server, motor-bridge, arm-bridge, demo-node, state-node, dora-c-ffi)..."
 
     # 在 orbstack 中编译 (使用 orbstack 中的 Rust 工具链和 Xuantie GCC)
     if $HAS_ORB; then
@@ -429,6 +429,7 @@ CARGO_EOF
                 -p web-server \
                 -p motor-bridge \
                 -p arm-bridge \
+                -p demo-node \
                 -p state-node \
                 -p dora-c-ffi \
                 2>&1 | grep -E 'Compiling|Finished|error' | sed 's/^/    /'
@@ -440,6 +441,7 @@ CARGO_EOF
             -p web-server \
             -p motor-bridge \
             -p arm-bridge \
+            -p demo-node \
             -p state-node \
             -p dora-c-ffi \
             2>&1 | grep -E "Compiling|Finished|error|warning:" | sed 's/^/    /'
@@ -449,7 +451,7 @@ CARGO_EOF
     local target_dir="target/$TARGET/release"
     local all_ok=true
 
-    for bin in web-server motor-bridge arm-bridge state-node; do
+    for bin in web-server motor-bridge arm-bridge demo-node state-node; do
         if [ -f "$target_dir/$bin" ]; then
             cp "$target_dir/$bin" "$PACKAGE_DIR/bin/"
             ok "$bin"
@@ -470,7 +472,7 @@ CARGO_EOF
     # Strip 二进制瘦身
     if $TOOLCHAIN_OK; then
         info "Stripping binaries..."
-        for bin in web-server motor-bridge arm-bridge state-node; do
+        for bin in web-server motor-bridge arm-bridge demo-node state-node; do
             _orb "$RISCV64_TOOLCHAIN/bin/riscv64-unknown-linux-musl-strip" \
                 "$PACKAGE_DIR/bin/$bin" 2>/dev/null || true
         done
@@ -628,6 +630,51 @@ else
     warn "arm_angles.json 不存在（arm 服务会回退到 Rust 内置默认值）"
 fi
 
+# 复制 demo 目录（demo-node 通过 DEMO_BASE_DIR=$DORA_HOME/demo 找 init.sh，
+# init.sh 内部 exec ./tennis ./yolo_model.cvimodel 0，所以二进制和模型必须在
+# 同目录）。打包整个 demo/ 子目录到 PACKAGE_DIR/demo。
+if [ -d "$SCRIPT_DIR/../demo" ]; then
+    cp -r "$SCRIPT_DIR/../demo" "$PACKAGE_DIR/"
+    # 统计 + 列名
+    DEMO_COUNT=$(ls -1 "$PACKAGE_DIR/demo" 2>/dev/null | wc -l | tr -d ' ')
+    info "demo/ ($DEMO_COUNT 项):"
+    ls -1 "$PACKAGE_DIR/demo" 2>/dev/null | sed 's/^/    /'
+else
+    warn "demo/ 不存在（demo-node 启动时会找不到任何 demo）"
+fi
+
+# 复制 demo 二进制依赖的共享库（CVitek NPU runtime + OpenCV）。
+# ./tennis 二进制 RPATH 是 host 路径（/home/junbo_dai/cvitek_tpu_sdk/lib），
+# 板子上不存在；所以打包到 PACKAGE_DIR/lib 并在 init.sh 里 export LD_LIBRARY_PATH。
+# 缺的 libcviruntime.so / libcvikernel.so / libopencv_*.so.3.2 ——
+# 这部分是 CVitek SDK 编译产物，理论上 RISCV64_TOOLCHAIN/sysroot 也会有，
+# 但 dev 机上 SDK 直接 build 到 /Users/junbo.dai/projects/AKA-00/lib/。
+# 这里双源：优先 ../lib/，其次 SDK。
+mkdir -p "$PACKAGE_DIR/lib"
+LIB_SRC=""
+if [ -d "$SCRIPT_DIR/../lib" ]; then
+    LIB_SRC="$SCRIPT_DIR/../lib"
+elif [ -d "$RISCV64_TOOLCHAIN/sysroot/usr/lib" ]; then
+    LIB_SRC="$RISCV64_TOOLCHAIN/sysroot/usr/lib"
+fi
+if [ -n "$LIB_SRC" ]; then
+    # 关键库：libcviruntime / libcvikernel / libopencv_* (NPU + 视觉)
+    # 跳过 libstdc++ / libgcc_s / libc / libz / libatomic 等系统库（板子上 Buildroot 自带）
+    for lib_pattern in "libcviruntime.so*" "libcvikernel.so*" "libopencv_core.so*" \
+                       "libopencv_imgcodecs.so*" "libopencv_imgproc.so*" \
+                       "libopencv_highgui.so*" "libopencv_videoio.so*"; do
+        for f in "$LIB_SRC"/$lib_pattern; do
+            [ -e "$f" ] || continue
+            cp "$f" "$PACKAGE_DIR/lib/"
+            ok "$(basename "$f")"
+        done
+    done
+    LIB_COUNT=$(ls -1 "$PACKAGE_DIR/lib" 2>/dev/null | wc -l | tr -d ' ')
+    info "lib/ 共 $LIB_COUNT 个文件"
+else
+    warn "lib/ 源找不到（../lib 和 sysroot 都没有），板子 ./tennis 跑不起来"
+fi
+
 # 复制 AP 热点 + wlan1 STA 配置脚本（首次上板手动跑一次：
 #   /root/dora-riscv64/init_ap_web.sh
 # 它会写 /etc/hostapd.conf + /etc/udhcpd.conf + /etc/init.d/S98apstart / S99webstart）
@@ -751,6 +798,10 @@ CAM_HEIGHT=$(grep -E '^\s*height\s*=' "$DORA_HOME/etc/config.toml" 2>/dev/null |
 export CAMERA_WIDTH="${CAM_WIDTH:-640}"
 export CAMERA_HEIGHT="${CAM_HEIGHT:-480}"
 echo "  camera: ${CAMERA_WIDTH}x${CAMERA_HEIGHT} MJPEG"
+
+# demo-node 默认 cwd=demo，告诉它绝对路径
+export DEMO_BASE_DIR="$DORA_HOME/demo"
+echo "  demo base: $DEMO_BASE_DIR"
 
 # ── 1.6. SG2002 UART 寄存器初始化（产生 /dev/ttyS1）──
 # /dev/ttyS1 由 UART1 引出给底盘 ESP32 用。内核默认不开 UART1 寄存器，

@@ -80,16 +80,55 @@ async fn ws_handler(ws: WebSocketUpgrade, State(s): State<Arc<AppState>>) -> imp
     ws.on_upgrade(move |socket| handle_ws(socket, motor, arm))
 }
 
+/// 读指定网卡的 IPv4 地址。对应 Python `get_ip(iface)`（fcntl ioctl SIOCGIFADDR）。
+/// 这里用 `ip` 命令更简单（板子上必有），输出形如：
+///   "4: wlan0    inet 192.168.4.1/24 brd 192.168.4.255 scope global wlan0\n"
+/// 找 "inet " 后面那个 CIDR，strip /xx。
+///
+/// 这个是 blocking `Command::output`，但只跑 1-2 次（每次 WS 连接只触发一次），
+/// ip 命令一般 5ms 内完成，不会卡住 tokio reactor。生产实现可以换成
+/// libc::ioctl(SIOCGIFADDR) 直接读 ifreq，但需要 unsafe + 跨平台兼容代码。
+fn get_iface_ip(iface: &str) -> String {
+    use std::process::Command;
+    let Ok(out) = Command::new("ip")
+        .args(["-4", "-o", "addr", "show", iface])
+        .output()
+    else {
+        return String::new();
+    };
+    if !out.status.success() {
+        return String::new(); // 网卡不存在等
+    }
+    let s = String::from_utf8_lossy(&out.stdout);
+    for line in s.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        for (i, p) in parts.iter().enumerate() {
+            if *p == "inet" && i + 1 < parts.len() {
+                if let Some(addr) = parts[i + 1].split('/').next() {
+                    if !addr.is_empty() {
+                        return addr.to_string();
+                    }
+                }
+            }
+        }
+    }
+    String::new()
+}
+
 /// 取本机 IP（用于 ws 开场白里的 `ip` 字段；前端用它跳转 labs.chenlongrobot.com）。
-/// 通过 UDP connect 探测拿到出口网卡 IP，不真正发包。失败则回落到 0.0.0.0。
+///
+/// 对应 Python `app/routes/_utils.py::get_wifi_ip`：wlan1 (STA 已连接) 优先，
+/// wlan0 (AP 默认 192.168.4.1) 兜底，最后 127.0.0.1。
+///
+/// 之前纯 UDP 探测 8.8.8.8，AP-only 模式下 8.8.8.8 没路由 → 拿到 0.0.0.0 → 前端显示空白。
 fn detect_local_ip() -> String {
-    use std::net::UdpSocket;
-    UdpSocket::bind("0.0.0.0:0")
-        .and_then(|s| s.connect("8.8.8.8:80").map(|_| s))
-        .ok()
-        .and_then(|s| s.local_addr().ok())
-        .map(|a| a.ip().to_string())
-        .unwrap_or_else(|| "0.0.0.0".to_string())
+    for iface in ["wlan1", "wlan0"] {
+        let ip = get_iface_ip(iface);
+        if !ip.is_empty() {
+            return ip;
+        }
+    }
+    "127.0.0.1".to_string()
 }
 
 async fn handle_ws(

@@ -7,8 +7,8 @@ edition = "2021"
 dora-config = { path = "../dora-config" }
 dora-node-api = "0.5"
 dora-message = "0.8"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
-axum = { version = "0.7", features = ["ws"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "process"] }
+axum = { version = "0.7", features = ["ws", "multipart"] }
 async-stream = "0.3"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "fs"] }
