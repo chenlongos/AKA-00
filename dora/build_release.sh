@@ -842,16 +842,22 @@ cat > "$PACKAGE_DIR/stop.sh" << 'STOPEOF'
 #!/bin/sh
 # =============================================================================
 # dora 机器人系统 — 停止脚本
+#
+# 注意：init.sh 用的是 `dora run dataflow.yml`（前台 coordinator），
+# dora-rs v0.5 中 `dora run` 不会向 daemon 注册 flow，
+# 所以 `dora stop` / `dora destroy` 是 no-op，主要靠下面的 pgrep+kill 兜底。
 # =============================================================================
 
-set -e
+# 故意不开 `set -e`：下面的 kill 调用在权限不足或进程已死时会返回非 0，
+# `set -e` 会让脚本在第一轮 SIGTERM 后立即 abort，永远到不了 SIGKILL。
+# 每个 kill 都单独包了 `|| true`，整体遇错继续。
 
 DORA_HOME="${DORA_HOME:-$(cd "$(dirname "$0")" && pwd)}"
 DORA_BIN="$DORA_HOME/bin/dora"
 
 echo "Stopping dora system..."
 
-# 使用内置 dora 或系统 dora
+# dora stop / destroy 试一下（多数情况 no-op，但偶尔 daemon 模式下有用）
 if [ -f "$DORA_BIN" ]; then
     "$DORA_BIN" stop 2>/dev/null || true
     "$DORA_BIN" destroy 2>/dev/null || true
@@ -860,23 +866,39 @@ else
     dora destroy 2>/dev/null || true
 fi
 
-# 兜底: 杀掉所有相关进程
-for name in camera-node web-server motor-bridge arm-bridge state-node dora-daemon dora-coordinator; do
-    pgrep -f "$name" 2>/dev/null | while read pid; do
-        [ -n "$pid" ] && kill "$pid" 2>/dev/null
+# 节点进程名清单（精确匹配 basename，不用 -f 避免误伤 grep/cat/vim）
+NODES="camera-node web-server motor-bridge arm-bridge state-node dora-daemon dora-coordinator"
+
+# 第一轮 SIGTERM：让 dora node 收 Event::Stop 后优雅退出（刷 buffer、关串口）
+echo "Sending SIGTERM..."
+for name in $NODES; do
+    pgrep -x "$name" 2>/dev/null | while read pid; do
+        [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
     done
 done
 
+# 给节点 3 秒清理时间（dora node 收 Stop → 刷 buffer → 关闭 serial/socket）
+sleep 3
+
+# 第二轮 SIGKILL：还有存活的强制结束
+SURVIVORS=""
+for name in $NODES; do
+    for pid in $(pgrep -x "$name" 2>/dev/null); do
+        echo "  SIGKILL $name (pid=$pid)"
+        kill -9 "$pid" 2>/dev/null || true
+        SURVIVORS="$SURVIVORS $name/$pid"
+    done
+done
+
+# 兜底再扫一次：刚才漏的、或新起来的（罕见）
 sleep 0.3
-
-# 强制杀死
-for name in camera-node web-server motor-bridge arm-bridge state-node dora-daemon dora-coordinator; do
-    pgrep -f "$name" 2>/dev/null | while read pid; do
-        [ -n "$pid" ] && kill -9 "$pid" 2>/dev/null
+for name in $NODES; do
+    for pid in $(pgrep -x "$name" 2>/dev/null); do
+        echo "  warning: $name (pid=$pid) still alive after SIGKILL"
     done
 done
 
-# 释放端口
+# 释放 web 端口
 WEB_PORT=$(grep 'port' "$DORA_HOME/etc/config.toml" 2>/dev/null | grep -oE '[0-9]+' | head -1)
 WEB_PORT="${WEB_PORT:-80}"
 fuser -k "${WEB_PORT}/tcp" 2>/dev/null || true
@@ -888,7 +910,11 @@ if [ -d /dev/shm ]; then
     rm -f /dev/shm/zenoh-* 2>/dev/null || true
 fi
 
-echo "Done"
+if [ -n "$SURVIVORS" ]; then
+    echo "Done (force-killed:$SURVIVORS)"
+else
+    echo "Done"
+fi
 STOPEOF
 chmod +x "$PACKAGE_DIR/stop.sh"
 ok "stop.sh"
