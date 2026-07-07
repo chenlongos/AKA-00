@@ -757,16 +757,20 @@ echo "  camera: ${CAMERA_WIDTH}x${CAMERA_HEIGHT} MJPEG"
 # 不跑这个 uart_init.sh 就没 /dev/ttyS1 设备文件，motor-bridge 起不来。
 # uart_init.sh 里有 4 行 devmem 写寄存器；用 haveged / busybox devmem 都可以。
 # 失败不致命（开发机没有 devmem），warning 后继续。
+#
+# 注意：这里只能用 plain echo，不能用 build_release.sh 里定义的 ok/warn
+# 函数 —— heredoc 是 'INITEOF'（不展开），那些函数不会传到 init.sh，
+# 之前板子上就报过 'ok: not found'。
 if [ -f "$DORA_HOME/uart_init.sh" ]; then
     if [ -x "$DORA_HOME/uart_init.sh" ]; then
         echo "Initializing UART1 registers (uart_init.sh)..."
         if sh "$DORA_HOME/uart_init.sh" 2>/dev/null; then
-            ok "uart_init.sh"
+            echo "  [OK]   uart_init.sh"
         else
-            warn "uart_init.sh 失败（devmem 不可用？/dev/ttyS1 可能不存在）"
+            echo "  [WARN] uart_init.sh 失败（devmem 不可用？/dev/ttyS1 可能不存在）"
         fi
     else
-        warn "uart_init.sh 不可执行，跳过 UART1 初始化"
+        echo "  [WARN] uart_init.sh 不可执行，跳过 UART1 初始化"
     fi
 else
     echo "  -- uart_init.sh 未找到（开发机 / 非 SG2002 环境可忽略）"
