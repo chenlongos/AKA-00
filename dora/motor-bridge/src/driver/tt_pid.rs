@@ -106,6 +106,11 @@ pub struct TtPidDriver {
 /// 没节流就是 5 行/秒刷屏；30s 既能看到"还在断"，又不会刷爆日志。
 const WARN_THROTTLE: Duration = Duration::from_secs(30);
 
+/// 串口 read_exact 超时。ESP32 正常响应只需几 ms，30ms 是宽松上限；
+/// 失败情况下也只浪费 30ms 而不是 100ms（搭配 spawn_blocking 后不会
+/// 阻塞 tokio 任务）。
+const SERIAL_READ_TIMEOUT: Duration = Duration::from_millis(30);
+
 impl TtPidDriver {
     pub fn new(port_path: &str, baudrate: u32, ppr: i32) -> Box<dyn MotorDriver> {
         info!(
@@ -116,7 +121,7 @@ impl TtPidDriver {
             .data_bits(serialport::DataBits::Eight)
             .parity(serialport::Parity::None)
             .stop_bits(serialport::StopBits::One)
-            .timeout(Duration::from_millis(100))
+            .timeout(SERIAL_READ_TIMEOUT)
             .open()
         {
             Ok(p) => p,

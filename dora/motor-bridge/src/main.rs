@@ -75,6 +75,9 @@ async fn run() -> Result<()> {
     log::info!("[motor-bridge] Driver ready (backend={})", backend_name);
 
     // 定时回报电机状态（每 200ms，与 WebSocket 0xBB 同步）
+    // 注意：driver.rpm() 内部做同步串口 read_exact，必须放 spawn_blocking
+    // 里执行，否则在 SG2002 这类弱 CPU 上 200ms tick 会把整个 tokio runtime
+    // 焊死（之前 ESP32 不响应时每个 tick 阻塞 100ms）。
     let driver_rpt = driver.clone();
     let node_rpt = Arc::new(tokio::sync::Mutex::new(node));
     let node_clone = node_rpt.clone();
@@ -83,9 +86,17 @@ async fn run() -> Result<()> {
         let mut tick = tokio::time::interval(std::time::Duration::from_millis(200));
         loop {
             tick.tick().await;
-            let (left, right) = {
-                let d = driver_rpt.lock().unwrap();
-                d.rpm()
+            let driver_for_blocking = driver_rpt.clone();
+            let (left, right) = match tokio::task::spawn_blocking(move || {
+                driver_for_blocking.lock().unwrap().rpm()
+            })
+            .await
+            {
+                Ok(v) => v,
+                Err(e) => {
+                    log::warn!("[motor-bridge] rpm spawn_blocking join: {:?}", e);
+                    (0, 0)
+                }
             };
             let status = serde_json::json!({
                 "left_rpm": left,
@@ -115,37 +126,46 @@ async fn run() -> Result<()> {
                     }
                 };
 
-                let mut d = driver.lock().unwrap();
-                match cmd {
-                    MotorCmd::Action { action, speed, duration } => {
-                        let (l, r) = match action.as_str() {
-                            "up" => (speed as i32, speed as i32),
-                            "down" => (-(speed as i32), -(speed as i32)),
-                            "left" => (-(speed as i32), speed as i32),
-                            "right" => (speed as i32, -(speed as i32)),
-                            "stop" => (0, 0),
-                            _ => continue,
-                        };
-                        d.set_speeds(l, r);
-                        drop(d);
-                        if duration > 0 {
-                            tokio::time::sleep(std::time::Duration::from_millis(duration as u64)).await;
-                            driver.lock().unwrap().stop();
+                // set_speeds 也是同步串口写 + flush，同样挪到 spawn_blocking
+                // 避免在 dora 事件循环里阻塞。
+                let driver_for_cmd = driver.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    let mut d = driver_for_cmd.lock().unwrap();
+                    match cmd {
+                        MotorCmd::Action { action, speed, duration } => {
+                            let (l, r) = match action.as_str() {
+                                "up" => (speed as i32, speed as i32),
+                                "down" => (-(speed as i32), -(speed as i32)),
+                                "left" => (-(speed as i32), speed as i32),
+                                "right" => (speed as i32, -(speed as i32)),
+                                "stop" => (0, 0),
+                                _ => return,
+                            };
+                            d.set_speeds(l, r);
+                            drop(d);
+                            if duration > 0 {
+                                // 在 blocking 线程里 sleep —— 这里没有 await 需要，
+                                // std::thread::sleep 是阻塞的，但反正整个 task 就是
+                                // dedicated worker，等完再返回即可。
+                                std::thread::sleep(std::time::Duration::from_millis(duration as u64));
+                                driver_for_cmd.lock().unwrap().stop();
+                            }
+                        }
+                        MotorCmd::Direct { left, right, duration } => {
+                            d.set_speeds(left, right);
+                            drop(d);
+                            if duration > 0 {
+                                std::thread::sleep(std::time::Duration::from_millis(duration as u64));
+                                driver_for_cmd.lock().unwrap().stop();
+                            }
+                        }
+                        MotorCmd::Joystick { x, y } => {
+                            let (l, r) = joystick_to_tank(x, y);
+                            d.set_speeds(l, r);
                         }
                     }
-                    MotorCmd::Direct { left, right, duration } => {
-                        d.set_speeds(left, right);
-                        drop(d);
-                        if duration > 0 {
-                            tokio::time::sleep(std::time::Duration::from_millis(duration as u64)).await;
-                            driver.lock().unwrap().stop();
-                        }
-                    }
-                    MotorCmd::Joystick { x, y } => {
-                        let (l, r) = joystick_to_tank(x, y);
-                        d.set_speeds(l, r);
-                    }
-                }
+                })
+                .await;
             }
             Event::Stop(cause) => {
                 log::info!("[motor-bridge] Stop: {:?}, exiting", cause);
