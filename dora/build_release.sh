@@ -639,6 +639,16 @@ else
     warn "init_ap_web.sh 不存在（板子将无法启用 AP 热点）"
 fi
 
+# 复制 SG2002 UART 寄存器初始化脚本（init.sh 会自动调用它开 UART1，
+# 产生 /dev/ttyS1 给 motor-bridge 用；不开 /dev/ttyS1 设备文件不存在）
+if [ -f "$SCRIPT_DIR/uart_init.sh" ]; then
+    cp "$SCRIPT_DIR/uart_init.sh" "$PACKAGE_DIR/uart_init.sh"
+    chmod +x "$PACKAGE_DIR/uart_init.sh"
+    ok "uart_init.sh"
+else
+    warn "uart_init.sh 不存在（板子 /dev/ttyS1 可能不会生成）"
+fi
+
 # 生成 dataflow.yml (去掉 build: 字段，使用 bin/ 路径)
 # 注意: camera-node 如果没有编译则省略
 if [ -f "$PACKAGE_DIR/bin/camera-node" ]; then
@@ -741,6 +751,26 @@ CAM_HEIGHT=$(grep -E '^\s*height\s*=' "$DORA_HOME/etc/config.toml" 2>/dev/null |
 export CAMERA_WIDTH="${CAM_WIDTH:-640}"
 export CAMERA_HEIGHT="${CAM_HEIGHT:-480}"
 echo "  camera: ${CAMERA_WIDTH}x${CAMERA_HEIGHT} MJPEG"
+
+# ── 1.6. SG2002 UART 寄存器初始化（产生 /dev/ttyS1）──
+# /dev/ttyS1 由 UART1 引出给底盘 ESP32 用。内核默认不开 UART1 寄存器，
+# 不跑这个 uart_init.sh 就没 /dev/ttyS1 设备文件，motor-bridge 起不来。
+# uart_init.sh 里有 4 行 devmem 写寄存器；用 haveged / busybox devmem 都可以。
+# 失败不致命（开发机没有 devmem），warning 后继续。
+if [ -f "$DORA_HOME/uart_init.sh" ]; then
+    if [ -x "$DORA_HOME/uart_init.sh" ]; then
+        echo "Initializing UART1 registers (uart_init.sh)..."
+        if sh "$DORA_HOME/uart_init.sh" 2>/dev/null; then
+            ok "uart_init.sh"
+        else
+            warn "uart_init.sh 失败（devmem 不可用？/dev/ttyS1 可能不存在）"
+        fi
+    else
+        warn "uart_init.sh 不可执行，跳过 UART1 初始化"
+    fi
+else
+    echo "  -- uart_init.sh 未找到（开发机 / 非 SG2002 环境可忽略）"
+fi
 
 # ── 2. 验证二进制文件 ──
 echo ""
