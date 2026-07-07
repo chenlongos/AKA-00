@@ -40,14 +40,25 @@ async fn control_action(
     State(s): State<Arc<AppState>>,
     Query(p): Query<ControlParams>,
 ) -> Json<serde_json::Value> {
-    let action = match p.action.as_deref() {
-        Some("up") => Action::Up,
-        Some("down") => Action::Down,
-        Some("left") => Action::Left,
-        Some("right") => Action::Right,
-        Some("stop") => Action::Stop,
-        Some("grab") => Action::Grab,
-        Some("release") => Action::Release,
+    // grab/release 是机械臂高层动作，分流到 ArmService 而不是 MotorService。
+    // 之前全部走 motor.path → motor-bridge 收到 {action:"grab"} 后 match 没
+    // 这个分支就 _=>continue 静默丢弃；WS 路径更糟 —— 前端包成
+    // {type:"action",action:"grab",speed,time}（没 command 字段、time 不是
+    // duration）连解析都过不了。对应 Python app/services/control_service.py
+    // 的 _apply_arm_action。
+    let action_str = p.action.as_deref().unwrap_or("");
+    if action_str == "grab" || action_str == "release" {
+        let payload = serde_json::json!({ "command": action_str });
+        s.arm.handle_json_cmd(&payload).await;
+        return Json(serde_json::json!({"ok": true, "via": "arm"}));
+    }
+
+    let action = match action_str {
+        "up" => Action::Up,
+        "down" => Action::Down,
+        "left" => Action::Left,
+        "right" => Action::Right,
+        "stop" => Action::Stop,
         _ => {
             return Json(serde_json::json!({"error": "unknown action"}));
         }
@@ -146,9 +157,12 @@ async fn handle_ws(
                         if let Ok(cmd) =
                             serde_json::from_slice::<serde_json::Value>(&data[1..])
                         {
-                            // 类型分流：前端用 {type, payload} 包装命令。
-                            //   {type:"arm_cmd", payload:{command:"grab", ...}} → arm 服务
-                            //   其他（含 ip / action / pwm_channels / reinitialize 等）→ motor 服务
+                            // 类型分流：
+                            //   1. {type:"arm_cmd", payload:{...}}             → arm 服务
+                            //   2. {type:"action", action:"grab|release"}     → arm 服务（grab/release
+                            //      是机械臂高层动作，不该走 motor；前端 sendAction("grab")
+                            //      原本会因字段不匹配被 motor-bridge 拒掉）
+                            //   3. 其他（ip / action:up-down-stop / pwm_channels / reinitialize）→ motor
                             let msg_type = cmd
                                 .get("type")
                                 .and_then(|v| v.as_str())
@@ -162,6 +176,22 @@ async fn handle_ws(
                                 tokio::spawn(async move {
                                     arm.handle_json_cmd(&payload).await;
                                 });
+                            } else if msg_type == "action" {
+                                let inner_action = cmd
+                                    .get("action")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
+                                if inner_action == "grab" || inner_action == "release" {
+                                    let arm = arm.clone();
+                                    let payload = serde_json::json!({
+                                        "command": inner_action,
+                                    });
+                                    tokio::spawn(async move {
+                                        arm.handle_json_cmd(&payload).await;
+                                    });
+                                } else {
+                                    motor.handle_json_cmd(&cmd).await;
+                                }
                             } else {
                                 motor.handle_json_cmd(&cmd).await;
                             }
