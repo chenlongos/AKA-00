@@ -95,7 +95,16 @@ impl MotorDriver for StubDriver {
 
 pub struct TtPidDriver {
     port: Mutex<Option<Box<dyn serialport::SerialPort>>>,
+    /// 最近一次"可恢复错误" warn 的时间戳，用于节流防刷屏。
+    /// `None` 表示当前链路健康（或还没出过错）；一旦出错会写 Some(now)，
+    /// 后续相同错误在 30s 内静默；恢复（read 成功 / send 成功）后清空，
+    /// 下次出错可以立即 warn。
+    last_warn: Mutex<Option<Instant>>,
 }
+
+/// 同类错误 warn 节流间隔（秒）。ESP32 完全断连时 200ms tick 一次，
+/// 没节流就是 5 行/秒刷屏；30s 既能看到"还在断"，又不会刷爆日志。
+const WARN_THROTTLE: Duration = Duration::from_secs(30);
 
 impl TtPidDriver {
     pub fn new(port_path: &str, baudrate: u32, ppr: i32) -> Box<dyn MotorDriver> {
@@ -128,6 +137,7 @@ impl TtPidDriver {
 
         let driver = Self {
             port: Mutex::new(Some(port)),
+            last_warn: Mutex::new(None),
         };
 
         // 等 ESP32 USB-CDC 枚举完成（参照 Python `time.sleep(0.5)`）
@@ -157,6 +167,33 @@ impl TtPidDriver {
         Box::new(driver)
     }
 
+    /// 节流 warn：与上一次同类 warn 间隔 < WARN_THROTTLE 时静默（连 ESP32 断线
+    /// 时 200ms tick 一次就会刷屏，所以加节流）；链路恢复（mark_healthy）后
+    /// 会清空 last_warn，下一次失败立即 warn。
+    /// 闭包只在真正要 emit 时才执行，避免节流期间的 format! 分配。
+    fn warn_throttled<F>(&self, f: F)
+    where
+        F: FnOnce() -> String,
+    {
+        let now = Instant::now();
+        let mut last = self.last_warn.lock().unwrap();
+        let should_emit = match *last {
+            None => true,
+            Some(t) => now.duration_since(t) >= WARN_THROTTLE,
+        };
+        if should_emit {
+            let msg = f();
+            warn!("{}", msg);
+            *last = Some(now);
+        }
+    }
+
+    /// 标记链路恢复，清空 last_warn。这样下次出错时第一发 warn 不会被节流。
+    fn mark_healthy(&self) {
+        let mut last = self.last_warn.lock().unwrap();
+        *last = None;
+    }
+
     fn send_cmd(&self, cmd: u8, payload: &[u8]) {
         let len = payload.len() as u8;
         let mut chk = cmd ^ len;
@@ -172,10 +209,9 @@ impl TtPidDriver {
         let mut guard = self.port.lock().unwrap();
         match guard.as_mut() {
             None => {
-                warn!(
-                    "[tt_pid] tx {} called but port is None (stub mode?)",
-                    name
-                );
+                self.warn_throttled(|| {
+                    format!("[tt_pid] tx {} called but port is None (stub mode?)", name)
+                });
             }
             Some(port) => {
                 // 发命令前清输入缓冲，避免上次响应残留 / 启动 boot log 干扰本次解析
@@ -197,14 +233,18 @@ impl TtPidDriver {
     }
 
     /// 读一个完整的协议帧：`AA 55 <rsp> <len> [len 字节 payload] <chk>`。
-    /// 成功返回 `Some((rsp_cmd, payload))`；任何错误（端口没开/超时/坏头/chk 错）返回 `None` 并打日志。
+    /// 成功返回 `Some((rsp_cmd, payload))`；任何错误（端口没开/超时/坏头/chk 错）
+    /// 返回 `None` 并通过 `warn_throttled` 节流打 warn（默认每 30s 一次）。
+    /// 一旦某次成功，会 `mark_healthy` 清空节流计数器，下次失败立刻 warn。
     fn read_frame(&self, label: &str) -> Option<(u8, Vec<u8>)> {
         let started = Instant::now();
         let mut guard = self.port.lock().unwrap();
         let port = match guard.as_mut() {
             Some(p) => p,
             None => {
-                error!("[tt_pid] read_frame({}) called but port is None", label);
+                self.warn_throttled(|| {
+                    format!("[tt_pid] read_frame({}) called but port is None", label)
+                });
                 return None;
             }
         };
@@ -213,18 +253,22 @@ impl TtPidDriver {
         let mut header = [0u8; 4];
         if let Err(e) = port.read_exact(&mut header) {
             let elapsed_ms = started.elapsed().as_millis();
-            warn!(
-                "[tt_pid/rx] {} header TIMEOUT after {}ms: {} (ESP32 not responding?)",
-                label, elapsed_ms, e
-            );
+            self.warn_throttled(|| {
+                format!(
+                    "[tt_pid/rx] {} header TIMEOUT after {}ms: {} (ESP32 not responding?)",
+                    label, elapsed_ms, e
+                )
+            });
             return None;
         }
         if header[0] != FRAME_H1 || header[1] != FRAME_H2 {
-            warn!(
-                "[tt_pid/rx] {} bad header: {} (want AA 55 ?? ??)",
-                label,
-                hex(&header)
-            );
+            self.warn_throttled(|| {
+                format!(
+                    "[tt_pid/rx] {} bad header: {} (want AA 55 ?? ??)",
+                    label,
+                    hex(&header)
+                )
+            });
             return None;
         }
         let rsp = header[2];
@@ -235,10 +279,12 @@ impl TtPidDriver {
         if len > 0 {
             if let Err(e) = port.read_exact(&mut payload) {
                 let elapsed_ms = started.elapsed().as_millis();
-                warn!(
-                    "[tt_pid/rx] {} payload TIMEOUT after {}ms (len={}): {}",
-                    label, elapsed_ms, len, e
-                );
+                self.warn_throttled(|| {
+                    format!(
+                        "[tt_pid/rx] {} payload TIMEOUT after {}ms (len={}): {}",
+                        label, elapsed_ms, len, e
+                    )
+                });
                 return None;
             }
         }
@@ -247,10 +293,12 @@ impl TtPidDriver {
         let mut chk_byte = [0u8; 1];
         if let Err(e) = port.read_exact(&mut chk_byte) {
             let elapsed_ms = started.elapsed().as_millis();
-            warn!(
-                "[tt_pid/rx] {} chk TIMEOUT after {}ms: {}",
-                label, elapsed_ms, e
-            );
+            self.warn_throttled(|| {
+                format!(
+                    "[tt_pid/rx] {} chk TIMEOUT after {}ms: {}",
+                    label, elapsed_ms, e
+                )
+            });
             return None;
         }
 
@@ -260,16 +308,18 @@ impl TtPidDriver {
             expected ^= b;
         }
         if expected != chk_byte[0] {
-            error!(
-                "[tt_pid/rx] {} chk mismatch: got {:02X} expected {:02X} \
-                 (rsp=0x{:02X} len={} payload={})",
-                label,
-                chk_byte[0],
-                expected,
-                rsp,
-                len,
-                hex(&payload)
-            );
+            self.warn_throttled(|| {
+                format!(
+                    "[tt_pid/rx] {} chk mismatch: got {:02X} expected {:02X} \
+                     (rsp=0x{:02X} len={} payload={})",
+                    label,
+                    chk_byte[0],
+                    expected,
+                    rsp,
+                    len,
+                    hex(&payload)
+                )
+            });
             return None;
         }
 
@@ -283,6 +333,8 @@ impl TtPidDriver {
             len
         );
 
+        // 成功：清空节流计数器，下次失败可以立刻 warn
+        self.mark_healthy();
         Some((rsp, payload))
     }
 
