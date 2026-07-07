@@ -866,12 +866,19 @@ else
     dora destroy 2>/dev/null || true
 fi
 
-# 节点进程名清单（精确匹配 basename，不用 -f 避免误伤 grep/cat/vim）
-NODES="camera-node web-server motor-bridge arm-bridge state-node dora-daemon dora-coordinator"
+# 进程名清单（精确匹配 basename，不用 -f 避免误伤 grep/cat/vim）。
+# 注意：dora 启动器（dora run / dora up）的可执行文件名就是 dora，
+# dora-daemon / dora-coordinator 是它的子命令名，不是独立进程名。
+NODES="dora camera-node web-server motor-bridge arm-bridge state-node"
 
-# 第一轮 SIGTERM：让 dora node 收 Event::Stop 后优雅退出（刷 buffer、关串口）
+# 第一轮 SIGTERM：让 dora node 收 Event::Stop 后优雅退出（刷 buffer、关串口）。
+# dora 父进程先杀（它是 coordinator，子节点都是它 fork 的，杀父后子变孤儿）。
 echo "Sending SIGTERM..."
-for name in $NODES; do
+for pid in $(pgrep -x "dora" 2>/dev/null); do
+    [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+done
+sleep 1   # 等子节点收 Event::Stop
+for name in camera-node web-server motor-bridge arm-bridge state-node; do
     pgrep -x "$name" 2>/dev/null | while read pid; do
         [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
     done
