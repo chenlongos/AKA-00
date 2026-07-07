@@ -2,10 +2,10 @@
 # 对应 app/config.py 的 HardwareConfig
 
 [camera]
-width = 640
-height = 480
-fps = 30
-jpeg_quality = 70
+width = 320
+height = 240
+fps = 24
+jpeg_quality = 50
 
 [motor]
 # 底盘驱动类型："dev" (开发模式), "tt_pid" (真实硬件)
@@ -16,7 +16,7 @@ ppr = 4680
 
 [arm]
 # 机械臂驱动类型："dev" (开发模式), "zp10s" (真实硬件)
-backend = "dev"
+backend = "zp10s"
 port = "/dev/ttyS2"
 baudrate = 115200
 
