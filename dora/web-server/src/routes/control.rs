@@ -157,43 +157,77 @@ async fn handle_ws(
                         if let Ok(cmd) =
                             serde_json::from_slice::<serde_json::Value>(&data[1..])
                         {
-                            // 类型分流：
-                            //   1. {type:"arm_cmd", payload:{...}}             → arm 服务
-                            //   2. {type:"action", action:"grab|release"}     → arm 服务（grab/release
-                            //      是机械臂高层动作，不该走 motor；前端 sendAction("grab")
-                            //      原本会因字段不匹配被 motor-bridge 拒掉）
-                            //   3. 其他（ip / action:up-down-stop / pwm_channels / reinitialize）→ motor
+                            // WS 消息分流 —— 全部翻译成 service 方法调用，让 service 产出
+                            // motor-bridge 期望的 canonical JSON。
+                            //
+                            // 之前对未知 type 直接 motor.handle_json_cmd 裸转发，
+                            // 把前端 {type:"action", speed, time} 这种 WS 风格 JSON
+                            // 透给 motor-bridge 会因字段不匹配 (缺 command, time vs
+                            // duration) 报 parse error。
+                            //
+                            // 现在按 type 显式分发：
+                            //   arm_cmd              → arm 服务 (展开 payload)
+                            //   action (grab/release) → arm 服务
+                            //   action (up/down/...) → motor.action() 翻译
+                            //   其他                  → log warn 后丢弃
                             let msg_type = cmd
                                 .get("type")
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("");
-                            if msg_type == "arm_cmd" {
-                                let arm = arm.clone();
-                                let payload = cmd
-                                    .get("payload")
-                                    .cloned()
-                                    .unwrap_or(serde_json::Value::Null);
-                                tokio::spawn(async move {
-                                    arm.handle_json_cmd(&payload).await;
-                                });
-                            } else if msg_type == "action" {
-                                let inner_action = cmd
-                                    .get("action")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("");
-                                if inner_action == "grab" || inner_action == "release" {
+
+                            match msg_type {
+                                "arm_cmd" => {
                                     let arm = arm.clone();
-                                    let payload = serde_json::json!({
-                                        "command": inner_action,
-                                    });
+                                    let payload = cmd
+                                        .get("payload")
+                                        .cloned()
+                                        .unwrap_or(serde_json::Value::Null);
                                     tokio::spawn(async move {
                                         arm.handle_json_cmd(&payload).await;
                                     });
-                                } else {
-                                    motor.handle_json_cmd(&cmd).await;
                                 }
-                            } else {
-                                motor.handle_json_cmd(&cmd).await;
+                                "action" => {
+                                    let inner = cmd
+                                        .get("action")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("");
+                                    let speed = cmd
+                                        .get("speed")
+                                        .and_then(|v| v.as_u64())
+                                        .unwrap_or(50)
+                                        as u8;
+                                    let duration = cmd
+                                        .get("time")
+                                        .and_then(|v| v.as_u64())
+                                        .unwrap_or(0)
+                                        as u32;
+
+                                    match inner {
+                                        "grab" | "release" => {
+                                            let arm = arm.clone();
+                                            let payload = serde_json::json!({
+                                                "command": inner,
+                                            });
+                                            tokio::spawn(async move {
+                                                arm.handle_json_cmd(&payload).await;
+                                            });
+                                        }
+                                        "up" => motor.action(Action::Up, speed, duration).await,
+                                        "down" => motor.action(Action::Down, speed, duration).await,
+                                        "left" => motor.action(Action::Left, speed, duration).await,
+                                        "right" => motor.action(Action::Right, speed, duration).await,
+                                        "stop" => motor.action(Action::Stop, speed, duration).await,
+                                        other => {
+                                            log::warn!("[ws] unknown action: {}", other);
+                                        }
+                                    }
+                                }
+                                other => {
+                                    // raw_command / pwm_channels / reinitialize / ip 等
+                                    // 不是手机快速控制用的，统一 warn 提示走 HTTP，
+                                    // 避免裸转发到 motor-bridge 又报 parse error。
+                                    log::debug!("[ws] ignoring 0xDD type={} (use HTTP for this)", other);
+                                }
                             }
                         }
                     }
