@@ -2,8 +2,6 @@
 //!
 //! 对应 `run.py` 中的 ControlWebSocket 和 `app/routes/api.py`。
 
-use std::sync::Arc;
-
 use axum::{
     extract::{
         ws::{Message, WebSocket},
@@ -15,6 +13,8 @@ use axum::{
 use axum::routing::get;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
+use std::sync::Arc;
+use tokio::sync::Mutex as TokioMutex;
 use tokio::time::{interval, Duration};
 
 use crate::services::motor::Action;
@@ -85,10 +85,9 @@ async fn ws_handler(ws: WebSocketUpgrade, State(s): State<Arc<AppState>>) -> imp
 ///   "4: wlan0    inet 192.168.4.1/24 brd 192.168.4.255 scope global wlan0\n"
 /// 找 "inet " 后面那个 CIDR，strip /xx。
 ///
-/// 这个是 blocking `Command::output`，但只跑 1-2 次（每次 WS 连接只触发一次），
-/// ip 命令一般 5ms 内完成，不会卡住 tokio reactor。生产实现可以换成
-/// libc::ioctl(SIOCGIFADDR) 直接读 ifreq，但需要 unsafe + 跨平台兼容代码。
-fn get_iface_ip(iface: &str) -> String {
+/// 这两个函数跑在 spawn_blocking 里（不阻塞 tokio reactor），所以即使是
+/// sync Command 也安全。
+fn get_iface_ip_blocking(iface: &str) -> String {
     use std::process::Command;
     let Ok(out) = Command::new("ip")
         .args(["-4", "-o", "addr", "show", iface])
@@ -97,7 +96,7 @@ fn get_iface_ip(iface: &str) -> String {
         return String::new();
     };
     if !out.status.success() {
-        return String::new(); // 网卡不存在等
+        return String::new();
     }
     let s = String::from_utf8_lossy(&out.stdout);
     for line in s.lines() {
@@ -115,18 +114,57 @@ fn get_iface_ip(iface: &str) -> String {
     String::new()
 }
 
-/// 取本机 IP（用于 ws 开场白里的 `ip` 字段；前端用它跳转 labs.chenlongrobot.com）。
-///
-/// 对应 Python `app/routes/_utils.py::get_wifi_ip`：wlan1 (STA 已连接) 优先，
-/// wlan0 (AP 默认 192.168.4.1) 兜底，最后 127.0.0.1。
-///
-/// 之前纯 UDP 探测 8.8.8.8，AP-only 模式下 8.8.8.8 没路由 → 拿到 0.0.0.0 → 前端显示空白。
-fn detect_local_ip() -> String {
-    for iface in ["wlan1", "wlan0"] {
-        let ip = get_iface_ip(iface);
-        if !ip.is_empty() {
-            return ip;
+async fn get_iface_ip(iface: &str) -> String {
+    let iface = iface.to_string();
+    tokio::task::spawn_blocking(move || get_iface_ip_blocking(&iface))
+        .await
+        .unwrap_or_default()
+}
+
+/// UDP 探测拿出口网卡 IP（连公网时这是 wlan1 的 IP，AP 模式下探测失败）
+async fn udp_probe_ip() -> Option<String> {
+    tokio::task::spawn_blocking(|| {
+        use std::net::UdpSocket;
+        let sock = UdpSocket::bind("0.0.0.0:0").ok()?;
+        sock.connect("8.8.8.8:80").ok()?;
+        let addr = sock.local_addr().ok()?;
+        let ip = addr.ip().to_string();
+        if ip.is_empty() || ip == "0.0.0.0" {
+            None
+        } else {
+            Some(ip)
         }
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// 取本机 IP（用于 ws 开场白 + `/api/system/ip` + WS `{type:"ip"}` 响应）。
+///
+/// 优先级（每次都重跑，不缓存，方便 wifi 切换后立刻反映新 IP）：
+///   1. UDP 探测 8.8.8.8（连公网时直接拿到 wlan1 出口 IP）
+///   2. wlan1 静态 IP（连内网 wifi / 还没拿到 DHCP 时）
+///   3. wlan0 静态 IP（AP 模式默认 192.168.4.1）
+///   4. 127.0.0.1（兜底）
+///
+/// 对应 Python `app/routes/_utils.py::get_wifi_ip`：wlan1 → wlan0 → hostname，
+/// 但 UDP 探测先试（如果有公网，立刻拿到真出口 IP，wlan0 / wlan1 静态 IP
+/// 反而是次优）。
+pub async fn detect_local_ip() -> String {
+    // 1. UDP 探测（最准：直接告诉前端"你现在能被外网看到的 IP"）
+    if let Some(ip) = udp_probe_ip().await {
+        return ip;
+    }
+    // 2. wlan1 静态 IP（内网 wifi 或 AP 模式）
+    let wlan1 = get_iface_ip("wlan1").await;
+    if !wlan1.is_empty() {
+        return wlan1;
+    }
+    // 3. wlan0 静态 IP（AP 默认 192.168.4.1）
+    let wlan0 = get_iface_ip("wlan0").await;
+    if !wlan0.is_empty() {
+        return wlan0;
     }
     "127.0.0.1".to_string()
 }
@@ -138,20 +176,25 @@ async fn handle_ws(
 ) {
     log::info!("[ws] client connected");
 
-    let (mut tx, mut rx) = socket.split();
+    let (tx, mut rx) = socket.split();
+    // SplitSink 不支持 Clone，但 send_task 和 receive loop 都要发消息。
+    // 用 Arc<TokioMutex<>> 共享：偶尔发，不锁竞争。
+    let tx = Arc::new(TokioMutex::new(tx));
     let motor_tx = motor.clone();
 
     // 开场白：触发前端 wsReady 状态机（BaseControlPage.tsx:35-39）
     // 不发这一条，前端卡在 wsReady=false，init useEffect 不跑，
     // sendPwmChannels / sendReinitialize / hash-routing 全都失效。
-    let local_ip = detect_local_ip();
+    // IP 走 UDP 探测（async + spawn_blocking），不阻塞 tokio reactor。
+    let local_ip = detect_local_ip().await;
     let welcome = serde_json::json!({ "type": "ip", "ip": local_ip });
     match serde_json::to_vec(&welcome) {
         Ok(json_bytes) => {
             let mut buf = Vec::with_capacity(1 + json_bytes.len());
             buf.push(0xDD);
             buf.extend_from_slice(&json_bytes);
-            if tx.send(Message::Binary(buf.into())).await.is_err() {
+            let send_res = tx.lock().await.send(Message::Binary(buf.into())).await;
+            if send_res.is_err() {
                 log::warn!("[ws] failed to send welcome message");
             } else {
                 log::info!("[ws] welcome sent (ip={})", local_ip);
@@ -161,6 +204,8 @@ async fn handle_ws(
     }
 
     // 发送任务：每 200ms 推送电机状态（左/右轮线速度 m/s）
+    // send_task 用一份 Arc clone（receive loop 还要用 tx 发 ip 响应）
+    let tx_for_send = tx.clone();
     let send_task = tokio::spawn(async move {
         let mut tick = interval(Duration::from_millis(200));
         loop {
@@ -173,7 +218,7 @@ async fn handle_ws(
             let right_mmps = (s.right_speed * 1000.0).round() as i16;
             buf.extend_from_slice(&left_mmps.to_be_bytes());
             buf.extend_from_slice(&right_mmps.to_be_bytes());
-            if tx.send(Message::Binary(buf.into())).await.is_err() {
+            if tx_for_send.lock().await.send(Message::Binary(buf.into())).await.is_err() {
                 break;
             }
         }
@@ -224,6 +269,20 @@ async fn handle_ws(
                                     tokio::spawn(async move {
                                         arm.handle_json_cmd(&payload).await;
                                     });
+                                }
+                                "ip" => {
+                                    // 刷新 IP：wifi 切换后前端可以发这条重查，不必断 WS。
+                                    // 回 {type:"ip", ip:"..."} 走 0xDD 帧。
+                                    let ip_now = detect_local_ip().await;
+                                    let resp = serde_json::json!({"type": "ip", "ip": ip_now});
+                                    if let Ok(bytes) = serde_json::to_vec(&resp) {
+                                        let mut buf = Vec::with_capacity(1 + bytes.len());
+                                        buf.push(0xDD);
+                                        buf.extend_from_slice(&bytes);
+                                        if tx.lock().await.send(Message::Binary(buf.into())).await.is_err() {
+                                            log::debug!("[ws] ip refresh send failed");
+                                        }
+                                    }
                                 }
                                 "action" => {
                                     let inner = cmd

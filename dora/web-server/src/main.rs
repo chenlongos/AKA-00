@@ -92,6 +92,7 @@ async fn run() -> Result<()> {
         .merge(routes::arm::router())
         .merge(routes::wifi::router())
         .merge(routes::demo::router())
+        .merge(routes::system::router())
         .fallback_service(
             ServeDir::new(&static_dir)
                 .fallback(ServeFile::new(static_dir.join("index.html")))

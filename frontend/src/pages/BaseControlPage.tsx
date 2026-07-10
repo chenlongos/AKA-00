@@ -30,7 +30,12 @@ const BaseControlPage = () => {
     useEffect(() => {
         controlSocket.connect(
             setWsConnected,
-            (s) => { setLeftSpeed(s.left); setRightSpeed(s.right); },
+            (s) => {
+                setLeftSpeed(s.left);
+                setRightSpeed(s.right);
+                // 每次收到 0xBB 帧就刷新活跃时间戳（online 检测用）
+                lastMotorUpdateRef.current = Date.now();
+            },
             (msg) => {
                 if (msg.type === "ip") {
                     setIp("IP: " + msg.ip);
@@ -41,6 +46,26 @@ const BaseControlPage = () => {
         );
         return () => { controlSocket.close(); };
     }, []);
+
+    // online 状态用 motor_status 活跃度判断（dora 推 0xBB 帧 200ms 一次）。
+    // 比 heartbeat HTTP 轮询更可靠：实时、不依赖前端 fetch、由 dora 推动。
+    // 3s 内有 0xBB 帧就绿，否则红（dora 死了 / wifi 断了 / web-server 卡了都触发）。
+    useEffect(() => {
+        const tick = window.setInterval(() => {
+            const since = Date.now() - lastMotorUpdateRef.current;
+            if (lastMotorUpdateRef.current === 0 || since > 3000) {
+                setOnline(false);
+            } else {
+                setOnline(true);
+            }
+        }, 1000);
+        return () => window.clearInterval(tick);
+    }, []);
+
+
+
+    const [online, setOnline] = useState(false);
+    const lastMotorUpdateRef = useRef<number>(0);
 
     // WebSocket 就绪后执行初始化（sendRawCommand 依赖 WS 连接）
     useEffect(() => {
@@ -171,7 +196,7 @@ const BaseControlPage = () => {
 
                             <div style={{...S.rowBetween, width: "100%"}}>
                                 <div style={{...S.row, gap: scalePx(6)}}>
-                                    <span style={S.dot(wsConnected)} />
+                                    <span style={S.dot(online)} />
                                     <span style={S.muted}>{status}</span>
                                 </div>
                                 <div style={{...S.row, gap: scalePx(6)}}>
@@ -207,7 +232,7 @@ const BaseControlPage = () => {
 
             <div style={{...S.rowBetween, width: "100%", maxWidth: contentW, marginTop: scalePx(8)}}>
                 <div style={{...S.row, gap: scalePx(6)}}>
-                    <span style={S.dot(wsConnected)} />
+                    <span style={S.dot(online)} />
                     <span style={S.muted}>{status}</span>
                 </div>
                 <div style={{...S.row, gap: scalePx(6)}}>
