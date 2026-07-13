@@ -8,11 +8,15 @@ import {useViewportScale} from "../hooks/useViewportScale";
 
 interface Model { name: string; file: string; size: number; type: string; }
 
+// 与后端 DemoInfo (web-server/src/services/demo.rs) 对齐: /api/demo/list
+// 返回 {demos: DemoInfo[]}。这里只用 name/kind，path 留给后端。
+interface DemoInfo { name: string; path: string; kind: string; }
+
 const DEMO_SERVER_URL = import.meta.env.VITE_DEMO_SERVER_URL || "http://localhost:8888";
 
 const DemoPage = () => {
     const {scalePx} = useViewportScale();
-    const [demos, setDemos] = useState<string[]>([]);
+    const [demos, setDemos] = useState<DemoInfo[]>([]);
     const [demoStatus, setDemoStatus] = useState("准备就绪");
     const [runningDemo, setRunningDemo] = useState<string | null>(null);
     const [demoLoading, setDemoLoading] = useState(false);
@@ -108,7 +112,7 @@ const DemoPage = () => {
                     </Card>
                 ) : (
                     <div style={{display: "flex", flexDirection: "column", gap: scalePx(8)}}>
-                        {demos.map(name => {
+                        {demos.map(({name}) => {
                             const isRunning = runningDemo === name;
                             return (
                                 <Card key={name} marginBottom={0} style={{

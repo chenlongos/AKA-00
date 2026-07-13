@@ -1,9 +1,15 @@
 #!/bin/sh
-# demo-node 用 process_group(0) 独立进程组 spawn 这个 init.sh，
-# 当前 cwd = demo/<name>/。使用 $DORA_HOME/lib 找 CVitek + OpenCV 共享库，
-# 由 build_release.sh 复制到 PACKAGE_DIR/lib。
-# init.sh 里不写死 /root/AKA-00/lib 路径，方便换部署目录。
+# demo-node 用独立进程组 spawn 这个 init.sh，当前 cwd = demo/<name>/。
+# 路径无关：从 init.sh 自身位置反推仓库根，无论部署在 /root/AKA-00 还是别的目录。
+#   demo/<name>/init.sh -> dirname=`demo/<name>` -> ../..=repo 根
+#
+# .so 加载路径在仓库根下的 libs/ 子目录，由用户单独 scp 上来（不打包进 tarball）。
+# musl loader 找不到时逐条报缺哪个 lib + symbol。
 
-DORA_HOME="${DORA_HOME:-/root/dora-riscv64}"
-export LD_LIBRARY_PATH="$DORA_HOME/lib:${LD_LIBRARY_PATH:-}"
+# 路径无关：先把 $0 解析成绝对路径，再反推仓库根
+INIT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+DORA_HOME="$(cd "$INIT_DIR/../.." && pwd)"
+
+export LD_LIBRARY_PATH="$DORA_HOME/libs:${LD_LIBRARY_PATH:-}"
+
 exec ./tennis ./yolo_model.cvimodel 0

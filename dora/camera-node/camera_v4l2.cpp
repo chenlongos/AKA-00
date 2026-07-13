@@ -137,6 +137,9 @@ void Camera::close() {
         ::close(_fd);
         _fd = -1;
     }
+    // 兜底：open 失败后 _fd 已置 -1，_stop_stream 被跳过；但 _bufs 可能仍指向
+    // 残留 (老 _init_buffers 没清干净)。无脑调一次，安全可重入 (null = no-op)。
+    _cleanup_buffers();
     std::cout << "[camera] V4L2 closed" << std::endl;
 }
 
@@ -208,6 +211,12 @@ bool Camera::_try_fmt(int& w, int& h) {
 }
 
 void Camera::_init_buffers() {
+    // 失败路径：之前是 `_bufs = new Buf[N]` + 循环失败只设 `_fd=-1; return`，
+    // _bufs 没人 free，close() 又因为 _fd<0 跳过 _stop_stream——每次重试泄漏 64B*N。
+    // 现在 _bufs/_n_bufs 全程受 _cleanup_buffers 兜底，错误路径调它清干净。
+    _bufs = nullptr;
+    _n_bufs = 0;
+
     v4l2_requestbuffers req; CLEAR(req);
     req.count = 4;
     req.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -218,16 +227,26 @@ void Camera::_init_buffers() {
     }
     _n_bufs = req.count;
     _bufs = new Buf[_n_bufs];
+    std::memset(_bufs, 0, sizeof(Buf) * _n_bufs);   // 0-init: ptr=null, len=0 — 让 _cleanup_buffers 跳过未 mmap 的
 
     for (unsigned i = 0; i < _n_bufs; i++) {
         v4l2_buffer buf; CLEAR(buf);
         buf.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         buf.memory = V4L2_MEMORY_MMAP;
         buf.index  = i;
-        if (ioctl(_fd, VIDIOC_QUERYBUF, &buf) < 0) { _fd = -1; return; }
+        if (ioctl(_fd, VIDIOC_QUERYBUF, &buf) < 0) {
+            std::fprintf(stderr, "[camera] V4L2: QUERYBUF[%u]: %s\n", i, std::strerror(errno));
+            _cleanup_buffers();
+            _fd = -1; return;
+        }
         _bufs[i].len = buf.length;
         _bufs[i].ptr = mmap(nullptr, buf.length, PROT_READ | PROT_WRITE, MAP_SHARED, _fd, buf.m.offset);
-        if (_bufs[i].ptr == MAP_FAILED) { _fd = -1; return; }
+        if (_bufs[i].ptr == MAP_FAILED) {
+            std::fprintf(stderr, "[camera] V4L2: mmap[%u]: %s\n", i, std::strerror(errno));
+            _bufs[i].ptr = nullptr;            // 防止 _cleanup_buffers 把 MAP_FAILED 当合法地址 munmap
+            _cleanup_buffers();
+            _fd = -1; return;
+        }
     }
 }
 
@@ -244,11 +263,19 @@ void Camera::_start_stream() {
 }
 
 void Camera::_stop_stream() {
-    v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    ioctl(_fd, VIDIOC_STREAMOFF, &type);
-    for (unsigned i = 0; i < _n_bufs; i++)
+    if (_fd >= 0) {
+        v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        ioctl(_fd, VIDIOC_STREAMOFF, &type);
+    }
+    _cleanup_buffers();
+}
+
+void Camera::_cleanup_buffers() {
+    if (!_bufs) return;                // 已清干净 / 未分配 → no-op；可重复调用
+    for (unsigned i = 0; i < _n_bufs; i++) {
         if (_bufs[i].ptr && _bufs[i].ptr != MAP_FAILED)
             munmap(_bufs[i].ptr, _bufs[i].len);
+    }
     delete[] _bufs;
     _bufs = nullptr;
     _n_bufs = 0;

@@ -14,7 +14,6 @@ const BaseControlPage = () => {
     const [status, setStatus] = useState("准备就绪");
     const [leftSpeed, setLeftSpeed] = useState(0);
     const [rightSpeed, setRightSpeed] = useState(0);
-    const [wsConnected, setWsConnected] = useState(false);
     const [wsReady, setWsReady] = useState(false);
     const [isLandscape, setIsLandscape] = useState(() => window.innerWidth > window.innerHeight);
     const [alertMsg, setAlertMsg] = useState("");
@@ -29,7 +28,7 @@ const BaseControlPage = () => {
 
     useEffect(() => {
         controlSocket.connect(
-            setWsConnected,
+            undefined,
             (s) => {
                 setLeftSpeed(s.left);
                 setRightSpeed(s.right);

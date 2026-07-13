@@ -27,7 +27,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OUTPUT_DIR="$SCRIPT_DIR/dist"
 BUILD_DIR="$SCRIPT_DIR/build-cross"
-PACKAGE_NAME="dora-riscv64"
+PACKAGE_NAME="AKA-00"
 PACKAGE_DIR="$OUTPUT_DIR/$PACKAGE_NAME"
 
 TARGET="riscv64gc-unknown-linux-musl"
@@ -287,7 +287,7 @@ echo ""
 
 rm -rf "$PACKAGE_DIR"
 mkdir -p "$PACKAGE_DIR/bin"
-mkdir -p "$PACKAGE_DIR/lib"
+mkdir -p "$PACKAGE_DIR/libs"
 mkdir -p "$PACKAGE_DIR/etc"
 mkdir -p "$BUILD_DIR"
 
@@ -494,11 +494,31 @@ cross_compile_camera_node() {
     fi
 
     local camera_dir="$SCRIPT_DIR/camera-node"
-    local dora_ffi_lib="$PACKAGE_DIR/lib/libdora_c_ffi.a"
 
-    if [ ! -f "$dora_ffi_lib" ]; then
-        fail "libdora_c_ffi.a 未找到 ($dora_ffi_lib)"
-        fail "  请确保 Phase 2 (Rust 项目节点) 编译成功"
+    # libdora_c_ffi.a 查找优先级:
+    #   1. $PACKAGE_DIR/lib         — Phase 2 正常 compile+copy 落点 (正式构建产物)
+    #   2. $SCRIPT_DIR/libs        — 用户预置 (跳过 cargo, 加速迭代)
+    #   3. $SCRIPT_DIR/target/$TARGET/release — cargo 刚编出来、还没 copy
+    local dora_ffi_lib=""
+    local ffi_candidates=(
+        "$PACKAGE_DIR/lib/libdora_c_ffi.a"
+        "$SCRIPT_DIR/libs/libdora_c_ffi.a"
+        "$SCRIPT_DIR/target/$TARGET/release/libdora_c_ffi.a"
+    )
+    for candidate in "${ffi_candidates[@]}"; do
+        if [ -f "$candidate" ]; then
+            dora_ffi_lib="$candidate"
+            ok "libdora_c_ffi.a ← $candidate"
+            break
+        fi
+    done
+    if [ -z "$dora_ffi_lib" ]; then
+        fail "libdora_c_ffi.a 在所有候选位置都不存在:"
+        for c in "${ffi_candidates[@]}"; do
+            fail "    - $c"
+        done
+        fail "  解决: 重新跑 build_release.sh 让 Phase 2 编出 libdora_c_ffi.a,"
+        fail "  或手动 cp 已编产物到 dora/libs/ 后重跑 (--skip-dora 可省 cargo 时间)"
         return 1
     fi
 
@@ -600,8 +620,8 @@ MAKEFILE_EOF
     rm -f "$camera_fixed_ffi"
 
     # 编译完成后清理 .a 文件 (运行时不需要)
-    rm -f "$PACKAGE_DIR/lib/libdora_c_ffi.a" 2>/dev/null || true
-    rmdir "$PACKAGE_DIR/lib" 2>/dev/null || true
+    rm -f "$PACKAGE_DIR/libs/libdora_c_ffi.a" 2>/dev/null || true
+    rmdir "$PACKAGE_DIR/libs" 2>/dev/null || true
 
     return 0
 }
@@ -622,9 +642,9 @@ info "复制静态文件..."
 cp -r "$SCRIPT_DIR/web-server/static" "$PACKAGE_DIR/"
 ok "static/"
 
-# 复制机械臂角度配置文件（web-server 启动时 cwd=arm_angles.json）
-if [ -f "$SCRIPT_DIR/../arm_angles.json" ]; then
-    cp "$SCRIPT_DIR/../arm_angles.json" "$PACKAGE_DIR/arm_angles.json"
+# 复制机械臂角度配置文件（真源从 dora/arm_angles.json，不再是 repo 根的旧文件）
+if [ -f "$SCRIPT_DIR/arm_angles.json" ]; then
+    cp "$SCRIPT_DIR/arm_angles.json" "$PACKAGE_DIR/arm_angles.json"
     ok "arm_angles.json"
 else
     warn "arm_angles.json 不存在（arm 服务会回退到 Rust 内置默认值）"
@@ -643,40 +663,38 @@ else
     warn "demo/ 不存在（demo-node 启动时会找不到任何 demo）"
 fi
 
-# 复制 demo 二进制依赖的共享库（CVitek NPU runtime + OpenCV）。
-# ./tennis 二进制 RPATH 是 host 路径（/home/junbo_dai/cvitek_tpu_sdk/lib），
-# 板子上不存在；所以打包到 PACKAGE_DIR/lib 并在 init.sh 里 export LD_LIBRARY_PATH。
-# 缺的 libcviruntime.so / libcvikernel.so / libopencv_*.so.3.2 ——
-# 这部分是 CVitek SDK 编译产物，理论上 RISCV64_TOOLCHAIN/sysroot 也会有，
-# 但 dev 机上 SDK 直接 build 到 /Users/junbo.dai/projects/AKA-00/lib/。
-# 这里双源：优先 ../lib/，其次 SDK。
-mkdir -p "$PACKAGE_DIR/lib"
+# 复制 demo 二进制依赖的共享库到 PACKAGE_DIR/libs/。
+# 不再放 lib/ (那是 libdora_c_ffi.a 静态库的，跟 .so 分开)。
+# tennis 在它自己的 init.sh 里 export LD_LIBRARY_PATH=$DORA_HOME/libs:
+# 因此 board 顶层 init.sh 不必全局设。dora 各节点都是 Rust 静态链接，无需 .so。
+# 来源: dora/libs/ (CVitek SDK 产物复制位置) 或 RISCV64_TOOLCHAIN/sysroot (fallback)。
+mkdir -p "$PACKAGE_DIR/libs"
 LIB_SRC=""
-if [ -d "$SCRIPT_DIR/../lib" ]; then
-    LIB_SRC="$SCRIPT_DIR/../lib"
+if [ -d "$SCRIPT_DIR/libs" ]; then
+    LIB_SRC="$SCRIPT_DIR/libs"
 elif [ -d "$RISCV64_TOOLCHAIN/sysroot/usr/lib" ]; then
     LIB_SRC="$RISCV64_TOOLCHAIN/sysroot/usr/lib"
 fi
 if [ -n "$LIB_SRC" ]; then
-    # 关键库：libcviruntime / libcvikernel / libopencv_* (NPU + 视觉)
-    # 跳过 libstdc++ / libgcc_s / libc / libz / libatomic 等系统库（板子上 Buildroot 自带）
+    # 关键库：cvitek NPU runtime + OpenCV core/imgproc/imgcodecs/highgui/videoio。
+    # 跳过 libstdc++ / libgcc_s / libc / libz / libatomic（板子 Buildroot 自带）。
     for lib_pattern in "libcviruntime.so*" "libcvikernel.so*" "libopencv_core.so*" \
                        "libopencv_imgcodecs.so*" "libopencv_imgproc.so*" \
                        "libopencv_highgui.so*" "libopencv_videoio.so*"; do
         for f in "$LIB_SRC"/$lib_pattern; do
             [ -e "$f" ] || continue
-            cp "$f" "$PACKAGE_DIR/lib/"
+            cp "$f" "$PACKAGE_DIR/libs/"
             ok "$(basename "$f")"
         done
     done
-    LIB_COUNT=$(ls -1 "$PACKAGE_DIR/lib" 2>/dev/null | wc -l | tr -d ' ')
-    info "lib/ 共 $LIB_COUNT 个文件"
+    LIB_COUNT=$(ls -1 "$PACKAGE_DIR/libs" 2>/dev/null | wc -l | tr -d ' ')
+    info "libs/ 共 $LIB_COUNT 个文件"
 else
-    warn "lib/ 源找不到（../lib 和 sysroot 都没有），板子 ./tennis 跑不起来"
+    warn "libs 源找不到（dora/libs 和 sysroot 都没有），板子上 ./tennis 跑不起来"
 fi
 
 # 复制 AP 热点 + wlan1 STA 配置脚本（首次上板手动跑一次：
-#   /root/dora-riscv64/init_ap_web.sh
+#   /root/AKA-00/init_ap_web.sh
 # 它会写 /etc/hostapd.conf + /etc/udhcpd.conf + /etc/init.d/S98apstart / S99webstart）
 if [ -f "$SCRIPT_DIR/init_ap_web.sh" ]; then
     cp "$SCRIPT_DIR/init_ap_web.sh" "$PACKAGE_DIR/init_ap_web.sh"
@@ -712,6 +730,22 @@ else
     WEB_IMAGE_INPUT=""
 fi
 
+# demo-node 可选：没编译出来就不接，留 web-server 的 demo_cmd 输出没有 sink。
+# 实际只要 demo-node 在 cargo build 列表里就一定会编出来；这里做防御性
+# 检查，万一 build 失败 deploy 包也至少能起来（只是 demo 功能缺失）。
+if [ -f "$PACKAGE_DIR/bin/demo-node" ]; then
+    DEMO_NODE="  - id: demo-node
+    path: bin/demo-node
+    inputs:
+      demo_cmd: web-server/demo_cmd
+    outputs:
+      - demo_status"
+    WEB_DEMO_CMD_OUTPUT="      - demo_cmd"
+else
+    DEMO_NODE=""
+    WEB_DEMO_CMD_OUTPUT=""
+fi
+
 cat > "$PACKAGE_DIR/etc/dataflow.yml" << EOF
 # dora 数据流 — SG2002 板子部署版
 # 由 build_release.sh 自动生成
@@ -732,6 +766,7 @@ ${CAMERA_NODE}
     outputs:
       - arm_status
 
+${DEMO_NODE}
   - id: state-node
     path: bin/state-node
     inputs:
@@ -751,6 +786,7 @@ ${WEB_IMAGE_INPUT:+      image: camera/image}
       - control
       - motor_cmd
       - arm_cmd
+${WEB_DEMO_CMD_OUTPUT}
 EOF
 ok "etc/dataflow.yml (板子适配版)"
 
@@ -761,7 +797,7 @@ cat > "$PACKAGE_DIR/init.sh" << 'INITEOF'
 # dora 机器人系统 — SG2002 板子启动脚本
 #
 # 用法:
-#   cd /root/dora-riscv64 && ./init.sh
+#   cd /root/AKA-00 && ./init.sh
 #   DORA_HOME=/opt/dora ./init.sh     # 自定义路径
 #
 # 停止: ./stop.sh
@@ -831,7 +867,7 @@ fi
 echo ""
 echo "Verifying binaries..."
 MISSING=""
-for bin in web-server motor-bridge arm-bridge state-node; do
+for bin in web-server motor-bridge arm-bridge demo-node state-node; do
     if [ -f "$DORA_HOME/bin/$bin" ]; then
         echo "  OK  bin/$bin"
     else
@@ -854,12 +890,7 @@ if [ -n "$MISSING" ]; then
     exit 1
 fi
 
-# ── 3. 设置库路径 (如果有 OpenCV .so) ──
-if [ -d "$DORA_HOME/lib" ]; then
-    export LD_LIBRARY_PATH="$DORA_HOME/lib:$DORA_HOME/lib/opencv:${LD_LIBRARY_PATH:-}"
-fi
-
-# ── 4. 启动 dora 运行时 ──
+# ── 3. 启动 dora 运行时 ──
 echo ""
 echo "Starting dora runtime..."
 
@@ -876,7 +907,7 @@ else
     sleep 2
 fi
 
-# ── 5. 启动数据流 ──
+# ── 4. 启动数据流 ──
 echo ""
 echo "Launching dataflow..."
 
@@ -928,13 +959,19 @@ cat > "$PACKAGE_DIR/stop.sh" << 'STOPEOF'
 # =============================================================================
 # dora 机器人系统 — 停止脚本
 #
-# 注意：init.sh 用的是 `dora run dataflow.yml`（前台 coordinator），
-# dora-rs v0.5 中 `dora run` 不会向 daemon 注册 flow，
-# 所以 `dora stop` / `dora destroy` 是 no-op，主要靠下面的 pgrep+kill 兜底。
+# 策略：
+#   1. 按可执行名 (pgrep -x) 匹配 + 同步杀 process group (kill -- -PGID)，
+#      处理 dora run / coordinator fork 出来的同 pgid 子节点，
+#      避免 dora daemon / dora run 死了但子节点变孤儿继续跑。
+#   2. SIGTERM (3s grace) → SIGKILL (杀剩下的) → watch-kill 5s (防 respawn)。
+#   3. 释放 web 端口 + 清 /dev/shm 残留。
+#
+# 注意：dora-rs v0.5 中 `dora run dataflow.yml` 不会向 daemon 注册 flow，
+# 所以 `dora stop` / `dora destroy` 是 no-op，主要靠下面 pgrep+kill 兜底。
 # =============================================================================
 
-# 故意不开 `set -e`：下面的 kill 调用在权限不足或进程已死时会返回非 0，
-# `set -e` 会让脚本在第一轮 SIGTERM 后立即 abort，永远到不了 SIGKILL。
+# 故意不开 `set -e`：下面的 kill 在权限不足或进程已死时返回非 0，
+# `set -e` 会让脚本在第一轮 SIGTERM 后立即 abort，永远到不了 SIGKILL / 监杀。
 # 每个 kill 都单独包了 `|| true`，整体遇错继续。
 
 DORA_HOME="${DORA_HOME:-$(cd "$(dirname "$0")" && pwd)}"
@@ -952,41 +989,57 @@ else
 fi
 
 # 进程名清单（精确匹配 basename，不用 -f 避免误伤 grep/cat/vim）。
-# 注意：dora 启动器（dora run / dora up）的可执行文件名就是 dora，
-# dora-daemon / dora-coordinator 是它的子命令名，不是独立进程名。
-NODES="dora camera-node web-server motor-bridge arm-bridge state-node"
+# dora 启动器 (dora run / dora up / dora coordinator / dora daemon)
+# 可执行文件名都是 dora，子命令名是命令行参数、不在 comm 里。
+NAMES="dora camera-node web-server motor-bridge arm-bridge demo-node state-node"
 
-# 第一轮 SIGTERM：让 dora node 收 Event::Stop 后优雅退出（刷 buffer、关串口）。
-# dora 父进程先杀（它是 coordinator，子节点都是它 fork 的，杀父后子变孤儿）。
-echo "Sending SIGTERM..."
-for pid in $(pgrep -x "dora" 2>/dev/null); do
-    [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
-done
-sleep 1   # 等子节点收 Event::Stop
-for name in camera-node web-server motor-bridge arm-bridge state-node; do
-    pgrep -x "$name" 2>/dev/null | while read pid; do
-        [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+# 内部：杀 pid 及其同 process group 的所有进程。
+# 拿不到 pgid（进程已死）时静默跳过。
+_kill_pgroup() {
+    pid="$1"
+    sig="$2"
+    pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' \r')
+    if [ -n "$pgid" ] && [ "$pgid" -gt 0 ] 2>/dev/null; then
+        kill "$sig" "-$pgid" 2>/dev/null || true
+    fi
+}
+
+# 第一轮 SIGTERM：让 dora node 收 Event::Stop 后 graceful 退出（刷 buffer、关串口）。
+# 同时杀 group：dora run / coordinator 把子节点 fork 到自己的 pgid，
+# 单杀父进程后 group 内剩余进程会变孤儿继续跑。
+echo "  Phase 1: SIGTERM (3s grace)..."
+for name in $NAMES; do
+    for pid in $(pgrep -x "$name" 2>/dev/null); do
+        kill -TERM "$pid" 2>/dev/null || true
+        _kill_pgroup "$pid" -TERM
     done
 done
-
-# 给节点 3 秒清理时间（dora node 收 Stop → 刷 buffer → 关闭 serial/socket）
 sleep 3
 
-# 第二轮 SIGKILL：还有存活的强制结束
-SURVIVORS=""
-for name in $NODES; do
+# 第二轮 SIGKILL：哪些还活着就强杀。
+echo "  Phase 2: SIGKILL survivors..."
+KILLED=""
+for name in $NAMES; do
     for pid in $(pgrep -x "$name" 2>/dev/null); do
-        echo "  SIGKILL $name (pid=$pid)"
+        echo "    SIGKILL $name (pid=$pid)"
         kill -9 "$pid" 2>/dev/null || true
-        SURVIVORS="$SURVIVORS $name/$pid"
+        _kill_pgroup "$pid" -9
+        KILLED="$KILLED $name/$pid"
     done
 done
+sleep 1
 
-# 兜底再扫一次：刚才漏的、或新起来的（罕见）
-sleep 0.3
-for name in $NODES; do
-    for pid in $(pgrep -x "$name" 2>/dev/null); do
-        echo "  warning: $name (pid=$pid) still alive after SIGKILL"
+# 第三轮 监杀：5 秒内任何新出现的 PID 都再 SIGKILL 一次。
+# 兜底 buildroot 的 /etc/inittab respawn 或其他脚本拉起。
+echo "  Phase 3: watch-kill (respawn guard)..."
+for i in 1 2 3 4 5; do
+    sleep 1
+    for name in $NAMES; do
+        for pid in $(pgrep -x "$name" 2>/dev/null); do
+            echo "    [watch] SIGKILL $name (pid=$pid)"
+            kill -9 "$pid" 2>/dev/null || true
+            _kill_pgroup "$pid" -9
+        done
     done
 done
 
@@ -1002,8 +1055,8 @@ if [ -d /dev/shm ]; then
     rm -f /dev/shm/zenoh-* 2>/dev/null || true
 fi
 
-if [ -n "$SURVIVORS" ]; then
-    echo "Done (force-killed:$SURVIVORS)"
+if [ -n "$KILLED" ]; then
+    echo "Done (force-killed:$KILLED)"
 else
     echo "Done"
 fi
@@ -1029,8 +1082,8 @@ SG2002 / CV1812 板子部署包。
 ```bash
 # 1. 解压
 cd /root
-tar xzf dora-riscv64.tar.gz
-cd dora-riscv64
+tar xzf AKA-00.tar.gz
+cd AKA-00
 
 # 2. 配置 (如需修改)
 vi etc/config.toml
@@ -1065,10 +1118,10 @@ cat > /etc/init.d/S99dora << 'EOF'
 case "$1" in
   start)
     echo "Starting dora..."
-    cd /root/dora-riscv64 && ./init.sh &
+    cd /root/AKA-00 && ./init.sh &
     ;;
   stop)
-    cd /root/dora-riscv64 && ./stop.sh
+    cd /root/AKA-00 && ./stop.sh
     ;;
   *)
     echo "Usage: $0 {start|stop}"
@@ -1141,16 +1194,16 @@ if [ -n "$DEPLOY_HOST" ]; then
         cd /root
 
         # 停止已有服务
-        if [ -d dora-riscv64 ]; then
-            cd dora-riscv64 && ./stop.sh 2>/dev/null || true
+        if [ -d AKA-00 ]; then
+            cd AKA-00 && ./stop.sh 2>/dev/null || true
             cd /root
         fi
 
         # 解压新版本
-        rm -rf dora-riscv64.old
-        [ -d dora-riscv64 ] && mv dora-riscv64 dora-riscv64.old
-        tar xzf dora-riscv64.tar.gz
-        cd dora-riscv64
+        rm -rf AKA-00.old
+        [ -d AKA-00 ] && mv AKA-00 AKA-00.old
+        tar xzf AKA-00.tar.gz
+        cd AKA-00
         chmod +x bin/* init.sh stop.sh 2>/dev/null || true
 
         # 启动

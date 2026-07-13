@@ -2,13 +2,14 @@
 //!
 //! 对应 Python 项目 `app/services/camera_service.py` 的职责。
 
-use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use dora_node_api::DoraNode;
 use eyre::Context;
 use tokio::sync::{watch, Mutex};
+
+use super::dora_send;
 
 /// 摄像头服务：单例，被 routes 和 dora 事件循环共享
 pub struct CameraService {
@@ -64,8 +65,8 @@ impl CameraService {
             return Ok(()); // 已开启
         }
 
-        let mut node = self.node.lock().await;
-        node.send_output_bytes("control".into(), BTreeMap::new(), 5, b"start")
+        dora_send::send_output(&self.node, "control", b"start")
+            .await
             .wrap_err("send dora start")?;
 
         log::info!("[camera-service] 📷 on");
@@ -78,8 +79,8 @@ impl CameraService {
             return Ok(()); // 已关闭
         }
 
-        let mut node = self.node.lock().await;
-        node.send_output_bytes("control".into(), BTreeMap::new(), 4, b"stop")
+        dora_send::send_output(&self.node, "control", b"stop")
+            .await
             .wrap_err("send dora stop")?;
 
         log::info!("[camera-service] ⏸  off");

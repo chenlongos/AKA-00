@@ -4,8 +4,10 @@
 //! / update_arm_angles / preview_arm_angle / _do_grab / _do_release）。
 //!
 //! 关键设计：
-//! - arm_angles.json 的所有权在 web-server（启动时 cwd = $DORA_HOME，文件就在
-//!   cwd/arm_angles.json）。front-end 通过 /api/arm/angles 读写它。
+//! - arm_angles.json 的所有权在 web-server。文件位置：
+//!   - 优先级：$ARM_ANGLES_PATH 环境变量（dev.sh / init.sh 显式设） > cwd/arm_angles.json
+//!   - 真源是 dora/arm_angles.json（本地开发）或 build_release.sh 拷到 $DORA_HOME/arm_angles.json（板子）。
+//! - front-end 通过 /api/arm/angles 读写同一路径，所以 dev/init 看到的所有改动落回真源。
 //! - 高层动作 grab / release 由本服务读 arm_angles.json 后展开成 set_angle 序列
 //!   再下发，避免 arm-bridge 也去读 JSON（职责单一）。
 //! - 展开逻辑直接照搬 `src/arm_control/zl/zp10s/uart_control.py:62-90` 的
@@ -19,6 +21,8 @@ use std::time::Duration;
 use dora_node_api::DoraNode;
 use serde::Serialize;
 use tokio::sync::Mutex as TokioMutex;
+
+use super::dora_send;
 
 /// 机械臂状态（与 arm-bridge 上报的 ArmStatus 字段名对齐）
 #[derive(Debug, Clone, Serialize, Default)]
@@ -257,12 +261,9 @@ impl ArmService {
 
     async fn send(&self, payload: &serde_json::Value) {
         let bytes = serde_json::to_vec(payload).unwrap_or_default();
-        let mut node = self.node.lock().await;
-        let _ = node.send_output_bytes(
-            "arm_cmd".into(),
-            BTreeMap::new(),
-            bytes.len(),
-            &bytes,
-        );
+        // 2s 超时；grab / release 序列里这调用频率低（一步一调），超时也不致命。
+        if let Err(e) = dora_send::send_output(&self.node, "arm_cmd", &bytes).await {
+            log::warn!("[arm-svc] send failed: {e}");
+        }
     }
 }

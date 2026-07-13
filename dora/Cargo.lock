@@ -860,6 +860,7 @@ dependencies = [
  "dora-node-api",
  "env_logger",
  "eyre",
+ "libc",
  "log",
  "serde",
  "serde_json",

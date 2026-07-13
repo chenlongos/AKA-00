@@ -26,7 +26,7 @@ def _find_current_demo():
 
 
 def _list_all_demos():
-    """列出 demo/ 下所有包含 init.sh 的目录名"""
+    """列出 demo/ 下所有包含 init.sh 的目录信息（与 dora/web-server/services/demo.rs 对齐）"""
     base_dir = _get_base_dir()
     if not os.path.isdir(base_dir):
         return []
@@ -34,13 +34,17 @@ def _list_all_demos():
     for name in sorted(os.listdir(base_dir)):
         demo_dir = os.path.join(base_dir, name)
         if os.path.isdir(demo_dir) and os.path.isfile(os.path.join(demo_dir, "init.sh")):
-            demos.append(name)
+            demos.append({
+                "name": name,
+                "path": demo_dir,
+                "kind": "binary",  # python mode 只认 init.sh，所以全是 binary
+            })
     return demos
 
 
 @demo_bp.route("/list", methods=["GET"])
 def demo_list():
-    """返回所有可用的本地 demo 目录"""
+    """返回所有可用的本地 demo 目录（结构与 Rust web-server 对齐：[{name, path, kind}, ...]）"""
     return jsonify({"demos": _list_all_demos()})
 
 

@@ -49,32 +49,44 @@ int main() {
             char* id_ptr = nullptr;
             size_t id_len = 0;
             read_dora_input_id(event, &id_ptr, &id_len);
+            // dora-node-api-c 在 InputClosed 时回 (null, 0)；std::string(nullptr, n) 是 UB，
+            // 即使 id_len==0 在某些 libstdc++ 也走 deref 分支。一行护栏：
+            if (!id_ptr) { free_dora_event(event); continue; }
             std::string id(id_ptr, id_len);
 
             if (id == "control") {
                 char* data_ptr = nullptr;
                 size_t data_len = 0;
                 read_dora_input_data(event, &data_ptr, &data_len);
+                // 数据可能是 Null arrow (上游某节点发了空 tick)。空指针构造 string = UB，
+                // 之前实际看到的 segfault 就是这里没护栏；现在 nullptr 当空命令处理。
+                if (!data_ptr) {
+                    free_dora_event(event);
+                    continue;
+                }
                 std::string cmd(data_ptr, data_len);
 
                 if (cmd == "start") {
                     if (!cam.good()) {
-                        // 首次打开设备
+                        // 首次打开设备（或刚关掉后又开）
                         if (!cam.open(nullptr, target_w, target_h)) {
                             CAM_ERROR("Failed to open camera");
                             free_dora_event(event);
                             continue;
                         }
                     } else {
-                        // 设备已打开，只需恢复流（避免 reopen 开销）
+                        // 设备已打开，只恢复流（极少见，因为 stop 现在会真关掉）
                         cam.start_stream();
                     }
                     capturing = true;
                     CAM_INFO("▶  capture started");
                 } else if (cmd == "stop") {
                     capturing = false;
-                    cam.stop_stream();  // 只停流，保留 fd 和 buffer
-                    CAM_INFO("⏸  capture stopped");
+                    // 必须真正释放 /dev/videoX —— demo 模式（tennis / yolo）会自己
+                    // open 摄像头。如果只 STREAMOFF 保留 fd，那些进程就抢不到。
+                    // USB autosuspend 也会因 fd 持有而无法触发（更耗电）。
+                    cam.close();
+                    CAM_INFO("⏸  capture stopped (device released)");
                 }
                 free_dora_event(event);
                 continue;

@@ -2,12 +2,13 @@
 //!
 //! 对应 `app/services/control_service.py` 的职责。
 
-use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use dora_node_api::DoraNode;
 use serde::Serialize;
 use tokio::sync::Mutex as TokioMutex;
+
+use super::dora_send;
 
 /// 电机实时状态（对应 Python StateCollector 的 get_status()）
 #[derive(Debug, Clone, Serialize)]
@@ -97,12 +98,10 @@ impl MotorService {
 
     async fn send_control(&self, data: &serde_json::Value) {
         let bytes = serde_json::to_vec(data).unwrap_or_default();
-        let mut node = self.node.lock().await;
-        let _ = node.send_output_bytes(
-            "motor_cmd".into(),
-            BTreeMap::new(),
-            bytes.len(),
-            &bytes,
-        );
+        // 之前 fire-and-forget：daemon 挂了就永远死锁在 mutex 里。
+        // 现在走 dora_send helper，2s 超时；错误只 log，不阻塞其它调用。
+        if let Err(e) = dora_send::send_output(&self.node, "motor_cmd", &bytes).await {
+            log::warn!("[motor-svc] send_control failed: {e}");
+        }
     }
 }

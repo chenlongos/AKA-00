@@ -2,22 +2,27 @@
 //!
 //! 对应 Python `app/routes/demo.py::demo_init` 的 subprocess 逻辑：
 //!   - spawn demo/<name>/init.sh 作为子进程
-//!   - start_new_session=true 等价：process_group(0) 让 demo 独立进程组
-//!   - stop 时按 PID 发 SIGKILL，等 3s
-//!   - 子进程退出后清状态（reaper task）
+//!   - process_group(0) 让 demo 独立进程组（优雅信号传播）
+//!   - stop 时按 pgid 发 SIGTERM（让 worker 子进程有时间清理），等 2s，升级 SIGKILL
+//!   - 子进程退出后清状态（reaper task 用 unique 持有 Child，无 mutex 共享）
 //!
 //! demo_cmd JSON 协议：
 //!   {"command":"start","name":"tennis"}   启动 demo/tennis/init.sh
-//!   {"command":"stop"}                     停止当前 demo
+//!   {"command":"stop"}                     停止当前 demo（按 pgid）
 //!   {"command":"status"}                   （调试）log 当前状态
 //!
 //! 状态通过 demo_status output 发给 web-server / state-node。
+//!
+//! 历史 bug:
+//!   - reaper task 持锁 await child.wait()；stop task 也需同一锁调 start_kill。
+//!     → 互相等死，stop 永远发不出 SIGKILL。
+//!   - SIGKILL 单杀 PID 不带 pgid：tennis 若 fork NPU worker，worker 变孤儿。
+//!   现在 Child 由 reaper 独占，RunningInfo 只存 name + pid，stop 用 libc+pgid。
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use arrow::array::AsArray;
 use dora_node_api::{self, DoraNode, Event};
@@ -25,45 +30,46 @@ use dora_node_api::futures::StreamExt;
 use eyre::{Context, Result};
 use serde::Deserialize;
 use serde_json::json;
-use tokio::process::{Child, Command};
+use tokio::process::Command;
 use tokio::sync::Mutex as TokioMutex;
 
-#[derive(Debug, Deserialize)]
-#[serde(tag = "command")]
-enum DemoCmd {
-    #[serde(rename = "start")]
-    Start { name: String },
-    #[serde(rename = "stop")]
-    Stop,
-    #[serde(rename = "status")]
-    Status,
-}
-
-struct RunningDemo {
+/// 当前在跑的 demo 运行时元数据。
+///
+/// ⚠ 不持有 `Child`。Child 由 reaper task 独占（unique 拥有），
+/// 这样 stop 路径不需要 Child 上的 `&mut self`，可用 pid + libc
+/// 直接发信号，避免 reaper / stop 互相等锁。
+struct RunningInfo {
     name: String,
-    child: Arc<TokioMutex<Child>>,
+    pid: u32,
 }
 
 struct AppState {
     node: Arc<TokioMutex<DoraNode>>,
-    running: Arc<Mutex<Option<RunningDemo>>>,
+    running: Arc<Mutex<Option<RunningInfo>>>,
     demo_base: PathBuf,
 }
 
+/// 按 pgid（首选）或 pid 发送信号。pgid 优先能保证整个 demo 子进程树
+/// 收到信号——tennis 可能 fork CVitek NPU worker，单杀 PID 会留孤儿。
+unsafe fn kill_tree(pid: u32, sig: i32) {
+    if pid == 0 {
+        return;
+    }
+    let pid_t = pid as libc::pid_t;
+    let pgid = libc::getpgid(pid_t);
+    if pgid > 0 {
+        // 负号 send to process group
+        libc::kill(-pgid, sig);
+    } else {
+        libc::kill(pid_t, sig);
+    }
+}
+
 impl AppState {
-    #[allow(dead_code)]
-    async fn publish_status(&self) {
-        let snap = {
-            let g = self.running.lock().unwrap();
-            match g.as_ref() {
-                Some(r) => {
-                    let pid = r.child.try_lock().ok().and_then(|mut g| g.id());
-                    json!({"running": true, "name": r.name, "pid": pid})
-                }
-                None => json!({"running": false, "name": serde_json::Value::Null, "pid": serde_json::Value::Null}),
-            }
-        };
-        let bytes = serde_json::to_vec(&snap).unwrap_or_default();
+    /// 发布 demo 状态到 dora `demo_status` output。
+    /// 错误只 log，不抛——controller 网络抖动不应让 demo-node 崩。
+    async fn publish_status(&self, payload: serde_json::Value) {
+        let bytes = serde_json::to_vec(&payload).unwrap_or_default();
         let mut n = self.node.lock().await;
         let _ = n.send_output_bytes(
             "demo_status".into(),
@@ -102,50 +108,45 @@ impl AppState {
 
         let mut cmd = Command::new(&init_script);
         cmd.current_dir(&demo_dir)
-            .process_group(0)
+            .process_group(0)  // 自己开 pgid，init.sh exec tennis 后继承
             .kill_on_drop(true)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        let child = match cmd.spawn() {
+        let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
                 log::warn!("[demo-node] spawn {}: {e}", init_script.display());
                 return;
             }
         };
-        let pid = child.id();
-        log::info!("[demo-node] started '{name}' pid={pid:?}");
+        // 等 cmd.spawn 后 pid 一定可读（API 保证）——不 .unwrap()，显式 fallback 0
+        let pid = child.id().unwrap_or(0);
+        log::info!("[demo-node] started '{name}' pid={pid}");
 
-        let child_arc = Arc::new(TokioMutex::new(child));
-
-        // reaper：等子进程退出清状态
-        let running_for_reaper = self.running.clone();
-        let node_for_reaper = self.node.clone();
+        // reaper：独占 Child，等它退出后清状态 + 发 idle status。
+        // 用 `&mut` 直传不通过 Arc/Mutex，stop 路径压根不碰这个 Child。
+        let running = self.running.clone();
+        let node = self.node.clone();
         let name_for_reaper = name.clone();
-        let child_for_reaper = child_arc.clone();
         tokio::spawn(async move {
-            let status = {
-                let mut g = child_for_reaper.lock().await;
-                g.wait().await
-            };
+            let status = child.wait().await;
             log::info!("[demo-node] pid exited: name={name_for_reaper} status={status:?}");
             {
-                let mut g = running_for_reaper.lock().unwrap();
+                let mut g = running.lock().unwrap();
                 if let Some(r) = g.as_ref() {
                     if r.name == name_for_reaper {
                         *g = None;
                     }
                 }
             }
-            // 发布 idle status
-            let bytes = serde_json::to_vec(&json!({
+            let payload = json!({
                 "running": false,
                 "name": serde_json::Value::Null,
                 "pid": serde_json::Value::Null,
-            }))
-            .unwrap_or_default();
-            let mut n = node_for_reaper.lock().await;
+            });
+            let bytes = serde_json::to_vec(&payload).unwrap_or_default();
+            let mut n = node.lock().await;
             let _ = n.send_output_bytes(
                 "demo_status".into(),
                 BTreeMap::new(),
@@ -154,59 +155,54 @@ impl AppState {
             );
         });
 
-        *self.running.lock().unwrap() = Some(RunningDemo {
+        *self.running.lock().unwrap() = Some(RunningInfo {
             name: name.clone(),
-            child: child_arc,
+            pid,
         });
 
-        // 发 running status
-        let bytes = serde_json::to_vec(&json!({
+        // 发 running status（前端会收到并清掉 loading 状态）
+        let payload = json!({
             "running": true,
             "name": name,
             "pid": pid,
-        }))
-        .unwrap_or_default();
-        let mut n = self.node.lock().await;
-        let _ = n.send_output_bytes(
-            "demo_status".into(),
-            BTreeMap::new(),
-            bytes.len(),
-            &bytes,
-        );
+        });
+        self.publish_status(payload).await;
     }
 
     async fn stop(&self) {
+        // take：原子地把 running 清出来。后续 stop 路径不持锁
         let prev = {
             let mut g = self.running.lock().unwrap();
             g.take()
         };
         let Some(r) = prev else {
             log::info!("[demo-node] stop called but no demo running");
-            // 也发一条 idle status
-            let bytes = serde_json::to_vec(&json!({
+            // 也发一条 idle status，把前端"还在跑"的状态同步回真实
+            self.publish_status(json!({
                 "running": false,
                 "name": serde_json::Value::Null,
                 "pid": serde_json::Value::Null,
-            }))
-            .unwrap_or_default();
-            let mut n = self.node.lock().await;
-            let _ = n.send_output_bytes(
-                "demo_status".into(),
-                BTreeMap::new(),
-                bytes.len(),
-                &bytes,
-            );
+            })).await;
             return;
         };
-        let pid = r.child.try_lock().ok().and_then(|mut g| g.id());
-        log::info!("[demo-node] stopping '{}' pid={pid:?}", r.name);
+        log::info!("[demo-node] stopping '{}' pid={}", r.name, r.pid);
 
-        // 发 SIGKILL + 等 3s（想 SIGTERM 先 → 等 → SIGKILL 用 libc，先简化）
-        let child = r.child.clone();
+        // 用 libc 直接发信号——不需要 Child，绕开和 reaper 的锁竞争。
+        // tokio Child::start_kill 在 stop 路径死锁是因为 reaper 持锁，
+        // 现在根本不走 Child。
+        //
+        // SIGTERM 先发：让 worker 子进程（NPU 之类）有机会清理。
+        // 200ms 后升级 SIGKILL。reaper 看见 child 退出后会发 idle。
+        let pid = r.pid;
+        unsafe { kill_tree(pid, libc::SIGTERM); }
         tokio::spawn(async move {
-            let mut g = child.lock().await;
-            let _ = g.start_kill();
-            let _ = tokio::time::timeout(Duration::from_secs(3), g.wait()).await;
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            unsafe {
+                // 检查仍活就给 SIGKILL。kill(pid, 0) 是无副作用存在性查询。
+                if pid > 0 && libc::kill(pid as libc::pid_t, 0) == 0 {
+                    kill_tree(pid, libc::SIGKILL);
+                }
+            }
         });
     }
 
@@ -214,13 +210,23 @@ impl AppState {
         let g = self.running.lock().unwrap();
         match g.as_ref() {
             Some(r) => log::info!(
-                "[demo-node] status: running=true name={} pid={:?}",
-                r.name,
-                r.child.try_lock().ok().and_then(|g| g.id()),
+                "[demo-node] status: running=true name={} pid={}",
+                r.name, r.pid,
             ),
             None => log::info!("[demo-node] status: running=false"),
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "command")]
+enum DemoCmd {
+    #[serde(rename = "start")]
+    Start { name: String },
+    #[serde(rename = "stop")]
+    Stop,
+    #[serde(rename = "status")]
+    Status,
 }
 
 fn main() -> Result<()> {

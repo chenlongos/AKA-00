@@ -48,6 +48,7 @@ private:
     void _init_buffers();
     void _start_stream();
     void _stop_stream();
+    void _cleanup_buffers();    // 释放已 mmap 的 buffer + delete[] _bufs（重置 _bufs/_n_bufs），安全可重复调用
 #else
     // ── OpenCV 成员 ──
     void* _cap = nullptr;   // cv::VideoCapture* (不暴露 OpenCV 头文件)

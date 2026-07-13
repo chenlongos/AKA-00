@@ -11,17 +11,18 @@ const FPS_OPTIONS = [30, 20, 10];
 const FPS_LABELS = ["高清", "均衡", "省流"];
 
 const CameraBar = ({
-    scalePx, cameraOn, fpsIndex, onStatusChange, onFpsChange, syncKey,
+    scalePx, cameraOn, fpsIndex, frameReady, onStatusChange, onFpsChange, syncKey,
 }: {
     scalePx: (px: number) => string;
     cameraOn: boolean;
     fpsIndex: number;
+    frameReady?: boolean;
     onStatusChange: (on: boolean) => void;
     onFpsChange: () => void;
     syncKey: number;
 }) => (
     <div style={{display: "flex", alignItems: "center", gap: scalePx(6)}}>
-        <CameraToggle key={syncKey} onStatusChange={onStatusChange} />
+        <CameraToggle key={syncKey} onStatusChange={onStatusChange} frameReady={frameReady} />
         {cameraOn && (
             <button onClick={onFpsChange} style={{
                 background: fpsIndex > 0 ? "var(--color-success)" : "var(--color-bg-elevated)",
@@ -44,6 +45,9 @@ const RCDemoPage = () => {
     const [rotation, setRotation] = useState(0);
     const [cameraOn, setCameraOn] = useState(false);
     const [cameraSyncKey, setCameraSyncKey] = useState(0);
+    // MJPEG <img> 首帧到达信号：传给 CameraToggle 让 loading spinner 持续到
+    // camera-node 真正有 JPEG 推过来，不只是 HTTP 成功。
+    const [frameReady, setFrameReady] = useState(false);
     const [fpsIndex, setFpsIndex] = useState(0);
     const [wsConnected, setWsConnected] = useState(false);
     const [isLandscape, setIsLandscape] = useState(() => window.innerWidth > window.innerHeight);
@@ -74,6 +78,12 @@ const RCDemoPage = () => {
         window.addEventListener("resize", check); window.addEventListener("orientationchange", check);
         return () => { window.removeEventListener("resize", check); window.removeEventListener("orientationchange", check); };
     }, []);
+
+    // 每次摄像头重新打开，把 frameReady 清成 false 等首帧；
+    // img.onLoad 把它拉到 true → CameraToggle 据此关 loading。
+    useEffect(() => {
+        if (cameraOn) setFrameReady(false);
+    }, [cameraOn]);
 
     const sendCommand = useCallback(() => {
         const t = Math.abs(throttleRef.current) < 3 ? 0 : throttleRef.current;
@@ -277,6 +287,7 @@ const RCDemoPage = () => {
                 <div style={{position: "absolute", inset: 0}}>
                     {cameraOn ? (
                         <img src={`/api/camera/stream?fps=${FPS_OPTIONS[fpsIndex]}`}
+                             onLoad={() => setFrameReady(true)}
                              style={{width: "100%", height: "100%", objectFit: "cover", display: "block"}} alt="" />
                     ) : (
                         <div
@@ -318,7 +329,7 @@ const RCDemoPage = () => {
                 <div style={{position: "absolute", right: joySide, bottom: joyAreaBottom + navBarOffset + Math.round(vh * 0.04),
                     zIndex: 2, display: "flex", flexDirection: "column", alignItems: "center", gap: scalePx(6)}}>
                     <div style={{display: "flex", alignItems: "center", gap: scalePx(6), alignSelf: "flex-end"}}>
-                        <CameraToggle key={cameraSyncKey} onStatusChange={setCameraOn} />
+                        <CameraToggle key={cameraSyncKey} onStatusChange={setCameraOn} frameReady={frameReady} />
                         {cameraOn && (
                             <button onClick={() => setFpsIndex(i => (i + 1) % 3)} style={{
                                 background: fpsIndex > 0 ? "var(--color-success)" : "rgba(255,255,255,0.15)",
@@ -391,7 +402,7 @@ const RCDemoPage = () => {
             <div style={{...S.col, gap, alignItems: "center", width: pVideoW}}>
                 {/* 顶部栏 */}
                 <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", height: topH, marginTop: "5px"}}>
-                    <CameraBar scalePx={scalePx} cameraOn={cameraOn} fpsIndex={fpsIndex} onStatusChange={setCameraOn} onFpsChange={() => setFpsIndex(i => (i + 1) % 3)} syncKey={cameraSyncKey} />
+                    <CameraBar scalePx={scalePx} cameraOn={cameraOn} fpsIndex={fpsIndex} frameReady={frameReady} onStatusChange={setCameraOn} onFpsChange={() => setFpsIndex(i => (i + 1) % 3)} syncKey={cameraSyncKey} />
                     <div style={{display: "flex", gap: scalePx(8), fontSize: scalePx(10), whiteSpace: "nowrap", alignItems: "center"}}>
                         <FullscreenButton />
                         <span>左 <b style={S.success}>{leftSpeed >= 0 ? "+" : ""}{leftSpeed.toFixed(1)}</b></span>
@@ -404,6 +415,7 @@ const RCDemoPage = () => {
                 <div style={{borderRadius: "var(--radius-md)", overflow: "hidden", border: "2px solid var(--color-border)", flexShrink: 0}}>
                     {cameraOn ? (
                         <img src={`/api/camera/stream?fps=${FPS_OPTIONS[fpsIndex]}`}
+                             onLoad={() => setFrameReady(true)}
                              style={{width: pVideoW, height: pVideoH, objectFit: "cover", background: "#000", display: "block"}} alt="" />
                     ) : (
                         <div style={{width: pVideoW, height: pVideoH, background: "var(--color-bg-card)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-text-muted)", fontSize: scalePx(14)}}>

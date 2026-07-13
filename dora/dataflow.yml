@@ -1,6 +1,17 @@
+# dora dataflow — 本地 host 模式
+#
+# 注意：本 dataflow 没有 `build:` 字段——dev.sh / init.sh 在调 dora run 之前
+# 已经把所有 binary 串行建好了。原先 5 个并行 `cargo build -p X --release` 让
+# 同一 Cargo workspace 跑多个 cargo，会争 target/.rustc_info.json 锁与 linker，
+# 偶发 "Text file busy" / 残留 .rmeta。串行交给外层构建更稳。
+#
+# path 相对当前 cwd。dev.sh 在 dora/ 启动 dora run，所以 target/release/* 在此可达。
+# camera-node 的 path 是 dora/camera-node/camera-node（make 产出位置）。
+# dora-c-ffi (staticlib) 已被 dev.sh 预先 build_release → target/release/libdora_c_ffi.a，
+# camera-node/Makefile 会去链它。
+
 nodes:
   - id: camera
-    build: make -C camera-node
     path: camera-node/camera-node
     inputs:
       tick: dora/timer/millis/42
@@ -9,7 +20,6 @@ nodes:
       - image
 
   - id: motor-bridge
-    build: cargo build -p motor-bridge --release
     path: target/release/motor-bridge
     inputs:
       motor_cmd: web-server/motor_cmd
@@ -17,7 +27,6 @@ nodes:
       - motor_status
 
   - id: arm-bridge
-    build: cargo build -p arm-bridge --release
     path: target/release/arm-bridge
     inputs:
       arm_cmd: web-server/arm_cmd
@@ -25,7 +34,6 @@ nodes:
       - arm_status
 
   - id: state-node
-    build: cargo build -p state-node --release
     path: target/release/state-node
     inputs:
       motor_status: motor-bridge/motor_status
@@ -36,7 +44,6 @@ nodes:
       - robot_state
 
   - id: demo-node
-    build: cargo build -p demo-node --release
     path: target/release/demo-node
     inputs:
       demo_cmd: web-server/demo_cmd
@@ -44,7 +51,6 @@ nodes:
       - demo_status
 
   - id: web-server
-    build: cargo build -p web-server --release
     path: target/release/web-server
     inputs:
       image: camera/image
