@@ -642,13 +642,12 @@ info "复制静态文件..."
 cp -r "$SCRIPT_DIR/web-server/static" "$PACKAGE_DIR/"
 ok "static/"
 
-# 复制机械臂角度配置文件（真源从 dora/arm_angles.json，不再是 repo 根的旧文件）
-if [ -f "$SCRIPT_DIR/arm_angles.json" ]; then
-    cp "$SCRIPT_DIR/arm_angles.json" "$PACKAGE_DIR/arm_angles.json"
-    ok "arm_angles.json"
-else
-    warn "arm_angles.json 不存在（arm 服务会回退到 Rust 内置默认值）"
-fi
+# 复制机械臂角度配置文件（arm_angles.json 一定存在）。
+# 部署后路径：$DORA_HOME/dora/arm_angles.json ——dev/板子共用同一相对语义，
+# 板子 web-server 写回也落在这同一文件。
+mkdir -p "$PACKAGE_DIR/dora"
+cp "$SCRIPT_DIR/arm_angles.json" "$PACKAGE_DIR/dora/arm_angles.json"
+ok "dora/arm_angles.json"
 
 # 复制 demo 目录（demo-node 通过 DEMO_BASE_DIR=$DORA_HOME/demo 找 init.sh，
 # init.sh 内部 exec ./tennis ./yolo_model.cvimodel 0，所以二进制和模型必须在
@@ -838,6 +837,10 @@ echo "  camera: ${CAMERA_WIDTH}x${CAMERA_HEIGHT} MJPEG"
 # demo-node 默认 cwd=demo，告诉它绝对路径
 export DEMO_BASE_DIR="$DORA_HOME/demo"
 echo "  demo base: $DEMO_BASE_DIR"
+
+# arm_angles.json 真源路径：dora/arm_angles.json（dev/板子端共用）
+export ARM_ANGLES_PATH="$DORA_HOME/dora/arm_angles.json"
+echo "  arm angles: $ARM_ANGLES_PATH"
 
 # ── 1.6. SG2002 UART 寄存器初始化（产生 /dev/ttyS1）──
 # /dev/ttyS1 由 UART1 引出给底盘 ESP32 用。内核默认不开 UART1 寄存器，
