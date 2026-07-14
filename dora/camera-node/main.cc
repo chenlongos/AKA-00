@@ -67,16 +67,11 @@ int main() {
                 std::string cmd(data_ptr, data_len);
 
                 if (cmd == "start") {
-                    if (!cam.good()) {
-                        // 首次打开设备（或刚关掉后又开）
-                        if (!cam.open(nullptr, target_w, target_h)) {
-                            CAM_ERROR("Failed to open camera");
-                            free_dora_event(event);
-                            continue;
-                        }
-                    } else {
-                        // 设备已打开，只恢复流（极少见，因为 stop 现在会真关掉）
-                        cam.start_stream();
+                    // stop 现在走 cam.close()，重开一定是 fresh open。
+                    if (!cam.open(nullptr, target_w, target_h)) {
+                        CAM_ERROR("Failed to open camera");
+                        free_dora_event(event);
+                        continue;
                     }
                     capturing = true;
                     CAM_INFO("▶  capture started");

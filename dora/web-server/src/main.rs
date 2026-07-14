@@ -15,7 +15,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use arrow::array::AsArray;
-use dora_node_api::{self, DoraNode, Event};
+use dora_node_api::{DoraNode, Event};
 use dora_node_api::futures::StreamExt;
 use eyre::{Context, Result};
 use tokio::sync::Mutex;

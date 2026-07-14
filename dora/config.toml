@@ -23,11 +23,6 @@ baudrate = 115200
 [web]
 port = 80
 
-[calibration]
-# 距离标定: D = m / P + c
-m = 2671.82
-c = -2.82
-
 [chassis]
 # 底盘物理参数 — 用于把编码器 RPM 换算成线速度 m/s
 # 1:90 减速比对应 PPR=4680（TT 马达典型值，base_control.ino 固件）

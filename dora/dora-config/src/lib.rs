@@ -10,7 +10,6 @@ pub struct Config {
     pub motor: MotorConfig,
     pub arm: ArmConfig,
     pub web: WebConfig,
-    pub calibration: CalibrationConfig,
     pub chassis: ChassisConfig,
     pub logging: LoggingConfig,
 }
@@ -43,12 +42,6 @@ pub struct WebConfig {
     pub port: u16,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct CalibrationConfig {
-    pub m: f64,
-    pub c: f64,
-}
-
 /// 日志配置 —— motor-bridge / web-server / state-node 启动时用其 level 作为
 /// env_logger 的默认 filter。RUST_LOG 仍然可以覆盖。
 #[derive(Debug, Clone, Deserialize)]
@@ -74,7 +67,6 @@ impl Default for Config {
             motor: MotorConfig { backend: "dev".into(), port: "/dev/ttyS1".into(), baudrate: 115200, ppr: 4680 },
             arm: ArmConfig { backend: "dev".into(), port: "/dev/ttyS2".into(), baudrate: 115200 },
             web: WebConfig { port: 80 },
-            calibration: CalibrationConfig { m: 2671.82, c: -2.82 },
             chassis: ChassisConfig { wheel_diameter_mm: 62.0, gear_ratio: 90 },
             logging: LoggingConfig { level: "info".into() },
         }

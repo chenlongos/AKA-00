@@ -122,9 +122,7 @@ pub async fn snapshot(
     use base64::Engine as _;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&jpeg);
     Ok(Json(serde_json::json!({
-        "image": b64,
-        "m": 0,
-        "c": 0
+        "image": b64
     })))
 }
 
