@@ -11,20 +11,72 @@
 mod routes;
 mod services;
 
+use std::io::BufReader;
 use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use arrow::array::AsArray;
 use dora_node_api::{DoraNode, Event};
 use dora_node_api::futures::StreamExt;
 use eyre::{Context, Result};
+use tokio::net::TcpListener;
 use tokio::sync::Mutex;
+use axum_server;
 use tower_http::services::{ServeDir, ServeFile};
 
 use services::arm::ArmService;
 use services::camera::CameraService;
 use services::demo::DemoService;
 use services::motor::MotorService;
+
+/// 加载/生成自签 TLS 证书 → rustls::ServerConfig。
+///
+/// - 缺 cert/key 时用 rcgen 即时生成（CN=AKA-00 + localhost，3650 天）
+/// - 路径默认 <DORA_HOME>/cert.pem + key.pem，可用 APP_CERT_PATH / APP_KEY_PATH 覆盖
+/// - 与 python run.py 的 ensure_cert() 行为一致
+async fn setup_tls(cert_path: &Path, key_path: &Path) -> Result<rustls::ServerConfig> {
+    if !cert_path.exists() || !key_path.exists() {
+        log::info!(
+            "[web-server] generating self-signed cert (CN=AKA-00, 3650d) at {} + {}",
+            cert_path.display(), key_path.display()
+        );
+        if let Some(parent) = cert_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        // rcgen 0.13 API: generate_simple_self_signed(Vec<String>) -> CertifiedKey
+        let ck = rcgen::generate_simple_self_signed(vec![
+            "AKA-00".into(),
+            "localhost".into(),
+        ])
+        .map_err(|e| eyre::eyre!("rcgen: {e}"))?;
+        std::fs::write(cert_path, ck.cert.pem())?;
+        std::fs::write(key_path, ck.key_pair.serialize_pem())?;
+    }
+
+    let cert_pem = std::fs::read(cert_path)
+        .wrap_err_with(|| format!("read cert {}", cert_path.display()))?;
+    let key_pem = std::fs::read(key_path)
+        .wrap_err_with(|| format!("read key {}", key_path.display()))?;
+
+    let certs: Vec<_> = rustls_pemfile::certs(&mut BufReader::new(cert_pem.as_slice()))
+        .collect::<Result<_, _>>()
+        .wrap_err("parse cert PEM")?;
+
+    let key = rustls_pemfile::pkcs8_private_keys(&mut BufReader::new(key_pem.as_slice()))
+        .next()
+        .ok_or_else(|| eyre::eyre!("no private key in {}", key_path.display()))?
+        .wrap_err("parse key PEM")?;
+
+    let config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, rustls::pki_types::PrivateKeyDer::Pkcs8(key.secret_pkcs8_der().to_vec().into()))
+        .map_err(|e| eyre::eyre!("rustls config: {e}"))?;
+    Ok(config)
+}
+
+// HTTPS accept-loop 由 axum_server 内部处理；这里不再需要手写 accept。
+// TlsAcceptor 从 use 中移除。
 
 /// 合并所有服务的状态类型（axum 只允许一次 with_state）
 #[derive(Clone)]
@@ -99,12 +151,57 @@ async fn run() -> Result<()> {
         )
         .with_state(state.clone());
 
-    // ── 启动 HTTP ──
-    let addr = SocketAddr::from(([0, 0, 0, 0], config.web.port));
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    // ── 启动 HTTP（端口 80，来自 config.toml [web] port）──
+    let http_addr = SocketAddr::from(([0, 0, 0, 0], config.web.port));
+    let http_listener = TcpListener::bind(http_addr).await?;
     log::info!("[web-server] Listening on http://0.0.0.0:{}", config.web.port);
+    let http_app = app.clone();
+    let http_handle = tokio::spawn(async move {
+        if let Err(e) = axum::serve(http_listener, http_app).await {
+            log::error!("[web-server] http server: {e}");
+        }
+    });
 
-    let server_handle = tokio::spawn(async { axum::serve(listener, app).await.unwrap() });
+    // ── 启动 HTTPS（端口 443，跟 python run.py 行为对齐）──
+    // 缺证书用 rcgen 即时生成；路径在 DORA_HOME 下，与 python 一致 (APP_CERT_PATH / APP_KEY_PATH 可覆盖).
+    let dora_home = std::env::var("DORA_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/root/AKA-00"));
+    let cert_path = std::env::var("APP_CERT_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| dora_home.join("cert.pem"));
+    let key_path = std::env::var("APP_KEY_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| dora_home.join("key.pem"));
+
+    let https_app = app.clone().into_make_service();
+    let https_handle = match setup_tls(&cert_path, &key_path).await {
+        Ok(config) => {
+            let https_addr = SocketAddr::from(([0, 0, 0, 0], 443));
+            // axum_server::RustlsConfig 把 rustls::ServerConfig 包一层，
+            // 内部做 non-blocking + accept loop，跟 python 同语义。
+            let rustls_cfg = axum_server::tls_rustls::RustlsConfig::from_config(std::sync::Arc::new(config));
+            let handle = tokio::spawn(async move {
+                if let Err(e) = axum_server::bind_rustls(https_addr, rustls_cfg)
+                    .serve(https_app)
+                    .await
+                {
+                    log::warn!("[web-server] https server exited: {e}");
+                } else {
+                    log::info!("[web-server] HTTPS shut down cleanly");
+                }
+            });
+            log::info!(
+                "[web-server] Listening on https://0.0.0.0:443 (cert: {})",
+                cert_path.display()
+            );
+            Some(handle)
+        }
+        Err(e) => {
+            log::warn!("[web-server] HTTPS disabled (cert setup failed: {e:#})");
+            None
+        }
+    };
 
     // ── dora 事件循环 ──
     while let Some(event) = events.next().await {
@@ -163,7 +260,8 @@ async fn run() -> Result<()> {
         }
     }
 
-    server_handle.abort();
+    http_handle.abort();
+    if let Some(h) = https_handle { h.abort(); }
     log::info!("[web-server] Shutdown");
     Ok(())
 }

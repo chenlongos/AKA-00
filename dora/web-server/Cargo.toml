@@ -7,7 +7,7 @@ edition = "2021"
 dora-config = { path = "../dora-config" }
 dora-node-api = "0.5"
 dora-message = "0.8"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "process"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "process", "net", "io-util"] }
 axum = { version = "0.7", features = ["ws", "multipart"] }
 async-stream = "0.3"
 tower = "0.5"
@@ -21,3 +21,12 @@ serde_json = "1"
 base64 = "0.22"
 log = "0.4"
 env_logger = "0.11"
+# HTTPS support (port 443 next to existing HTTP 80). 全部纯 Rust，无 gcc/musl
+# cross-compile C 依赖 — 适合 riscv64 toolchain。
+rustls = "0.23"
+tokio-rustls = "0.26"
+rustls-pemfile = "2"
+rcgen = "0.13"
+# axum 0.7 的 `serve()` 只接 TcpListener，不接通用 IO。
+# axum-server 提供 tls-rustls + bind/accept helpers，正好对接 TlsStream<TcpStream>。
+axum-server = { version = "0.7", default-features = false, features = ["tls-rustls"] }
