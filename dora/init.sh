@@ -33,6 +33,7 @@ echo "   arm angles:    $ARM_ANGLES_PATH"
 
 # ── 1. 编译 ──
 echo ""
+
 echo "🔨 Building..."
 cargo build -p web-server --release 2>&1 | grep -E "Compiling|Finished|error" || true
 cargo build -p motor-bridge --release 2>&1 | grep -E "Compiling|Finished|error" || true
