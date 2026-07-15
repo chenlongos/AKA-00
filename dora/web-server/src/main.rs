@@ -96,6 +96,13 @@ fn main() -> Result<()> {
     .format_timestamp_millis()
     .init();
 
+    // ── rustls 0.23+ 不再自动选 crypto provider ──
+    // `ring` 已在 Cargo.toml 启用，这里再显式 install_default 兜底：
+    // 万一上游 feature 解析变了（feature 合并、依赖图变化），这里至少给一个清晰错误，
+    // 而不是等第一个 ServerConfig::builder() 触发深处的 panic。
+    // install_default() 在已 install 时返回 Err，无害，吞掉即可。
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(run())
         .unwrap_or_else(|e| log::error!("web-server error: {:?}", e));

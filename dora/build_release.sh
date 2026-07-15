@@ -643,11 +643,10 @@ cp -r "$SCRIPT_DIR/web-server/static" "$PACKAGE_DIR/"
 ok "static/"
 
 # 复制机械臂角度配置文件（arm_angles.json 一定存在）。
-# 部署后路径：$DORA_HOME/dora/arm_angles.json ——dev/板子共用同一相对语义，
-# 板子 web-server 写回也落在这同一文件。
-mkdir -p "$PACKAGE_DIR/dora"
-cp "$SCRIPT_DIR/arm_angles.json" "$PACKAGE_DIR/dora/arm_angles.json"
-ok "dora/arm_angles.json"
+# 真源在 workspace 根的 arm_angles.json；build 产物直接放 $PACKAGE_DIR 根，
+# 板子 web-server 通过 $DORA_HOME/arm_angles.json 读写。dora/ 子目录不再持有这份文件。
+cp "$SCRIPT_DIR/../arm_angles.json" "$PACKAGE_DIR/arm_angles.json"
+ok "arm_angles.json"
 
 # 复制 demo 目录（demo-node 通过 DEMO_BASE_DIR=$DORA_HOME/demo 找 init.sh，
 # init.sh 内部 exec ./tennis ./yolo_model.cvimodel 0，所以二进制和模型必须在
@@ -838,8 +837,8 @@ echo "  camera: ${CAMERA_WIDTH}x${CAMERA_HEIGHT} MJPEG"
 export DEMO_BASE_DIR="$DORA_HOME/demo"
 echo "  demo base: $DEMO_BASE_DIR"
 
-# arm_angles.json 真源路径：dora/arm_angles.json（dev/板子端共用）
-export ARM_ANGLES_PATH="$DORA_HOME/dora/arm_angles.json"
+# arm_angles.json 真源在 workspace 根（board 端 $DORA_HOME 根）
+export ARM_ANGLES_PATH="$DORA_HOME/arm_angles.json"
 echo "  arm angles: $ARM_ANGLES_PATH"
 
 # ── 1.6. SG2002 UART 寄存器初始化（产生 /dev/ttyS1）──
@@ -893,22 +892,12 @@ if [ -n "$MISSING" ]; then
     exit 1
 fi
 
-# ── 3. 启动 dora 运行时 ──
-echo ""
-echo "Starting dora runtime..."
-
-if [ -f "$DORA_BIN" ]; then
-    echo "  Using bundled dora binary"
-    # 使用内置的 dora 二进制
-    "$DORA_BIN" up 2>/dev/null &
-    DORA_UP_PID=$!
-    sleep 2
-else
-    echo "  Using system dora (make sure it's installed)"
-    dora up 2>/dev/null &
-    DORA_UP_PID=$!
-    sleep 2
-fi
+# ── 3. 启动 dora runtime ──
+# 注意：原来这里有 `dora up & + sleep 2`，但 `dora up` 实际启动的是
+# `dora coordinator` (53290) + `dora daemon` 两个常驻子进程，**而 `dora run`
+# 走的是 `Daemon::run_dataflow` standalone 模式，根本不连 coordinator**。
+# dora up 完全冗余——只会让 init.sh 多等 2s + 持续占用 2 个常驻进程。
+# stop.sh 拼出来时 NAMES 含 `dora` (pgrep -x dora)，会清掉所有 dora 子进程。
 
 # ── 4. 启动数据流 ──
 echo ""
@@ -928,12 +917,17 @@ echo "Waiting for web-server..."
 WEB_PORT=$(grep 'port' "$DORA_HOME/etc/config.toml" 2>/dev/null | grep -oE '[0-9]+' | head -1)
 WEB_PORT="${WEB_PORT:-80}"
 
-for i in $(seq 1 60); do
-    sleep 1
-    if curl -s "http://localhost:${WEB_PORT}/api/camera/status" > /dev/null 2>&1; then
+# 墙钟 60s 上限；先 curl 再 sleep（一旦 ready 立即返回，避免无谓等待）；
+# curl 加 --connect-timeout 1 + -m 2 防止端口未绑定时卡在 SYN 重传。
+DEADLINE=$(( $(date +%s) + 60 ))
+ATTEMPT=0
+START=$(date +%s)
+while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+    ATTEMPT=$((ATTEMPT + 1))
+    if curl -sf -m 2 --connect-timeout 1 "http://localhost:${WEB_PORT}/api/camera/status" >/dev/null 2>&1; then
         echo ""
         echo "========================================"
-        echo "  READY!"
+        echo "  READY! (after ${ATTEMPT} probes, $(( $(date +%s) - START ))s)"
         echo ""
         echo "  Web UI: http://<board-ip>:${WEB_PORT}"
         echo ""
@@ -943,11 +937,12 @@ for i in $(seq 1 60); do
         exit 0
     fi
     printf "."
+    sleep 0.2
 done
 
 echo ""
 echo "========================================"
-echo "  WARNING: web-server 未响应"
+echo "  WARNING: web-server 未响应 (60s timeout)"
 echo ""
 echo "  Check with: cd $DORA_HOME && ./bin/dora logs"
 echo "========================================"

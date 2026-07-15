@@ -23,7 +23,7 @@ log = "0.4"
 env_logger = "0.11"
 # HTTPS support (port 443 next to existing HTTP 80). 全部纯 Rust，无 gcc/musl
 # cross-compile C 依赖 — 适合 riscv64 toolchain。
-rustls = "0.23"
+rustls = { version = "0.23", features = ["ring"] }
 tokio-rustls = "0.26"
 rustls-pemfile = "2"
 rcgen = "0.13"
