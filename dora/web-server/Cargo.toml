@@ -23,10 +23,18 @@ log = "0.4"
 env_logger = "0.11"
 # HTTPS support (port 443 next to existing HTTP 80). 全部纯 Rust，无 gcc/musl
 # cross-compile C 依赖 — 适合 riscv64 toolchain。
-rustls = { version = "0.23", features = ["ring"] }
-tokio-rustls = "0.26"
+# rustls 0.23 / tokio-rustls 0.26 的 default 都含 `aws_lc_rs` feature，
+# 会让我们 ring + aws-lc-rs 同时启用 → `from_crate_features()` 返回 None → 运行时 panic。
+# 两边都关 default，只留 ring + logging + tls12。
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12"] }
 rustls-pemfile = "2"
 rcgen = "0.13"
 # axum 0.7 的 `serve()` 只接 TcpListener，不接通用 IO。
 # axum-server 提供 tls-rustls + bind/accept helpers，正好对接 TlsStream<TcpStream>。
-axum-server = { version = "0.7", default-features = false, features = ["tls-rustls"] }
+#
+# 注意用 `tls-rustls-no-provider` 而非 `tls-rustls`：后者强制 `rustls/aws-lc-rs`，
+# 会让我们 cargo.toml 的 `rustls/ring` 跟它 union 后同时启用 ring + aws-lc-rs，
+# rustls 0.23 的 `from_crate_features()` 在两个 provider 同时启用时返回 None → panic。
+# no-provider 版只引入 axum-server 的 TLS plumbing，让 web-server 自己 install_default()。
+axum-server = { version = "0.7", default-features = false, features = ["tls-rustls-no-provider"] }

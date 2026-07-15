@@ -191,15 +191,29 @@ impl AppState {
         // tokio Child::start_kill 在 stop 路径死锁是因为 reaper 持锁，
         // 现在根本不走 Child。
         //
-        // SIGTERM 先发：让 worker 子进程（NPU 之类）有机会清理。
-        // 200ms 后升级 SIGKILL。reaper 看见 child 退出后会发 idle。
+        // SIGTERM 先发整个 pgid：让 worker 子进程（NPU / CVitek TPU）有机会清理。
+        // 1.5s 后**检查整个 pgid**是否还活着（不是只看 pid！）——tennis 响应
+        // SIGTERM 退出后 fork 出来的 NPU worker 可能残留，pgid 仍 alive；
+        // 残留 NPU worker 会让下一次 start 卡 D-state，表现为"又无法停止"。
+        // pgid 仍 alive 就发 SIGKILL 到整个 pgid。
         let pid = r.pid;
         unsafe { kill_tree(pid, libc::SIGTERM); }
         tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
             unsafe {
-                // 检查仍活就给 SIGKILL。kill(pid, 0) 是无副作用存在性查询。
-                if pid > 0 && libc::kill(pid as libc::pid_t, 0) == 0 {
+                let pid_t = pid as libc::pid_t;
+                let pgid = libc::getpgid(pid_t);
+                let still_alive = if pgid > 0 {
+                    libc::kill(-pgid, 0) == 0
+                } else {
+                    // pgid 没了 (init.sh 早死 / 父进程没 setpgid) 的兜底
+                    libc::kill(pid_t, 0) == 0
+                };
+                if still_alive {
+                    log::warn!(
+                        "[demo-node] pgid={} still alive after 1.5s SIGTERM, sending SIGKILL",
+                        pgid
+                    );
                     kill_tree(pid, libc::SIGKILL);
                 }
             }

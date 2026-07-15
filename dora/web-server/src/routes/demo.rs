@@ -37,15 +37,22 @@ async fn init_demo(
     State(s): State<Arc<AppState>>,
     Json(body): Json<InitBody>,
 ) -> (axum::http::StatusCode, Json<serde_json::Value>) {
-    // 闸：preview 还开着就先把 camera 关掉，再启 demo。
-    //
-    // 为什么不直接同时跑：camera-node 持 /dev/videoX → tennis open 同一个
-    // → uvcvideo 内核 USB 带宽锁互斥 → tennis 进 D-state（uninterruptible
-    // sleep）→ 任何 SIGTERM/SIGKILL 都排不上调度 → 板子整体僵死。
-    //
-    // 之前修过的 demo-node 死锁是"信号发不出"，这条闸是从源头不让它进去。
-    // sleep(500ms) 等 camera-node 真的 cam.close() + 释放 fd（发了 stop 命令
-    // 不等于 camera-node 已执行），host 上够，板上 cvitek 流程若需更多调大。
+    // ── 防御性清理 ──
+    // 1. NPU 残留：上次的 stop 可能漏杀 NPU / CVitek TPU worker（demo-node 的
+    //    200ms 升级 SIGKILL 用 kill(pid,0) 检查，只看 tennis 主进程，NPU
+    //    worker 残留时漏发）。NPU device 一次只能被一个进程 open，残留的
+    //    worker 会让新 demo 卡 D-state，表现为"无法停止"。
+    //    pkill 扫 tennis / yolo_model / cviruntime 三个特征串，宁错杀。
+    // 2. camera preview 还开着：camera-node 持 /dev/videoX → demo open 同一个
+    //    → uvcvideo 内核 USB 带宽锁互斥 → demo 进 D-state（uninterruptible
+    //    sleep）→ 任何 SIGTERM/SIGKILL 都排不上调度 → 板子整体僵死。
+    log::info!("[demo-route] pre-start cleanup for demo '{}'", body.name);
+    let _ = std::process::Command::new("pkill")
+        .args(["-9", "-f", "tennis|yolo_model.cvimodel|cviruntime"])
+        .output();
+    // 给 kernel 时间回收 fd / TPU device
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
     if s.camera.is_active() {
         log::info!(
             "[demo-route] preview is on, closing camera before demo '{}' to avoid V4L2 deadlock",
