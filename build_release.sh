@@ -17,10 +17,18 @@ OUTPUT="$SCRIPT_DIR/dist/aka-00-server"
 mkdir -p "$SCRIPT_DIR/dist"
 
 # Build frontend if needed
+# Frontend 构建输出在 dora/web-server/static（供 dora dev 模式使用），
+# 同时同步到根 static/ 供 Python Flask 生产部署使用。
 if [ "$1" = "--rebuild" ] || [ ! -d "$SCRIPT_DIR/static" ] || [ -z "$(ls -A "$SCRIPT_DIR/static" 2>/dev/null)" ]; then
     echo "Building frontend..."
     cd "$SCRIPT_DIR/frontend" && npm run build
     cd "$SCRIPT_DIR"
+    # 同步到根 static/ 目录（生产部署需要）
+    if [ -d "$SCRIPT_DIR/dora/web-server/static" ]; then
+        rm -rf "$SCRIPT_DIR/static"
+        cp -r "$SCRIPT_DIR/dora/web-server/static" "$SCRIPT_DIR/static"
+        echo "Synced dora/web-server/static -> static/"
+    fi
 fi
 
 # Create the self-extracting executable.

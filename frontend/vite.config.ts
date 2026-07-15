@@ -19,7 +19,7 @@ export default defineConfig({
         },
     },
     build: {
-        outDir: path.resolve(__dirname, '../static'),
+        outDir: path.resolve(__dirname, '../dora/web-server/static'),
         emptyOutDir: true,
         rolldownOptions: {
             output: {

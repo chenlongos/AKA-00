@@ -21,14 +21,3 @@ def action_control():
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
 
-
-# ===========================
-# 注册子模块
-# ===========================
-
-from app.routes.system import system_bp
-from app.routes.motor import motor_bp
-from app.routes.arm import arm_bp
-from app.routes.base import base_bp
-from app.routes.camera import camera_bp
-from app.routes.demo import demo_bp

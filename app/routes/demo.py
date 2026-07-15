@@ -124,7 +124,12 @@ def demo_stop():
     try:
         proc.wait(timeout=3)
     except Exception:
-        pass
+        # SIGTERM 未响应，升级为 SIGKILL（参考 dora demo-node 的杀进程策略）
+        try:
+            os.kill(pid, signal.SIGKILL)
+            proc.wait(timeout=2)
+        except Exception:
+            pass
 
     return jsonify({
         "status": "stopped",
@@ -165,6 +170,18 @@ def _do_download(task_id, url, file_path, new_demo_dir, old_demo_dir):
     except Exception as exc:
         _download_progress[task_id]["status"] = "error"
         _download_progress[task_id]["error"] = str(exc)
+    finally:
+        # 60 秒后清理旧条目，防止内存泄漏（留足够时间给前端轮询最终状态）
+        _schedule_progress_cleanup(task_id)
+
+
+def _schedule_progress_cleanup(task_id):
+    """延迟清理下载进度条目"""
+    def _clean():
+        import time
+        time.sleep(60)
+        _download_progress.pop(task_id, None)
+    threading.Thread(target=_clean, daemon=True).start()
 
 
 @demo_bp.route("/download_model_with_progress", methods=["POST"])
@@ -193,6 +210,10 @@ def demo_download_model_with_progress():
     url = f"{demo_server}/api/models/{model_name}"
 
     task_id = f"{current_name}_to_{model_name}"
+    # 防止 _download_progress 无限增长：超过 20 个条目时清理最旧的
+    if len(_download_progress) > 20:
+        oldest = next(iter(_download_progress))
+        _download_progress.pop(oldest, None)
     _download_progress[task_id] = {"progress": 0, "status": "downloading", "error": None}
 
     thread = threading.Thread(target=_do_download, args=(task_id, url, file_path, new_dir, old_dir))
