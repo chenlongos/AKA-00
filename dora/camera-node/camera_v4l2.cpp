@@ -218,7 +218,7 @@ void Camera::_init_buffers() {
     _n_bufs = 0;
 
     v4l2_requestbuffers req; CLEAR(req);
-    req.count = 4;
+    req.count = 2;  // 减少缓冲数以降低延迟（4→2：~167ms→~83ms pipeline depth）
     req.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     req.memory = V4L2_MEMORY_MMAP;
     if (ioctl(_fd, VIDIOC_REQBUFS, &req) < 0) {

@@ -14,7 +14,7 @@ nodes:
   - id: camera
     path: camera-node/camera-node
     inputs:
-      tick: dora/timer/millis/42
+      tick: dora/timer/millis/67
       control: web-server/control
     outputs:
       - image

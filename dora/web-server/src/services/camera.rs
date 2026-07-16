@@ -15,6 +15,8 @@ use super::dora_send;
 pub struct CameraService {
     /// MJPEG 帧广播
     frame_tx: watch::Sender<Vec<u8>>,
+    /// 保活 watch channel：Receiver 被持有可确保 Sender 不会因无订阅者而丢弃帧
+    _rx: watch::Receiver<Vec<u8>>,
     /// 摄像头开关状态（true = 前端请求开启 + 已发送 dora start）
     active: Arc<AtomicBool>,
     /// dora 节点句柄，用于发送 control 消息到 camera 节点
@@ -26,10 +28,10 @@ pub struct CameraService {
 impl CameraService {
     pub fn new(node: Arc<Mutex<DoraNode>>, config: dora_config::CameraConfig) -> Self {
         let (frame_tx, _rx) = watch::channel(Vec::new());
-        std::mem::forget(_rx);
 
         Self {
             frame_tx,
+            _rx,
             active: Arc::new(AtomicBool::new(false)),
             node,
             config,
@@ -89,43 +91,48 @@ impl CameraService {
 
     // ── 帧处理 ──
 
-    /// 接收 dora 帧数据，广播到所有 /stream 订阅者
-    /// 数据可能是 JPEG（camera-node 直接发）或原始 RGB（旧版兼容）
+    /// 接收 dora 帧数据，广播到所有 /stream 订阅者。
+    /// 数据可能是 JPEG（camera-node 直接发）或原始 RGB（旧版兼容）。
+    ///
+    /// 无订阅者时跳过分配——watch channel 的 receiver_count==1（_rx 自身），
+    /// 多出来的才是 /stream 客户端。
     pub fn push_frame(&self, data: &dora_node_api::ArrowData) {
         use arrow::array::AsArray;
         use std::sync::atomic::Ordering;
 
         let active = self.active.load(Ordering::Relaxed);
         if !active {
-            return;  // 摄像头关闭状态，静默丢弃
+            return;
+        }
+
+        // 无 /stream 订阅者时跳过拷贝（_rx 自身占 1 个 receiver）
+        if self.frame_tx.receiver_count() <= 1 {
+            return;
         }
 
         let raw = data.as_primitive::<arrow::datatypes::UInt8Type>().values();
 
         if raw.is_empty() {
-            log::warn!("[camera-svc] push_frame: empty data (len=0), dropping");
             return;
         }
 
         // JPEG 头部检测
         let is_jpeg = raw.len() >= 2 && raw[0] == 0xFF && raw[1] == 0xD8;
         if is_jpeg {
-            self.frame_tx.send_replace(raw.to_vec());
+            // send_modify 原地覆盖，复用已分配的缓冲区，避免每帧 malloc+free
+            // （SG2002 上 15KB 的 malloc 可能耗时数 ms，24fps 累积明显）
+            self.frame_tx.send_modify(|buf| {
+                buf.clear();
+                buf.extend_from_slice(raw);
+            });
             return;
         }
 
-        log::warn!(
-            "[camera-svc] push_frame: not JPEG, header=[{:02X} {:02X}], len={}",
-            raw.first().unwrap_or(&0),
-            raw.get(1).unwrap_or(&0),
-            raw.len()
-        );
-
         // 旧版 RGB → JPEG
         if let Some(jpeg) = Self::encode_rgb_to_jpeg(raw, self.config.width, self.config.height, self.config.jpeg_quality) {
-            self.frame_tx.send_replace(jpeg);
-        } else {
-            log::warn!("[camera-svc] push_frame: not JPEG, RGB encode failed (len={})", raw.len());
+            self.frame_tx.send_modify(|buf| {
+                *buf = jpeg;
+            });
         }
     }
 }

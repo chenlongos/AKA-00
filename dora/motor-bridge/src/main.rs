@@ -30,6 +30,8 @@ enum MotorCmd {
     Direct { left: i32, right: i32, duration: u32 },
     #[serde(rename = "joystick")]
     Joystick { x: i8, y: i8 },
+    #[serde(rename = "reinitialize")]
+    Reinitialize,
 }
 
 fn joystick_to_tank(x: i8, y: i8) -> (i32, i32) {
@@ -126,46 +128,76 @@ async fn run() -> Result<()> {
                     }
                 };
 
-                // set_speeds 也是同步串口写 + flush，同样挪到 spawn_blocking
-                // 避免在 dora 事件循环里阻塞。
-                let driver_for_cmd = driver.clone();
-                let _ = tokio::task::spawn_blocking(move || {
-                    let mut d = driver_for_cmd.lock().unwrap();
+                // ── 无 duration 的即时指令（joystick/stop/direct 等）──
+                // 串口 write 只需 <1ms，直接在当前 task 执行最快。
+                // spawn_blocking 在单核 RISC-V 上线调度开销 5-20ms，摇杆 10Hz
+                // 流量下延迟不可接受。
+                let needs_duration = matches!(&cmd,
+                    MotorCmd::Action { duration, .. } | MotorCmd::Direct { duration, .. }
+                    if *duration > 0
+                );
+
+                if needs_duration {
+                    // 有 duration：sleep 会阻塞，必须放 spawn_blocking
+                    let driver_for_cmd = driver.clone();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        let mut d = driver_for_cmd.lock().unwrap();
+                        match cmd {
+                            MotorCmd::Action { action, speed, duration } => {
+                                let (l, r) = match action.as_str() {
+                                    "up" => (speed as i32, speed as i32),
+                                    "down" => (-(speed as i32), -(speed as i32)),
+                                    "left" => (-(speed as i32), speed as i32),
+                                    "right" => (speed as i32, -(speed as i32)),
+                                    "stop" => (0, 0),
+                                    _ => return,
+                                };
+                                d.set_speeds(l, r);
+                                drop(d);
+                                std::thread::sleep(std::time::Duration::from_millis(duration as u64));
+                                driver_for_cmd.lock().unwrap().stop();
+                            }
+                            MotorCmd::Direct { left, right, duration } => {
+                                d.set_speeds(left, right);
+                                drop(d);
+                                std::thread::sleep(std::time::Duration::from_millis(duration as u64));
+                                driver_for_cmd.lock().unwrap().stop();
+                            }
+                            _ => {} // unreachable: needs_duration guards this
+                        }
+                    }).await;
+                } else {
+                    // 快速路径：直接执行（joystick / stop / reinitialize / duration=0）
+                    let mut d = driver.lock().unwrap();
                     match cmd {
-                        MotorCmd::Action { action, speed, duration } => {
+                        MotorCmd::Action { action, speed, .. } => {
                             let (l, r) = match action.as_str() {
                                 "up" => (speed as i32, speed as i32),
                                 "down" => (-(speed as i32), -(speed as i32)),
                                 "left" => (-(speed as i32), speed as i32),
                                 "right" => (speed as i32, -(speed as i32)),
                                 "stop" => (0, 0),
-                                _ => return,
+                                _ => {
+                                    log::warn!("[motor-bridge] unknown action: {}", action);
+                                    (0, 0) // safe: stop
+                                }
                             };
                             d.set_speeds(l, r);
-                            drop(d);
-                            if duration > 0 {
-                                // 在 blocking 线程里 sleep —— 这里没有 await 需要，
-                                // std::thread::sleep 是阻塞的，但反正整个 task 就是
-                                // dedicated worker，等完再返回即可。
-                                std::thread::sleep(std::time::Duration::from_millis(duration as u64));
-                                driver_for_cmd.lock().unwrap().stop();
-                            }
                         }
-                        MotorCmd::Direct { left, right, duration } => {
+                        MotorCmd::Direct { left, right, .. } => {
                             d.set_speeds(left, right);
-                            drop(d);
-                            if duration > 0 {
-                                std::thread::sleep(std::time::Duration::from_millis(duration as u64));
-                                driver_for_cmd.lock().unwrap().stop();
-                            }
                         }
                         MotorCmd::Joystick { x, y } => {
                             let (l, r) = joystick_to_tank(x, y);
                             d.set_speeds(l, r);
                         }
+                        MotorCmd::Reinitialize => {
+                            let reinit = d.reinitialize();
+                            log::info!("[motor-bridge] reinitialize: {}", reinit);
+                        }
+                        _ => {} // unreachable
                     }
-                })
-                .await;
+                }
             }
             Event::Stop(cause) => {
                 log::info!("[motor-bridge] Stop: {:?}, exiting", cause);

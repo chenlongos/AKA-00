@@ -143,10 +143,12 @@ build_crate state-node
 # camera-node 是 C++，走 make
 if [ -f camera-node/Makefile ] && [ -f camera-node/main.cc ]; then
     echo "   building camera-node (make)..."
-    if ! make -C camera-node 2>&1 | grep -E "error" | sed 's/^/    /'; then
+    make_out=$(make -C camera-node 2>&1) && make_rc=0 || make_rc=$?
+    echo "$make_out" | grep -iE "error" | sed 's/^/    /' || true
+    if [ "$make_rc" -eq 0 ]; then
         echo "   ✅ camera-node built"
     else
-        echo "   ⚠ camera-node build failed — 摄像头节点将启动失败"
+        echo "   ⚠ camera-node build failed (exit code: $make_rc)"
     fi
 elif [ -d camera-node ]; then
     echo "   ⚠ camera-node 没有 Makefile — 跳过（可能是 src 路径变化）"

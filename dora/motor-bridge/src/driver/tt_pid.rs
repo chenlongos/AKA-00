@@ -446,6 +446,12 @@ impl MotorDriver for TtPidDriver {
         self.send_cmd(CMD_STOP, &[STOP_BOTH]);
     }
 
+    fn reinitialize(&mut self) -> bool {
+        info!("[tt_pid] reinitialize (re-run INIT)");
+        self.init();
+        true
+    }
+
     /// 读 ESP32 实时状态，返回 (M1_RPM, M2_RPM)。
     /// 失败（超时 / NACK / 状态机错）返回 (0, 0)，避免上层 UI 卡住。
     fn rpm(&self) -> (i32, i32) {

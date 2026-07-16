@@ -79,21 +79,28 @@ pub async fn stream(
                 yield mjpeg_part(&jpeg);
             }
         }
+        // 防止 bufferbloat：限制 HTTP 端最大 ~10fps。
+        // 摄像头 15fps（67ms/帧）→ 如果 WiFi 慢，TCP 发送缓冲积压 → 每帧
+        // yield 阻塞越来越长 → "越来越卡"。这里每 100ms 最多发一帧，给 TCP
+        // 缓冲足够的排空时间。
+        let min_interval = tokio::time::Duration::from_millis(100);
+        let mut last_send = tokio::time::Instant::now();
         loop {
-            // 等待新帧
             if rx.changed().await.is_err() {
                 break;
             }
-            // 取最新帧发送，发送完检查是否有更新的帧积压
-            loop {
-                let jpeg = rx.borrow_and_update().clone();
-                if !jpeg.is_empty() {
-                    yield mjpeg_part(&jpeg);
-                }
-                // 当前帧发送期间如果来了新帧，跳过等待直接取最新
-                if !rx.has_changed().unwrap_or(false) {
-                    break;
-                }
+            // drain to latest
+            let mut jpeg = rx.borrow_and_update().clone();
+            while rx.has_changed().unwrap_or(false) {
+                jpeg = rx.borrow_and_update().clone();
+            }
+            // 距上一帧不足 100ms 则跳过，等下一帧
+            if last_send.elapsed() < min_interval {
+                continue;
+            }
+            if !jpeg.is_empty() {
+                yield mjpeg_part(&jpeg);
+                last_send = tokio::time::Instant::now();
             }
         }
     };

@@ -96,7 +96,7 @@ async fn preview(
         }
     };
 
-    s.arm.set_angle(servo_id, body.value).await;
+    let _ = s.arm.set_angle(servo_id, body.value).await;
     (
         axum::http::StatusCode::OK,
         Json(serde_json::json!({

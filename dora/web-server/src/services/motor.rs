@@ -79,6 +79,12 @@ impl MotorService {
         self.send_control(cmd).await;
     }
 
+    /// 重新初始化电机底盘（tt_pid ESP32 重置等）
+    pub async fn reinitialize(&self) {
+        let json = serde_json::json!({"command": "reinitialize"});
+        self.send_control(&json).await;
+    }
+
     /// 处理来自 WebSocket 的 joystick 输入（x, y: -127..127）
     pub async fn joystick(&self, x: i8, y: i8) {
         let json = serde_json::json!({

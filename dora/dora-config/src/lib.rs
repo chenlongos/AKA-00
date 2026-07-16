@@ -74,11 +74,60 @@ impl Default for Config {
 }
 
 impl Config {
-    /// 从当前目录的 config.toml 加载，文件不存在则返回默认值
+    /// 加载 config.toml，按优先级查找：
+    ///   1. `$DORA_HOME/config.toml`（生产部署）
+    ///   2. 二进制所在目录的 `../config.toml`（`bin/web-server` → `config.toml`）
+    ///   3. CWD 下的 `config.toml`（开发 `dora/` 目录直接跑）
+    ///
+    /// 都找不到则 warn + 返回默认值（motor/arm backend=dev，不控制硬件）。
     pub fn load() -> Self {
-        std::fs::read_to_string("config.toml")
-            .ok()
-            .and_then(|s| toml::from_str(&s).ok())
-            .unwrap_or_default()
+        let path = Self::find_config_path();
+        match std::fs::read_to_string(&path) {
+            Ok(s) => match toml::from_str(&s) {
+                Ok(cfg) => {
+                    log::info!("[dora-config] loaded {}", path.display());
+                    cfg
+                }
+                Err(e) => {
+                    log::warn!("[dora-config] failed to parse {}: {e}; using defaults", path.display());
+                    Self::default()
+                }
+            },
+            Err(_) => {
+                log::warn!(
+                    "[dora-config] config.toml not found (tried DORA_HOME, ../ relative to binary, cwd); \
+                     using defaults (motor/arm backend=dev — 不控制硬件)"
+                );
+                Self::default()
+            }
+        }
+    }
+
+    fn find_config_path() -> std::path::PathBuf {
+        // 1. $DORA_HOME/etc/config.toml（生产部署：build_release.sh 打包到 etc/ 下）
+        if let Ok(home) = std::env::var("DORA_HOME") {
+            let p = std::path::PathBuf::from(&home).join("etc").join("config.toml");
+            if p.exists() {
+                return p;
+            }
+        }
+
+        // 2. 二进制位置推算：bin/web-server → ../etc/config.toml（生产布局）
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(parent) = exe.parent() {
+                // bin/ 下 → ../etc/config.toml
+                if parent.file_name().map(|n| n == "bin").unwrap_or(false) {
+                    if let Some(root) = parent.parent() {
+                        let p = root.join("etc").join("config.toml");
+                        if p.exists() {
+                            return p;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. CWD（开发时在 dora/ 目录下 `dora run dataflow.yml`）
+        std::path::PathBuf::from("config.toml")
     }
 }

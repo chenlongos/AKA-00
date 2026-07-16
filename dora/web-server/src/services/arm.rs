@@ -177,19 +177,19 @@ impl ArmService {
             }
             _ => {
                 // 细粒度原语直接转发
-                self.send(cmd).await;
+                let _ = self.send(cmd).await;
             }
         }
     }
 
     /// 立即下发单舵机指令
-    pub async fn set_angle(&self, servo_id: u8, angle: u16) {
+    pub async fn set_angle(&self, servo_id: u8, angle: u16) -> Result<(), String> {
         let payload = serde_json::json!({
             "command": "set_angle",
             "servo_id": servo_id,
             "angle": angle,
         });
-        self.send(&payload).await;
+        self.send(&payload).await
     }
 
     pub async fn torque(&self, on: bool) {
@@ -197,12 +197,12 @@ impl ArmService {
             "command": "torque",
             "on": on,
         });
-        self.send(&payload).await;
+        let _ = self.send(&payload).await;
     }
 
     pub async fn stop(&self) {
         let payload = serde_json::json!({ "command": "stop" });
-        self.send(&payload).await;
+        let _ = self.send(&payload).await;
     }
 
     // ── grab / release 编排（照搬 uart_control.py:62-90）──
@@ -221,28 +221,27 @@ impl ArmService {
                 })
                 .unwrap_or(150)
         };
-        // id2_angle_open / id2_angle_close 在 Python 里就是 servo2_prepare / servo2_grab
         let open = get("servo2_prepare");
         let close = get("servo2_grab");
 
         // 1. 张开夹爪
-        self.set_angle(2, open).await;
+        self.set_angle(2, open).await?;
         tokio::time::sleep(Duration::from_millis(500)).await;
 
         // 2. 准备位
-        self.set_angle(0, get("servo0_prepare")).await;
-        self.set_angle(1, get("servo1_prepare")).await;
-        self.set_angle(2, get("servo2_approach")).await;
+        self.set_angle(0, get("servo0_prepare")).await?;
+        self.set_angle(1, get("servo1_prepare")).await?;
+        self.set_angle(2, get("servo2_approach")).await?;
         tokio::time::sleep(Duration::from_millis(1000)).await;
 
         // 3. 闭合夹爪
-        self.set_angle(2, close).await;
+        self.set_angle(2, close).await?;
         tokio::time::sleep(Duration::from_millis(2000)).await;
 
         // 4. 抬起
-        self.set_angle(0, get("servo0_lift")).await;
-        self.set_angle(1, get("servo1_lift")).await;
-        self.set_angle(2, get("servo2_lift")).await;
+        self.set_angle(0, get("servo0_lift")).await?;
+        self.set_angle(1, get("servo1_lift")).await?;
+        self.set_angle(2, get("servo2_lift")).await?;
 
         log::info!("[arm] grab sequence done");
         Ok(())
@@ -254,16 +253,15 @@ impl ArmService {
             .get("servo2_prepare")
             .copied()
             .unwrap_or(150);
-        self.set_angle(2, open).await;
+        self.set_angle(2, open).await?;
         log::info!("[arm] release sequence done");
         Ok(())
     }
 
-    async fn send(&self, payload: &serde_json::Value) {
+    async fn send(&self, payload: &serde_json::Value) -> Result<(), String> {
         let bytes = serde_json::to_vec(payload).unwrap_or_default();
-        // 2s 超时；grab / release 序列里这调用频率低（一步一调），超时也不致命。
-        if let Err(e) = dora_send::send_output(&self.node, "arm_cmd", &bytes).await {
-            log::warn!("[arm-svc] send failed: {e}");
-        }
+        dora_send::send_output(&self.node, "arm_cmd", &bytes)
+            .await
+            .map_err(|e| format!("arm send failed: {e}"))
     }
 }

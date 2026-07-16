@@ -124,6 +124,14 @@ impl AppState {
         let pid = child.id().unwrap_or(0);
         log::info!("[demo-node] started '{name}' pid={pid}");
 
+        // ⚠️ 先设 RunningInfo 再 spawn reaper，消除竞态：
+        // 如果 child 在 spawn 和赋值之间快速退出，reaper 看到 running=None 就跳过，
+        // 然后赋值 running=Some(...) 永远不被清除 → 后续 start 全被拒绝。
+        *self.running.lock().unwrap() = Some(RunningInfo {
+            name: name.clone(),
+            pid,
+        });
+
         // reaper：独占 Child，等它退出后清状态 + 发 idle status。
         // 用 `&mut` 直传不通过 Arc/Mutex，stop 路径压根不碰这个 Child。
         let running = self.running.clone();
@@ -153,11 +161,6 @@ impl AppState {
                 bytes.len(),
                 &bytes,
             );
-        });
-
-        *self.running.lock().unwrap() = Some(RunningInfo {
-            name: name.clone(),
-            pid,
         });
 
         // 发 running status（前端会收到并清掉 loading 状态）

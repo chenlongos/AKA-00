@@ -14,6 +14,8 @@ pub trait MotorDriver: Send + Sync {
     /// 读取当前 RPM（实际硬件返回真实值，dev 返回 0）
     #[allow(dead_code)]
     fn rpm(&self) -> (i32, i32) { (0, 0) }
+    /// 重新初始化硬件（tt_pid ESP32 重置等）
+    fn reinitialize(&mut self) -> bool { true }
 }
 
 /// 根据配置创建驱动实例

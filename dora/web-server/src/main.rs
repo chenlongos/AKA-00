@@ -152,6 +152,7 @@ async fn run() -> Result<()> {
         .merge(routes::wifi::router())
         .merge(routes::demo::router())
         .merge(routes::system::router())
+        .merge(routes::base::router())
         .fallback_service(
             ServeDir::new(&static_dir)
                 .fallback(ServeFile::new(static_dir.join("index.html")))
@@ -181,8 +182,21 @@ async fn run() -> Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(|_| dora_home.join("key.pem"));
 
+    // TLS 证书生成（rcgen RSA 2048）在单核 RISC-V 上可能需要 5-15s。
+    // 如果 inline 执行会占住唯一的 tokio worker 线程，HTTP server 被饿死，
+    // curl 连不上 → init.sh 健康检查超时。放 spawn_blocking 里释放 worker。
+    let tls_result = {
+        let cp = cert_path.clone();
+        let kp = key_path.clone();
+        tokio::task::spawn_blocking(move || {
+            tokio::runtime::Handle::current().block_on(setup_tls(&cp, &kp))
+        })
+        .await
+        .unwrap_or_else(|e| Err(eyre::eyre!("spawn_blocking join: {e}")))
+    };
+
     let https_app = app.clone().into_make_service();
-    let https_handle = match setup_tls(&cert_path, &key_path).await {
+    let https_handle = match tls_result {
         Ok(config) => {
             let https_addr = SocketAddr::from(([0, 0, 0, 0], 443));
             // axum_server::RustlsConfig 把 rustls::ServerConfig 包一层，

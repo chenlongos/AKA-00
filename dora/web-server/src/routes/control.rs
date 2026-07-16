@@ -214,10 +214,11 @@ async fn handle_ws(
             let mut buf = vec![0xBBu8];
             // 前端 (api.ts:125) 把 int16 当作 mm/s 读（再除以 1000 得 m/s）
             // 这里把 float m/s × 1000 编码成 int16 mm/s，精度 1mm/s
+            // LE 对齐前端 api.ts DataView.getInt16(..., true) 和 Python struct.pack("<Bhh", ...)
             let left_mmps = (s.left_speed * 1000.0).round() as i16;
             let right_mmps = (s.right_speed * 1000.0).round() as i16;
-            buf.extend_from_slice(&left_mmps.to_be_bytes());
-            buf.extend_from_slice(&right_mmps.to_be_bytes());
+            buf.extend_from_slice(&left_mmps.to_le_bytes());
+            buf.extend_from_slice(&right_mmps.to_le_bytes());
             if tx_for_send.lock().await.send(Message::Binary(buf.into())).await.is_err() {
                 break;
             }
@@ -338,5 +339,7 @@ async fn handle_ws(
     }
 
     send_task.abort();
+    // 断开连接时自动停电机，防止摇杆松手后小车继续跑
+    motor.action(Action::Stop, 0, 0).await;
     log::info!("[ws] client disconnected");
 }

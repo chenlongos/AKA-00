@@ -118,6 +118,8 @@ async fn run() -> Result<()> {
                     }
                 };
 
+                // 机械臂命令频率低（用户点击 grab/release），串口 write 直接执行即可，
+                // 不需要 spawn_blocking（其线程池调度在单核 RISC-V 上反而引入延迟）。
                 let mut d = driver.lock().unwrap();
                 match cmd {
                     ArmCmd::SetAngle { servo_id, angle } => {

@@ -5,7 +5,7 @@
 width = 320
 height = 240
 fps = 24
-jpeg_quality = 50
+jpeg_quality = 30
 
 [motor]
 # 底盘驱动类型："dev" (开发模式), "tt_pid" (真实硬件)
