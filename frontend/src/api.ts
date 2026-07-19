@@ -23,6 +23,13 @@ export const arm = {
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({driver, angles}),
         }).then(r => r.json()),
+    defaultAngles: () => fetch("/api/arm/angles/default").then(r => r.json()),
+    saveDefaultAngles: (driver: string, angles: object) =>
+        fetch("/api/arm/angles/default", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({driver, angles}),
+        }).then(r => r.json()),
     preview: (driver: string, key: string, value: number, angles: object) =>
         fetch("/api/arm/angles/preview", {
             method: "POST",

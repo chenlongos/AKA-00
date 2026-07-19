@@ -1,3 +1,5 @@
+import json
+import os
 from flask import Blueprint, request, jsonify
 
 from app.config import config
@@ -5,6 +7,7 @@ from app.services import get_control_service
 from src.arm_control.angle_config import load_arm_angles, save_arm_angles
 
 arm_bp = Blueprint("arm", __name__, url_prefix="/api/arm")
+_DEFAULT_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "arm_angles_default.json")
 
 
 @arm_bp.route("/angles", methods=["GET", "POST"])
@@ -38,6 +41,30 @@ def arm_angles():
         "driver": driver,
         "angles": angles,
     })
+
+
+@arm_bp.route("/angles/default", methods=["GET", "POST"])
+def arm_angles_default():
+    driver = config.arm_driver
+    if request.method == "GET":
+        try:
+            with open(_DEFAULT_FILE) as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return jsonify({"error": "default config not found"}), 404
+        return jsonify({"driver": driver, "angles": data})
+
+    # POST: 保存默认配置
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "json body required"}), 400
+    angles_payload = payload.get("angles", payload)
+    try:
+        with open(_DEFAULT_FILE, "w") as f:
+            json.dump(angles_payload, f)
+    except IOError as e:
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"status": "success", "driver": driver, "angles": angles_payload})
 
 
 @arm_bp.route("/angles/preview", methods=["POST"])

@@ -43,6 +43,7 @@ function App() {
                     <Route path="/settings" element={<SettingsPage />} />
                     <Route path="/wifi" element={<WiFiConfigPage />} />
                     <Route path="/arm-angles" element={<ArmAnglesPage />} />
+                    <Route path="/arm-angles/admin" element={<ArmAnglesPage />} />
                     <Route path="/ota" element={<OTAPage />} />
                     <Route path="/speed-config" element={<SpeedConfigPage />} />
                     <Route path="/gravity" element={<GravityControlPage />} />

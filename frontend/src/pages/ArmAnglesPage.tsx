@@ -1,4 +1,5 @@
 import {useEffect, useRef, useState} from "react";
+import {useLocation} from "react-router-dom";
 import {useViewportScale} from "../hooks/useViewportScale";
 import {api} from "../api";
 import Header from "../components/Header";
@@ -38,6 +39,8 @@ const ArmAnglesPage = () => {
     const [pwmStatus, setPwmStatus] = useState("");
     const [saving, setSaving] = useState(false);
     const [savingPwm, setSavingPwm] = useState(false);
+    const location = useLocation();
+    const isAdmin = location.pathname.endsWith("/admin");
     const previewTimerRef = useRef<number | null>(null);
     const requestIdRef = useRef(0);
 
@@ -50,7 +53,7 @@ const ArmAnglesPage = () => {
 
     const loadConfig = async () => {
         try {
-            const data = await api.arm.angles() as ArmAnglesResponse<ArmAnglesZP10S | ArmAnglesSTS>;
+            const data = await (isAdmin ? api.arm.defaultAngles() : api.arm.angles()) as ArmAnglesResponse<ArmAnglesZP10S | ArmAnglesSTS>;
             if (data.driver === "zp10s") { setZp10s(data.angles as ArmAnglesZP10S); setDriver(data.driver); }
             else if (data.driver === "sts3215") { setSts(data.angles as ArmAnglesSTS); setDriver(data.driver); }
         } catch {}
@@ -61,7 +64,8 @@ const ArmAnglesPage = () => {
 
     const saveConfig = async () => {
         setSaving(true); setStatus("");
-        try { const r = await api.arm.saveAngles(driver, currentAngles) as {error?: string}; setStatus(r.error ? "保存失败" : "保存成功"); if (!r.error) setTimeout(() => setStatus(""), 2000); }
+        const save = isAdmin ? api.arm.saveDefaultAngles : api.arm.saveAngles;
+        try { const r = await save(driver, currentAngles) as {error?: string}; setStatus(r.error ? "保存失败" : (isAdmin ? "出厂默认已保存" : "保存成功")); if (!r.error) setTimeout(() => setStatus(""), 2000); }
         catch (e) { setStatus("请求失败: " + e); }
         finally { setSaving(false); }
     };
@@ -126,14 +130,31 @@ const ArmAnglesPage = () => {
             background: "#f2f2f7",
         } as React.CSSProperties}>
             <Header
-                title="舵机角度配置"
+                title={isAdmin ? "出厂默认角度" : "舵机角度配置"}
                 subtitle={<span>当前驱动: <b>{driver}</b></span>}
                 showClose closeTo="/settings"
                 actions={
-                    <button onClick={saveConfig} disabled={saving}
-                            style={{color: saving ? "var(--color-text-dim)" : "var(--color-primary)", fontSize: scalePx(14), fontWeight: 600, background: "none", border: "none", cursor: saving ? "not-allowed" : "pointer"}}>
-                        {saving ? "保存中..." : "保存"}
-                    </button>
+                    <div style={{display: "flex", gap: scalePx(12), alignItems: "center"}}>
+                        {!isAdmin && (
+                            <button onClick={async () => {
+                                try {
+                                    const def = await api.arm.defaultAngles() as {angles?: object};
+                                    if (def.angles) {
+                                        if (driver === "zp10s") setZp10s(def.angles as ArmAnglesZP10S);
+                                        else setSts(def.angles as ArmAnglesSTS);
+                                        setStatus("已恢复默认值，请点击保存");
+                                        setTimeout(() => setStatus(""), 3000);
+                                    }
+                                } catch { setStatus("恢复失败"); }
+                            }} style={{color: "var(--color-text-dim)", fontSize: scalePx(13), fontWeight: 400, background: "none", border: "none", cursor: "pointer"}}>
+                                恢复默认
+                            </button>
+                        )}
+                        <button onClick={saveConfig} disabled={saving}
+                                style={{color: saving ? "var(--color-text-dim)" : "var(--color-primary)", fontSize: scalePx(14), fontWeight: 600, background: "none", border: "none", cursor: saving ? "not-allowed" : "pointer"}}>
+                            {saving ? "保存中..." : "保存"}
+                        </button>
+                    </div>
                 }
             />
 

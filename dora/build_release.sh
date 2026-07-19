@@ -647,6 +647,7 @@ ok "static/"
 # 板子 web-server 通过 $DORA_HOME/arm_angles.json 读写。dora/ 子目录不再持有这份文件。
 cp "$SCRIPT_DIR/../arm_angles.json" "$PACKAGE_DIR/arm_angles.json"
 ok "arm_angles.json"
+cp "$SCRIPT_DIR/../arm_angles_default.json" "$PACKAGE_DIR/arm_angles_default.json" 2>/dev/null && ok "arm_angles_default.json" || true
 cp "$SCRIPT_DIR/../speed_config.json" "$PACKAGE_DIR/speed_config.json"
 ok "speed_config.json"
 

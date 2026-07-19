@@ -1,0 +1,10 @@
+{
+  "servo0_lift": 150,
+  "servo0_prepare": 41,
+  "servo1_lift": 150,
+  "servo1_prepare": 228,
+  "servo2_approach": 150,
+  "servo2_grab": 150,
+  "servo2_lift": 150,
+  "servo2_prepare": 44
+}

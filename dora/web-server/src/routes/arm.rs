@@ -21,6 +21,7 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/arm/angles", get(get_angles).post(save_angles))
         .route("/api/arm/angles/preview", post(preview))
+        .route("/api/arm/angles/default", get(get_default).post(post_default))
 }
 
 async fn get_angles(State(s): State<Arc<AppState>>) -> Json<serde_json::Value> {
@@ -66,6 +67,56 @@ struct PreviewBody {
     value: u16,
     #[serde(default)]
     angles: BTreeMap<String, u16>,
+}
+
+// ── GET/POST /api/arm/angles/default → arm_angles_default.json ──
+
+fn default_path() -> std::path::PathBuf {
+    let base = std::env::var("ARM_ANGLES_PATH")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("arm_angles.json"));
+    base.with_file_name("arm_angles_default.json")
+}
+
+async fn get_default(State(s): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    let driver = s.arm.driver_name().to_string();
+    let path = default_path();
+    let angles: BTreeMap<String, u16> = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default();
+    Json(serde_json::json!({ "driver": driver, "angles": angles }))
+}
+
+#[derive(Deserialize)]
+struct DefaultBody {
+    driver: String,
+    #[serde(default)]
+    angles: BTreeMap<String, u16>,
+}
+
+async fn post_default(
+    State(s): State<Arc<AppState>>,
+    Json(body): Json<DefaultBody>,
+) -> (axum::http::StatusCode, Json<serde_json::Value>) {
+    if body.driver != s.arm.driver_name() {
+        return (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "driver mismatch" })),
+        );
+    }
+    let path = default_path();
+    let json = serde_json::to_string_pretty(&body.angles).unwrap_or_default();
+    match std::fs::write(&path, json) {
+        Ok(()) => (
+            axum::http::StatusCode::OK,
+            Json(serde_json::json!({ "status": "success", "driver": body.driver, "angles": body.angles })),
+        ),
+        Err(e) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        ),
+    }
 }
 
 /// "servo0_prepare" → 0；前端 key 形如 "servo<N>_*"
