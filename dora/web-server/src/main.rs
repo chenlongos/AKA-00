@@ -35,7 +35,7 @@ use services::motor::MotorService;
 /// - 缺 cert/key 时用 rcgen 即时生成（CN=AKA-00 + localhost，3650 天）
 /// - 路径默认 <DORA_HOME>/cert.pem + key.pem，可用 APP_CERT_PATH / APP_KEY_PATH 覆盖
 /// - 与 python run.py 的 ensure_cert() 行为一致
-async fn setup_tls(cert_path: &Path, key_path: &Path) -> Result<rustls::ServerConfig> {
+fn setup_tls(cert_path: &Path, key_path: &Path) -> Result<rustls::ServerConfig> {
     if !cert_path.exists() || !key_path.exists() {
         log::info!(
             "[web-server] generating self-signed cert (CN=AKA-00, 3650d) at {} + {}",
@@ -183,44 +183,34 @@ async fn run() -> Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(|_| dora_home.join("key.pem"));
 
-    // TLS 证书生成（rcgen RSA 2048）在单核 RISC-V 上可能需要 5-15s。
-    // 如果 inline 执行会占住唯一的 tokio worker 线程，HTTP server 被饿死，
-    // curl 连不上 → init.sh 健康检查超时。放 spawn_blocking 里释放 worker。
-    let tls_result = {
-        let cp = cert_path.clone();
-        let kp = key_path.clone();
-        tokio::task::spawn_blocking(move || {
-            tokio::runtime::Handle::current().block_on(setup_tls(&cp, &kp))
-        })
-        .await
-        .unwrap_or_else(|e| Err(eyre::eyre!("spawn_blocking join: {e}")))
-    };
+    let cp = cert_path.clone();
+    let kp = key_path.clone();
+    let https_port = std::env::var("APP_HTTPS_PORT")
+        .ok().and_then(|s| s.parse().ok())
+        .unwrap_or(config.web.https_port);
+    let https_app = app.clone();
 
-    let https_app = app.clone().into_make_service();
-    let https_handle = match tls_result {
-        Ok(config) => {
-            let https_addr = SocketAddr::from(([0, 0, 0, 0], 443));
-            // axum_server::RustlsConfig 把 rustls::ServerConfig 包一层，
-            // 内部做 non-blocking + accept loop，跟 python 同语义。
-            let rustls_cfg = axum_server::tls_rustls::RustlsConfig::from_config(std::sync::Arc::new(config));
-            let handle = tokio::spawn(async move {
-                if let Err(e) = axum_server::bind_rustls(https_addr, rustls_cfg)
-                    .serve(https_app)
-                    .await
-                {
-                    log::warn!("[web-server] https server exited: {e}");
-                } else {
-                    log::info!("[web-server] HTTPS shut down cleanly");
-                }
-            });
-            log::info!(
-                "[web-server] Listening on https://0.0.0.0:443 (cert: {})",
-                cert_path.display()
+    // TLS 证书生成在 spawn_blocking 执行（避免 RSA 密钥生成阻塞 tokio worker）
+    let tls_cfg = tokio::task::spawn_blocking(move || setup_tls(&cp, &kp))
+        .await
+        .unwrap_or_else(|e| Err(eyre::eyre!("spawn_blocking: {e}")));
+
+    let https_handle = match tls_cfg {
+        Ok(cfg) => {
+            let axum_cfg = axum_server::tls_rustls::RustlsConfig::from_config(
+                std::sync::Arc::new(cfg),
             );
-            Some(handle)
+            let addr = SocketAddr::from(([0, 0, 0, 0], https_port));
+            log::info!("[web-server] Listening on https://0.0.0.0:{}", https_port);
+            Some(tokio::spawn(async move {
+                axum_server::bind_rustls(addr, axum_cfg)
+                    .serve(https_app.into_make_service())
+                    .await
+                    .unwrap_or_else(|e| log::warn!("[web-server] https: {e}"));
+            }))
         }
         Err(e) => {
-            log::warn!("[web-server] HTTPS disabled (cert setup failed: {e:#})");
+            log::warn!("[web-server] HTTPS disabled: {e:#}");
             None
         }
     };

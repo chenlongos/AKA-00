@@ -40,7 +40,11 @@ pub struct ArmConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct WebConfig {
     pub port: u16,
+    #[serde(default = "default_https_port")]
+    pub https_port: u16,
 }
+
+fn default_https_port() -> u16 { 5443 }
 
 /// 日志配置 —— motor-bridge / web-server / state-node 启动时用其 level 作为
 /// env_logger 的默认 filter。RUST_LOG 仍然可以覆盖。
@@ -66,7 +70,7 @@ impl Default for Config {
             camera: CameraConfig { width: 640, height: 480, fps: 30, jpeg_quality: 70 },
             motor: MotorConfig { backend: "dev".into(), port: "/dev/ttyS1".into(), baudrate: 115200, ppr: 4680 },
             arm: ArmConfig { backend: "dev".into(), port: "/dev/ttyS2".into(), baudrate: 115200 },
-            web: WebConfig { port: 80 },
+            web: WebConfig { port: 80, https_port: 5443 },
             chassis: ChassisConfig { wheel_diameter_mm: 62.0, gear_ratio: 90 },
             logging: LoggingConfig { level: "info".into() },
         }

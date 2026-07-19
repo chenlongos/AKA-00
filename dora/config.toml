@@ -22,6 +22,7 @@ baudrate = 115200
 
 [web]
 port = 80
+https_port = 5443
 
 [chassis]
 # 底盘物理参数 — 用于把编码器 RPM 换算成线速度 m/s

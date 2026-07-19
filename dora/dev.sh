@@ -73,6 +73,7 @@ read_toml() {
 MOTOR_BACKEND=$(read_toml motor backend dev)
 ARM_BACKEND=$(read_toml arm backend dev)
 WEB_PORT=$(read_toml web port 80)
+HTTPS_PORT=$(read_toml web https_port 5443)
 LOG_LEVEL=$(read_toml logging level info)
 CAM_WIDTH=$(read_toml camera width 640)
 CAM_HEIGHT=$(read_toml camera height 480)
@@ -92,6 +93,7 @@ if [ -f "$ARM_ANGLES_PATH" ]; then
 fi
 
 # 下发到 web-server / camera-node / demo-node
+export APP_HTTPS_PORT="${APP_HTTPS_PORT:-$HTTPS_PORT}"
 export RUST_LOG="${RUST_LOG:-$LOG_LEVEL}"
 export CAMERA_LOG_LEVEL="${CAMERA_LOG_LEVEL:-$LOG_LEVEL}"
 export CAMERA_WIDTH="${CAMERA_WIDTH:-$CAM_WIDTH}"
@@ -111,6 +113,7 @@ echo ""
 echo "   motor backend:   $MOTOR_BACKEND"
 echo "   arm backend:     $ARM_BACKEND"
 echo "   web port:        $WEB_PORT"
+	echo "   https port:      $HTTPS_PORT"
 echo "   camera:          ${CAMERA_WIDTH}x${CAMERA_HEIGHT}"
 echo "   log level:       $RUST_LOG"
 echo "   demo base dir:   $DEMO_BASE_DIR"
