@@ -27,6 +27,7 @@ def create_app():
     from app.routes.camera import camera_bp
     from app.routes.demo import demo_bp
     from app.routes.ota import ota_bp
+    from app.routes.config import config_bp
     app.register_blueprint(system_bp)
     app.register_blueprint(motor_bp)
     app.register_blueprint(arm_bp)
@@ -34,6 +35,7 @@ def create_app():
     app.register_blueprint(camera_bp)
     app.register_blueprint(demo_bp)
     app.register_blueprint(ota_bp)
+    app.register_blueprint(config_bp)
     app.register_blueprint(wifi_bp)  # WiFi 路由注册到根路径
     app.register_blueprint(frontend_bp)
 

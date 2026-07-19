@@ -647,6 +647,8 @@ ok "static/"
 # 板子 web-server 通过 $DORA_HOME/arm_angles.json 读写。dora/ 子目录不再持有这份文件。
 cp "$SCRIPT_DIR/../arm_angles.json" "$PACKAGE_DIR/arm_angles.json"
 ok "arm_angles.json"
+cp "$SCRIPT_DIR/../speed_config.json" "$PACKAGE_DIR/speed_config.json"
+ok "speed_config.json"
 
 # 复制 demo 目录（demo-node 通过 DEMO_BASE_DIR=$DORA_HOME/demo 找 init.sh，
 # init.sh 内部 exec ./tennis ./yolo_model.cvimodel 0，所以二进制和模型必须在

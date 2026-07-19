@@ -134,15 +134,11 @@ class ControlService:
             self._motor_pair.set_speed(-speed, -speed)
             get_state_collector().set_target_speed(-speed, -speed)
         elif action == "left":
-            left = -int(speed)
-            right = int(speed)
-            self._motor_pair.set_speed(left, right)
-            get_state_collector().set_target_speed(left, right)
+            self._motor_pair.set_speed(-speed, speed)
+            get_state_collector().set_target_speed(-speed, speed)
         elif action == "right":
-            left = int(speed)
-            right = -int(speed)
-            self._motor_pair.set_speed(left, right)
-            get_state_collector().set_target_speed(left, right)
+            self._motor_pair.set_speed(speed, -speed)
+            get_state_collector().set_target_speed(speed, -speed)
         elif action == "stop":
             self._motor_pair.brake()
             get_state_collector().set_target_speed(0, 0)

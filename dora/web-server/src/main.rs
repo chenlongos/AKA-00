@@ -153,6 +153,7 @@ async fn run() -> Result<()> {
         .merge(routes::demo::router())
         .merge(routes::system::router())
         .merge(routes::base::router())
+        .merge(routes::config::router())
         .fallback_service(
             ServeDir::new(&static_dir)
                 .fallback(ServeFile::new(static_dir.join("index.html")))

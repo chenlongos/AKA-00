@@ -8,6 +8,7 @@ import DemoPage from "./pages/DemoPage.tsx";
 import RCDemoPage from "./pages/RCDemoPage.tsx";
 import GravityControlPage from "./pages/GravityControlPage.tsx";
 import SettingsPage from "./pages/SettingsPage.tsx";
+import SpeedConfigPage from "./pages/SpeedConfigPage.tsx";
 import OTAPage from "./pages/OTAPage.tsx";
 
 const TAB_PATHS = ["/", "/rc", "/demo", "/settings"];
@@ -43,6 +44,7 @@ function App() {
                     <Route path="/wifi" element={<WiFiConfigPage />} />
                     <Route path="/arm-angles" element={<ArmAnglesPage />} />
                     <Route path="/ota" element={<OTAPage />} />
+                    <Route path="/speed-config" element={<SpeedConfigPage />} />
                     <Route path="/gravity" element={<GravityControlPage />} />
                 </Routes>
             </div>

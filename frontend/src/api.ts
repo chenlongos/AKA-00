@@ -50,6 +50,17 @@ export const camera = {
     close: () => fetch("/api/camera/close", {method: "POST"}).then(r => r.json()),
 };
 
+// 配置
+export const config = {
+    speed: () => fetch("/api/config/speed").then(r => r.json()),
+    saveSpeed: (forward_speed: number, turn_speed: number) =>
+        fetch("/api/config/speed", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({forward_speed, turn_speed}),
+        }).then(r => r.json()),
+};
+
 // Demo
 export const demo = {
     list: () => fetch("/api/demo/list").then(r => r.json()),

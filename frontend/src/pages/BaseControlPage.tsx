@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from "react";
-import {controlSocket} from "../api";
+import {config, controlSocket} from "../api";
 import ControlButton from "../components/ControlButton.tsx";
 import CameraToggle from "../components/CameraToggle";
 import FullscreenButton from "../components/FullscreenButton";
@@ -17,6 +17,15 @@ const BaseControlPage = () => {
     const [wsReady, setWsReady] = useState(false);
     const [isLandscape, setIsLandscape] = useState(() => window.innerWidth > window.innerHeight);
     const [alertMsg, setAlertMsg] = useState("");
+    const [forwardSpeed, setForwardSpeed] = useState(50);
+    const [turnSpeed, setTurnSpeed] = useState(50);
+
+    useEffect(() => {
+        config.speed().then(c => {
+            if (c.forward_speed) setForwardSpeed(Math.min(60, c.forward_speed));
+            if (c.turn_speed) setTurnSpeed(Math.min(60, c.turn_speed));
+        }).catch(() => {});
+    }, []);
     const currentActionRef = useRef<string | null>(null);
 
     useEffect(() => {
@@ -83,7 +92,7 @@ const BaseControlPage = () => {
         return () => window.removeEventListener('hashchange', processHash);
     }, [wsReady]);
 
-    const send = (action: string, speed: number = 50) => {
+    const send = (action: string, speed: number = forwardSpeed) => {
         setStatus("执行: " + action);
         if (action === "stop") { controlSocket.sendJoystick(0, 0); }
         else if (action === "up") { controlSocket.sendJoystick(0, speed); }
@@ -93,7 +102,7 @@ const BaseControlPage = () => {
         else { controlSocket.sendAction(action, speed); }
     };
 
-    const handlePressStart = (action: string, speed?: number) => { currentActionRef.current = action; send(action, speed); };
+    const handlePressStart = (action: string, speed?: number) => { currentActionRef.current = action; send(action, speed ?? forwardSpeed); };
     const handlePressEnd = () => { currentActionRef.current = null; send("stop"); };
 
     const redirect = () => {
@@ -112,7 +121,7 @@ const BaseControlPage = () => {
     const contentW = Math.min(window.innerWidth - Math.max(60, window.innerWidth * 0.08), Math.round(400 * scale));
     const dpadBtn = (dir: string, label: string, bgColor: string) => (
         <button
-            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); handlePressStart(dir, dir === "left" || dir === "right" ? 50 : 50); }}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); handlePressStart(dir, dir === "left" || dir === "right" ? turnSpeed : forwardSpeed); }}
             onPointerUp={(e) => { e.preventDefault(); handlePressEnd(); }}
             onPointerLeave={handlePressEnd}
             onPointerCancel={handlePressEnd}
