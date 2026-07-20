@@ -63,6 +63,17 @@ impl MotorService {
         self.send_control(&json).await;
     }
 
+    /// 闭环距离控制（/api/control?action=up&distance=20&speed=0.25）
+    pub async fn move_distance(&self, direction: &str, distance_mm: f32, speed: u8) {
+        let json = serde_json::json!({
+            "command": "move",
+            "direction": direction,
+            "distance_mm": distance_mm,
+            "speed": speed,
+        });
+        self.send_control(&json).await;
+    }
+
     /// 直接设置电机速度（/api/motor/direct?left=N&right=N&duration=N）
     pub async fn direct(&self, left: i32, right: i32, duration_ms: u32) {
         let json = serde_json::json!({

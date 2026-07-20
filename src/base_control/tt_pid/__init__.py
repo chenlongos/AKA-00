@@ -21,6 +21,7 @@ CMD_STOP = 0x11
 CMD_BRAKE = 0x12
 CMD_GET_RPM = 0x20
 CMD_GET_STATUS = 0x21
+CMD_GET_ENCODER = 0x22
 CMD_RESET = 0xFF
 
 RSP_ACK = 0x80
@@ -40,7 +41,7 @@ class TtPidChassis:
     """
     TT马达 ESP32-C3 底盘 UART 控制器。
 
-    实现了 MotorPairProtocol 接口，可与 N20/Mock 互换。
+    实现了 MotorPairProtocol 接口，可与 Mock 互换。
 
     帧格式：0xAA 0x55 <cmd> <len> <payload...> <chk>
     校验：cmd ^ len ^ payload[0] ^ ... ^ payload[last]
@@ -192,3 +193,13 @@ class TtPidChassis:
         if rpm is None:
             return 0, 0
         return rpm.left, rpm.right
+
+    def get_encoder(self) -> tuple[int, int]:
+        """读取编码器累计脉冲（M1, M2），无延迟，ISR 实时更新。"""
+        resp = self._send_cmd(CMD_GET_ENCODER)
+        if resp and len(resp.get("payload", b"")) >= 8:
+            payload = resp["payload"]
+            c1 = struct.unpack(">i", payload[0:4])[0]
+            c2 = struct.unpack(">i", payload[4:8])[0]
+            return c1, c2
+        return 0, 0

@@ -26,12 +26,22 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/ws/control", get(ws_handler))
 }
 
-// ── REST: GET /api/control?action=up|down|left|right|stop|grab|release&speed=N&time=N ──
+// ── REST: GET /api/control?action=up|down|left|right|stop|grab|release&speed=N&distance=N&angle=N&time=N ──
+// speed: m/s (0.01~0.5, default 0.25), distance: cm, angle: degrees
+
+const MAX_SPEED_MPS: f32 = 0.5;
+const WHEEL_BASE_M: f32 = 0.15;
+
+fn mps_to_motor(mps: f32) -> u8 {
+    ((mps / MAX_SPEED_MPS * 100.0).clamp(1.0, 100.0)) as u8
+}
 
 #[derive(Deserialize, Default)]
 struct ControlParams {
     action: Option<String>,
-    speed: Option<u8>,
+    speed: Option<f32>,
+    distance: Option<f32>,
+    angle: Option<f32>,
     #[serde(rename = "time")]
     duration: Option<u32>,
 }
@@ -40,12 +50,6 @@ async fn control_action(
     State(s): State<Arc<AppState>>,
     Query(p): Query<ControlParams>,
 ) -> Json<serde_json::Value> {
-    // grab/release 是机械臂高层动作，分流到 ArmService 而不是 MotorService。
-    // 之前全部走 motor.path → motor-bridge 收到 {action:"grab"} 后 match 没
-    // 这个分支就 _=>continue 静默丢弃；WS 路径更糟 —— 前端包成
-    // {type:"action",action:"grab",speed,time}（没 command 字段、time 不是
-    // duration）连解析都过不了。对应 Python app/services/control_service.py
-    // 的 _apply_arm_action。
     let action_str = p.action.as_deref().unwrap_or("");
     if action_str == "grab" || action_str == "release" {
         let payload = serde_json::json!({ "command": action_str });
@@ -59,12 +63,29 @@ async fn control_action(
         "left" => Action::Left,
         "right" => Action::Right,
         "stop" => Action::Stop,
-        _ => {
-            return Json(serde_json::json!({"error": "unknown action"}));
-        }
+        _ => { return Json(serde_json::json!({"error": "unknown action"})); }
     };
-    s.motor.action(action, p.speed.unwrap_or(100), p.duration.unwrap_or(0)).await;
-    Json(serde_json::json!({"ok": true}))
+
+    let mps = p.speed.unwrap_or(0.25).clamp(0.01, 0.5);
+    let motor_speed = mps_to_motor(mps);
+
+    if let Some(dist_cm) = p.distance {
+        // 闭环距离控制
+        s.motor.move_distance(action_str, dist_cm * 10.0, motor_speed).await;
+        return Json(serde_json::json!({"ok": true, "action": action_str, "mode": "closed_loop", "distance_mm": dist_cm * 10.0}));
+    }
+    if let Some(angle_deg) = p.angle {
+        // 转角 → 估算距离（弧长）
+        let arc_mm = (angle_deg / 360.0) * std::f32::consts::PI * WHEEL_BASE_M * 1000.0;
+        let dir = match action_str { "left" => "left", "right" => "right", _ => action_str };
+        s.motor.move_distance(dir, arc_mm, motor_speed).await;
+        return Json(serde_json::json!({"ok": true, "action": action_str, "mode": "closed_loop", "angle_deg": angle_deg}));
+    }
+
+    // 无 distance/angle → 开环时间控制
+    let duration_ms = p.duration.unwrap_or(0);
+    s.motor.action(action, motor_speed, duration_ms).await;
+    Json(serde_json::json!({"ok": true, "action": action_str, "mode": "open_loop", "duration_ms": duration_ms}))
 }
 
 // ── WebSocket: /ws/control ──

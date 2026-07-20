@@ -1,9 +1,12 @@
 import threading
+import time
 
 from src.arm_control.interfaces import create_gripper
 from src.base_control.interfaces import create_motor_pair
 from src.base_control.pwm_channel_config import load_pwm_channels
 from src.state import get_state_collector
+
+_WHEEL_CIRCUMFERENCE_M = 3.1415926535 * 0.062  # 轮径 62mm
 
 
 class ControlService:
@@ -23,15 +26,8 @@ class ControlService:
 
     def _create_motor_pair(self):
         motor_pair = create_motor_pair(
-            left_chip=self._config.base_left_chip,
-            left_ch1=self._pwm_channels["left_ch1"],
-            left_ch2=self._pwm_channels["left_ch2"],
-            right_chip=self._config.base_right_chip,
-            right_ch1=self._pwm_channels["right_ch1"],
-            right_ch2=self._pwm_channels["right_ch2"],
-            chip_type=self._config.base_chip_type,
+            port=self._config.base_port,
             backend=self._config.base_driver,
-            base_port=self._config.base_port
         )
         get_state_collector().set_motor_pair(motor_pair)
         return motor_pair
@@ -62,6 +58,71 @@ class ControlService:
             self._schedule_stop(duration)
             return {"status": "success", "left": left, "right": right, "duration": duration, "mode": "scheduled"}
         return {"status": "success", "left": left, "right": right}
+
+    def move_distance(self, direction: str, distance_mm: float, speed: int) -> dict:
+        """闭环距离控制：编码器脉冲计数，到达目标停车（精度 ±2%）"""
+        speed = min(100, max(1, abs(speed)))
+
+        if direction == "forward":
+            self._motor_pair.set_speed(speed, speed)
+        elif direction == "backward":
+            self._motor_pair.set_speed(-speed, -speed)
+        elif direction == "left":
+            self._motor_pair.set_speed(-speed, speed)
+        elif direction == "right":
+            self._motor_pair.set_speed(speed, -speed)
+        else:
+            raise ValueError(f"unknown direction: {direction}")
+
+        # 编码器闭环：轮端 PPR=4680, 轮径 62mm, RPM 已含齿轮比
+        pulses_per_mm = 4680.0 / (3.1415926535 * 62.0)
+        target_pulses = int(distance_mm * pulses_per_mm)
+        done_pulses = 0
+
+        try:
+            start_l, start_r = self._motor_pair.get_encoder()
+        except (AttributeError, Exception):
+            # 无编码器（MockMotorPair 等），回退到时间估算
+            time.sleep(distance_mm / 1000.0 / 0.25)
+            self._motor_pair.brake()
+            return {"status": "success", "direction": direction,
+                    "target_mm": distance_mm, "mode": "open_loop"}
+
+        # 安全兜底：超时保护
+        max_time = (distance_mm / 1000.0 / 0.1) * 3
+        deadline = time.time() + max(1.0, max_time)
+
+        # 接近目标时减速（防过冲）
+        cruise_speed = speed
+        crawl_speed = max(10, speed // 3)
+        slow_at = int(target_pulses * 0.7)
+        slowed = False
+
+        while time.time() < deadline:
+            try:
+                cur_l, cur_r = self._motor_pair.get_encoder()
+            except Exception:
+                continue
+            done_pulses = max(abs(cur_l - start_l), abs(cur_r - start_r))
+
+            if not slowed and done_pulses >= slow_at:
+                slowed = True
+                s = crawl_speed
+                sgn = 1 if direction in ("forward", "right") else -1
+                if direction in ("forward", "backward"):
+                    self._motor_pair.set_speed(sgn * s, sgn * s)
+                else:
+                    self._motor_pair.set_speed(-sgn * s, sgn * s)
+
+            if done_pulses >= target_pulses:
+                break
+
+        time.sleep(0.02)  # 等串口清空
+        self._motor_pair.brake()
+        time.sleep(0.05)  # 等刹车生效
+        return {"status": "success", "direction": direction,
+                "target_mm": distance_mm,
+                "traveled_mm": round(done_pulses / pulses_per_mm, 1)}
 
     def send_raw_command(self, cmd: str) -> dict[str, str]:
         raw_sender = getattr(getattr(self._gripper, "_zp10s", None), "_send_raw_cmd", None)

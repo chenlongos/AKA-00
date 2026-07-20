@@ -1,26 +1,10 @@
 """电机硬件接口抽象。"""
 
-from __future__ import annotations
-
 import os
 import sys
 from typing import Protocol, runtime_checkable
 
 from src.base_control.tt_pid import TtPidChassis
-
-
-@runtime_checkable
-class MotorProtocol(Protocol):
-    """单电机抽象接口。"""
-
-    def set_speed(self, speed: int) -> None:
-        ...
-
-    def brake(self, val: int = 255) -> None:
-        ...
-
-    def close(self):
-        ...
 
 
 @runtime_checkable
@@ -31,7 +15,7 @@ class MotorPairProtocol(Protocol):
         ...
 
     def get_speeds(self) -> tuple[int, int]:
-        """获取左右轮速度。N20 返回目标速度，TT PID 返回实时速度。"""
+        """获取左右轮实时 RPM。"""
         ...
 
     def brake(self) -> None:
@@ -44,46 +28,11 @@ class MotorPairProtocol(Protocol):
         ...
 
     def reinitialize(self) -> bool:
-        """重新初始化硬件（TT PID 用于重置 ESP32 状态）。若无此方法则为空操作。"""
         ...
 
-
-class MotorPairAdapter:
-    """N20 双轮适配器。"""
-
-    def __init__(self, left: MotorProtocol, right: MotorProtocol) -> None:
-        self._left = left
-        self._right = right
-        self._last_left = 0
-        self._last_right = 0
-
-    def set_speed(self, left: int, right: int) -> None:
-        self._last_left = left
-        self._last_right = right
-        self._left.set_speed(left)
-        self._right.set_speed(right)
-
-    def get_speeds(self) -> tuple[int, int]:
-        return self._last_left, self._last_right
-
-    def brake(self) -> None:
-        self._last_left = 0
-        self._last_right = 0
-        self._left.brake()
-        self._right.brake()
-
-    def sleep(self) -> None:
-        self._last_left = 0
-        self._last_right = 0
-        self._left.set_speed(0)
-        self._right.set_speed(0)
-
-    def close(self) -> None:
-        self._left.close()
-        self._right.close()
-
-    def reinitialize(self) -> bool:
-        return True
+    def get_encoder(self) -> tuple[int, int]:
+        """读取编码器累计脉冲 (M1, M2)。"""
+        ...
 
 
 class MockMotorPair:
@@ -117,37 +66,19 @@ class MockMotorPair:
     def reinitialize(self) -> bool:
         return True
 
+    def get_encoder(self) -> tuple[int, int]:
+        return 0, 0
+
 
 def create_motor_pair(
-    left_chip: int = 4,
-    left_ch1: int = 0,
-    left_ch2: int = 1,
-    right_chip: int = 4,
-    right_ch1: int = 2,
-    right_ch2: int = 3,
-    chip_type: str = "sg2002",
+    port: str = "/dev/ttyS1",
     backend: str = "tt_pid",
-    base_port: str = "/dev/ttyS1",
-) -> MockMotorPair | TtPidChassis | MotorPairAdapter:
-    """
-    创建双轮底盘。
-
-    backend:
-      "n20"    - N20 PWM 直驱（默认）
-      "tt_pid" - TT马达 ESP32-C3 UART 控制
-      "mock"   - Windows/macOS 开发用 Mock
-    """
+) -> MockMotorPair | TtPidChassis:
+    """创建双轮底盘。backend: tt_pid（ESP32 编码器） 或 mock（开发用）。"""
     if os.name == "nt" or sys.platform == "darwin":
         return MockMotorPair()
 
     if backend == "tt_pid":
-        from src.base_control.tt_pid import TtPidChassis
+        return TtPidChassis(port=port)
 
-        return TtPidChassis(port=base_port)
-
-    from src.base_control.n20 import N20
-
-    return MotorPairAdapter(
-        N20(left_chip, left_ch1, left_ch2, chip_type=chip_type),
-        N20(right_chip, right_ch1, right_ch2, chip_type=chip_type),
-    )
+    return MockMotorPair()
