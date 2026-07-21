@@ -7,6 +7,7 @@ import tarfile
 import threading
 import urllib.request
 from flask import Blueprint, request, jsonify
+from app.config import config as hw_config
 
 ota_bp = Blueprint("ota", __name__, url_prefix="/api/ota")
 
@@ -17,13 +18,9 @@ VERSION_FILE = os.path.join(APP_DIR, "VERSION")
 # 进度追踪（task_id → {progress, status, message}）
 _upgrade_tasks = {}
 
-# ---- 拉取配置 ----
-# GitHub Releases API
-GITHUB_REPO = os.environ.get("OTA_GITHUB_REPO", "chenlongos/AKA-00")
-RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-# 如果不用 GitHub，可以设置 OTA_CHECK_URL + OTA_DOWNLOAD_URL 两个自定义地址
-CUSTOM_CHECK_URL = os.environ.get("OTA_CHECK_URL", "")    # 返回 {"version":"...","url":"..."}
-CUSTOM_DOWNLOAD_URL = os.environ.get("OTA_DOWNLOAD_URL", "")
+# ---- 更新源配置 ----
+CHECK_URL = hw_config.ota_check_url or os.environ.get("OTA_CHECK_URL", "")
+DOWNLOAD_URL = hw_config.ota_download_url or os.environ.get("OTA_DOWNLOAD_URL", "")
 DOWNLOAD_TIMEOUT = int(os.environ.get("OTA_TIMEOUT", "60"))
 
 
@@ -198,52 +195,21 @@ def _http_get_json(url):
     })
     try:
         with urllib.request.urlopen(req, timeout=DOWNLOAD_TIMEOUT) as resp:
-            body = resp.read().decode()
-            data = json.loads(body)
-            # GitHub API 限流检测
-            if isinstance(data, dict) and data.get("message") and "API rate limit" in str(data.get("message", "")):
-                raise Exception("GitHub API 限流，请稍后重试或使用自定义更新源")
-            return data
+            return json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         raise Exception(f"HTTP {e.code}: {e.reason}")
 
 
 def _fetch_release_info():
-    """
-    获取远程版本信息。
-    优先使用自定义 URL（OTA_CHECK_URL），否则用 GitHub Releases API。
-    返回 {"version": "...", "url": "...", "size": ...} 或 None。
-    """
-    # 方式 A: 自定义 HTTP 更新源
-    if CUSTOM_CHECK_URL:
-        data = _http_get_json(CUSTOM_CHECK_URL)
-        return {
-            "version": str(data.get("version", "")),
-            "url": str(data.get("url", CUSTOM_DOWNLOAD_URL)),
-            "size": int(data.get("size", 0)),
-        }
-
-    # 方式 B: GitHub Releases（默认）
-    data = _http_get_json(RELEASE_API)
-    tag = data.get("tag_name", "")
-    assets = data.get("assets", [])
-
-    # 找名为 aka-ota.tar.gz 的 asset，fallback 到第一个
-    download_url = ""
-    size = 0
-    for a in assets:
-        if a.get("name", "").endswith(".tar.gz"):
-            download_url = a["browser_download_url"]
-            size = a.get("size", 0)
-            break
-    if not download_url and assets:
-        download_url = assets[0]["browser_download_url"]
-        size = assets[0].get("size", 0)
-
-    if not download_url:
+    """获取远程版本信息，返回 {"version": "...", "url": "...", "size": ...} 或 None。"""
+    if not CHECK_URL:
         return None
-
-    return {"version": tag, "url": download_url, "size": size}
+    data = _http_get_json(CHECK_URL)
+    return {
+        "version": str(data.get("version", "")),
+        "url": str(data.get("url", DOWNLOAD_URL)),
+        "size": int(data.get("size", 0)),
+    }
 
 
 def _download(url, dest):

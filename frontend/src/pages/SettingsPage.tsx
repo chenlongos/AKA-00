@@ -12,6 +12,7 @@ const SettingsPage = () => {
         {icon: "📶", title: "WiFi 配置", desc: "扫描并连接无线网络", path: "/wifi"},
         {icon: "🔧", title: "舵机角度配置", desc: "调整抓取序列和 PWM 通道", path: "/arm-angles"},
         {icon: "🚗", title: "行驶速度", desc: "调整前进和转向速度百分比", path: "/speed-config"},
+        {icon: "⬆️", title: "固件升级", desc: "检查更新并升级系统固件", path: "/ota"},
     ];
 
     return (

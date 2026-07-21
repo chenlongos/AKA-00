@@ -12,6 +12,8 @@ class HardwareConfig:
     base_port: str = "/dev/ttyS1"
 
     demo_server_url: str = "http://124.222.162.228:8888"
+    ota_check_url: str = ""
+    ota_download_url: str = ""
 
     # 距离标定: D = m / P + c
     calib_m: float = 2671.82
