@@ -324,7 +324,7 @@ def _restart():
     with open(script, "w") as f:
         f.write("""#!/bin/sh
 sleep 2
-kill $(pgrep -f "python3.*run.py") 2>/dev/null
+pkill -f "python3.*run.py" 2>/dev/null || true
 sleep 1
 cd /root/AKA-00 && exec ./init.sh
 """)
