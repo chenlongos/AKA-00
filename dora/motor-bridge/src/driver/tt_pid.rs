@@ -30,6 +30,7 @@ const CMD_CONFIG: u8 = 0x02;
 const CMD_SET_SPEEDS: u8 = 0x13;
 const CMD_STOP: u8 = 0x11;
 const CMD_GET_STATUS: u8 = 0x21;
+const CMD_MOVE_DISTANCE: u8 = 0x23;  // ESP32 内置闭环距离控制
 
 const RSP_ACK: u8 = 0x80;
 const RSP_NACK: u8 = 0x81;
@@ -450,6 +451,18 @@ impl MotorDriver for TtPidDriver {
         info!("[tt_pid] reinitialize (re-run INIT)");
         self.init();
         true
+    }
+
+    fn move_distance(&mut self, dir: u8, speed: u8, target_pulses: u32) {
+        let payload: [u8; 6] = [
+            dir, speed,
+            (target_pulses >> 24) as u8,
+            (target_pulses >> 16) as u8,
+            (target_pulses >> 8) as u8,
+            target_pulses as u8,
+        ];
+        info!("[tt_pid] CMD_MOVE_DISTANCE dir={} speed={} target={}", dir, speed, target_pulses);
+        self.send_cmd(CMD_MOVE_DISTANCE, &payload);
     }
 
     /// 读 ESP32 实时状态，返回 (M1_RPM, M2_RPM)。

@@ -87,7 +87,6 @@ const BaseControlPage = () => {
         };
         processHash();
         window.addEventListener('hashchange', processHash);
-        controlSocket.sendPwmChannels();
         controlSocket.sendReinitialize();
         return () => window.removeEventListener('hashchange', processHash);
     }, [wsReady]);

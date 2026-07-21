@@ -44,23 +44,6 @@ fn joystick_to_tank(x: i8, y: i8) -> (i32, i32) {
     (c(fy + fx), c(fy - fx))
 }
 
-// ── 闭环距离控制 ──
-const WHEEL_CIRCUMFERENCE_M: f32 = 0.19478; // π × 0.062m
-const DISTANCE_POLL_MS: u64 = 50;
-
-struct DistanceCtrl {
-    target_m: f32,      // 目标距离(m)，正=前进
-    traveled_m: f32,    // 已行驶距离(m)
-}
-
-impl DistanceCtrl {
-    fn update(&mut self, left_rpm: i32, right_rpm: i32) -> bool {
-        let avg_mps = (left_rpm as f32 + right_rpm as f32) / 2.0 / 60.0 * WHEEL_CIRCUMFERENCE_M;
-        self.traveled_m += avg_mps * (DISTANCE_POLL_MS as f32 / 1000.0);
-        self.traveled_m.abs() >= self.target_m.abs()
-    }
-}
-
 fn main() -> Result<()> {
     // 日志初始化：[logging] level 作为默认 filter；RUST_LOG 可临时覆盖
     //   level = "info"  → 仅生命周期 + 错误
@@ -96,17 +79,13 @@ async fn run() -> Result<()> {
         Arc::new(Mutex::new(create_driver(&driver_config)));
     log::info!("[motor-bridge] Driver ready (backend={})", backend_name);
 
-    // 闭环距离控制状态
-    let dist_ctrl: Arc<tokio::sync::Mutex<Option<DistanceCtrl>>> = Arc::new(tokio::sync::Mutex::new(None));
-
-    // RPM 上报 + 距离闭环（50ms 间隔）
+    // RPM 上报（200ms）
     let driver_rpt = driver.clone();
-    let dist_rpt = dist_ctrl.clone();
     let node_rpt = Arc::new(tokio::sync::Mutex::new(node));
     let node_clone = node_rpt.clone();
 
     tokio::spawn(async move {
-        let mut tick = tokio::time::interval(std::time::Duration::from_millis(DISTANCE_POLL_MS));
+        let mut tick = tokio::time::interval(std::time::Duration::from_millis(200));
         loop {
             tick.tick().await;
             let driver_for_blocking = driver_rpt.clone();
@@ -116,22 +95,6 @@ async fn run() -> Result<()> {
                 Ok(v) => v,
                 Err(e) => { log::warn!("[motor-bridge] rpm: {:?}", e); (0, 0) }
             };
-
-            // 距离闭环检查
-            let mut ctrl = dist_rpt.lock().await;
-            let reached = if let Some(ref mut d) = *ctrl {
-                d.update(left, right)
-            } else { false };
-            if reached {
-                log::info!("[motor-bridge] distance reached: {:.1}mm",
-                    ctrl.as_ref().map(|d| d.traveled_m * 1000.0).unwrap_or(0.0));
-                *ctrl = None;
-                drop(ctrl);
-                let driver_stop = driver_rpt.clone();
-                tokio::task::spawn_blocking(move || { driver_stop.lock().unwrap().stop(); }).await.ok();
-            } else {
-                drop(ctrl);
-            }
 
             let status = serde_json::json!({ "left_rpm": left, "right_rpm": right });
             let bytes = serde_json::to_vec(&status).unwrap_or_default();
@@ -221,26 +184,17 @@ async fn run() -> Result<()> {
                             log::info!("[motor-bridge] reinitialize: {}", reinit);
                         }
                         MotorCmd::Move { direction, distance_mm, speed } => {
-                            let (l, r) = match direction.as_str() {
-                                "forward" => (speed as i32, speed as i32),
-                                "backward" => (-(speed as i32), -(speed as i32)),
-                                "left" => (-(speed as i32), speed as i32),
-                                "right" => (speed as i32, -(speed as i32)),
-                                other => {
-                                    log::warn!("[motor-bridge] unknown move direction: {}", other);
-                                    (0, 0)
-                                }
+                            let dir: u8 = match direction.as_str() {
+                                "forward" => 0,
+                                "backward" => 1,
+                                "left" => 2,
+                                "right" => 3,
+                                _ => { log::warn!("[motor-bridge] unknown direction: {}", direction); 0 }
                             };
-                            if l != 0 || r != 0 {
-                                d.set_speeds(l, r);
-                                drop(d);
-                                *dist_ctrl.lock().await = Some(DistanceCtrl {
-                                    target_m: distance_mm / 1000.0,
-                                    traveled_m: 0.0,
-                                });
-                                log::info!("[motor-bridge] move {} {}mm speed={}",
-                                    direction, distance_mm as u32, speed);
-                            }
+                            // PPR=4680, wheel=62mm → pulses = distance_mm * PPR / (π * D)
+                            let pulses = (distance_mm * 4680.0 / (std::f32::consts::PI * 62.0)) as u32;
+                            d.move_distance(dir, speed, pulses);
+                            log::info!("[motor-bridge] ESP32 move dir={} mm={} pulses={}", dir, distance_mm as u32, pulses);
                         }
                         _ => {}
                     }

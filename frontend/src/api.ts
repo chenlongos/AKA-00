@@ -38,17 +38,6 @@ export const arm = {
         }).then(r => r.json()),
 };
 
-// 底盘
-export const base = {
-    pwmChannels: () => fetch("/api/base/pwm_channels").then(r => r.json()),
-    savePwmChannels: (pwm_channels: object) =>
-        fetch("/api/base/pwm_channels", {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({pwm_channels}),
-        }),
-    reinitialize: () => fetch("/api/base/reinitialize", {method: "POST"}).then(r => r.json()),
-};
 
 // 摄像头
 export const camera = {
@@ -83,7 +72,7 @@ export const demo = {
     }).then(r => r.json()),
 };
 
-export const api = { system, motor, arm, base, camera, demo };
+export const api = { system, motor, arm, camera, demo };
 
 export type MotorStatus = { left: number; right: number };
 
@@ -91,7 +80,6 @@ export type JsonMsg =
     | { type: "ip"; ip: string }
     | { type: "action"; result: unknown }
     | { type: "raw_command"; result: unknown }
-    | { type: "pwm_channels"; data: Record<string, number> }
     | { type: "reinitialize"; result: unknown };
 
 // WebSocket 实时控制通道
@@ -186,10 +174,6 @@ export class ControlSocket {
 
     sendRequestIp() {
         this._sendJson({ type: "ip" });
-    }
-
-    sendPwmChannels() {
-        this._sendJson({ type: "pwm_channels" });
     }
 
     sendReinitialize() {

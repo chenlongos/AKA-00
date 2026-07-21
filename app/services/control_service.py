@@ -3,7 +3,6 @@ import time
 
 from src.arm_control.interfaces import create_gripper
 from src.base_control.interfaces import create_motor_pair
-from src.base_control.pwm_channel_config import load_pwm_channels
 from src.state import get_state_collector
 
 _WHEEL_CIRCUMFERENCE_M = 3.1415926535 * 0.062  # 轮径 62mm
@@ -16,7 +15,6 @@ class ControlService:
         self._duration_timer: threading.Timer | None = None
         self._duration_timer_lock = threading.Lock()
         self._arm_lock = threading.Lock()
-        self._pwm_channels = load_pwm_channels(config)
         self._motor_pair = self._create_motor_pair()
         self._gripper = create_gripper(
             driver=config.arm_driver,
@@ -60,69 +58,23 @@ class ControlService:
         return {"status": "success", "left": left, "right": right}
 
     def move_distance(self, direction: str, distance_mm: float, speed: int) -> dict:
-        """闭环距离控制：编码器脉冲计数，到达目标停车（精度 ±2%）"""
+        """ESP32 MCU 内部执行距离控制。"""
+        import struct
         speed = min(100, max(1, abs(speed)))
+        pulses_per_mm = 4680.0 / (3.1415926535 * 62.0)
+        target = int(distance_mm * pulses_per_mm)
+        dir_map = {"forward": 0, "backward": 1, "left": 2, "right": 3}
 
-        if direction == "forward":
-            self._motor_pair.set_speed(speed, speed)
-        elif direction == "backward":
-            self._motor_pair.set_speed(-speed, -speed)
-        elif direction == "left":
-            self._motor_pair.set_speed(-speed, speed)
-        elif direction == "right":
-            self._motor_pair.set_speed(speed, -speed)
-        else:
+        if direction not in dir_map:
             raise ValueError(f"unknown direction: {direction}")
 
-        # 编码器闭环：轮端 PPR=4680, 轮径 62mm, RPM 已含齿轮比
-        pulses_per_mm = 4680.0 / (3.1415926535 * 62.0)
-        target_pulses = int(distance_mm * pulses_per_mm)
-        done_pulses = 0
-
         try:
-            start_l, start_r = self._motor_pair.get_encoder()
-        except (AttributeError, Exception):
-            # 无编码器（MockMotorPair 等），回退到时间估算
-            time.sleep(distance_mm / 1000.0 / 0.25)
-            self._motor_pair.brake()
-            return {"status": "success", "direction": direction,
-                    "target_mm": distance_mm, "mode": "open_loop"}
+            payload = struct.pack(">BBi", dir_map[direction], speed, target)
+            self._motor_pair._send_cmd_noresp(0x23, payload)
+        except Exception:
+            return {"status": "error", "message": "CMD_MOVE_DISTANCE failed"}
 
-        # 安全兜底：超时保护
-        max_time = (distance_mm / 1000.0 / 0.1) * 3
-        deadline = time.time() + max(1.0, max_time)
-
-        # 接近目标时减速（防过冲）
-        cruise_speed = speed
-        crawl_speed = max(10, speed // 3)
-        slow_at = int(target_pulses * 0.7)
-        slowed = False
-
-        while time.time() < deadline:
-            try:
-                cur_l, cur_r = self._motor_pair.get_encoder()
-            except Exception:
-                continue
-            done_pulses = max(abs(cur_l - start_l), abs(cur_r - start_r))
-
-            if not slowed and done_pulses >= slow_at:
-                slowed = True
-                s = crawl_speed
-                sgn = 1 if direction in ("forward", "right") else -1
-                if direction in ("forward", "backward"):
-                    self._motor_pair.set_speed(sgn * s, sgn * s)
-                else:
-                    self._motor_pair.set_speed(-sgn * s, sgn * s)
-
-            if done_pulses >= target_pulses:
-                break
-
-        time.sleep(0.02)  # 等串口清空
-        self._motor_pair.brake()
-        time.sleep(0.05)  # 等刹车生效
-        return {"status": "success", "direction": direction,
-                "target_mm": distance_mm,
-                "traveled_mm": round(done_pulses / pulses_per_mm, 1)}
+        return {"status": "started", "mode": "esp32", "target_mm": distance_mm}
 
     def send_raw_command(self, cmd: str) -> dict[str, str]:
         raw_sender = getattr(getattr(self._gripper, "_zp10s", None), "_send_raw_cmd", None)
@@ -147,9 +99,6 @@ class ControlService:
         previewer(key, angle)
         return {"status": "success", "driver": driver, "key": key, "angle": angle}
 
-    def get_pwm_channels(self) -> dict[str, int]:
-        return self._pwm_channels.copy()
-
     def reinitialize_motor_pair(self) -> dict[str, object]:
         """重新初始化电机底盘（用于 tt_pid 等需要重置 ESP32 状态的场景）。"""
         reinit = getattr(self._motor_pair, "reinitialize", None)
@@ -157,15 +106,6 @@ class ControlService:
             result = reinit()
             return {"status": "success", "reinitialize": result}
         return {"status": "success", "reinitialize": "not_supported"}
-
-    def update_pwm_channels(self, pwm_channels: dict[str, int]) -> dict[str, object]:
-        self._cancel_pending_stop()
-        self._motor_pair.sleep()
-        self._motor_pair.close()
-        self._pwm_channels = pwm_channels.copy()
-        self._motor_pair = self._create_motor_pair()
-        get_state_collector().set_motor_pair(self._motor_pair)
-        return {"status": "success", "pwm_channels": self.get_pwm_channels()}
 
     def _cancel_pending_stop(self) -> None:
         with self._duration_timer_lock:

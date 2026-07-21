@@ -23,7 +23,6 @@ def create_app():
     from app.routes.system import system_bp
     from app.routes.motor import motor_bp
     from app.routes.arm import arm_bp
-    from app.routes.base import base_bp
     from app.routes.camera import camera_bp
     from app.routes.demo import demo_bp
     from app.routes.ota import ota_bp
@@ -31,7 +30,6 @@ def create_app():
     app.register_blueprint(system_bp)
     app.register_blueprint(motor_bp)
     app.register_blueprint(arm_bp)
-    app.register_blueprint(base_bp)
     app.register_blueprint(camera_bp)
     app.register_blueprint(demo_bp)
     app.register_blueprint(ota_bp)

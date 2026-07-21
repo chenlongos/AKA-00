@@ -16,6 +16,8 @@ pub trait MotorDriver: Send + Sync {
     fn rpm(&self) -> (i32, i32) { (0, 0) }
     /// 重新初始化硬件（tt_pid ESP32 重置等）
     fn reinitialize(&mut self) -> bool { true }
+    /// ESP32 内置闭环距离控制（dir:0=前进 1=后退 2=左 3=右, speed:0-100, target_pulses）
+    fn move_distance(&mut self, _dir: u8, _speed: u8, _target_pulses: u32) {}
 }
 
 /// 根据配置创建驱动实例

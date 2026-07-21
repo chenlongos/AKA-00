@@ -283,7 +283,7 @@ def _install(path):
             shutil.copy2(src, dst)
 
     # 确保脚本可执行
-    for name in ["init.sh", "uart_init.sh", "pwm_init.sh"]:
+    for name in ["init.sh", "uart_init.sh"]:
         p = os.path.join(APP_DIR, name)
         if os.path.exists(p):
             os.chmod(p, 0o755)

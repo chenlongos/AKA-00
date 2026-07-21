@@ -164,12 +164,6 @@ class ControlWebSocket(tornado.websocket.WebSocketHandler):
         elif typ == "ip":
             self._send_json({"type": "ip", "ip": get_wifi_ip()})
 
-        elif typ == "pwm_channels":
-            data = await tornado.ioloop.IOLoop.current().run_in_executor(
-                None, service.get_pwm_channels
-            )
-            self._send_json({"type": "pwm_channels", "data": data})
-
         elif typ == "reinitialize":
             result = await tornado.ioloop.IOLoop.current().run_in_executor(
                 None, service.reinitialize_motor_pair

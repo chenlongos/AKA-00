@@ -1,5 +1,3 @@
-import threading
-
 from flask import Blueprint, request, jsonify
 
 from app.services import get_control_service
@@ -42,26 +40,13 @@ def action_control():
             if distance_cm:
                 direction = {"up": "forward", "down": "backward",
                              "left": "left", "right": "right"}[action]
-                # 后台线程执行闭环控制，避免阻塞 Tornado
-                service = get_control_service()
-                threading.Thread(
-                    target=service.move_distance,
-                    args=(direction, distance_cm * 10, motor_speed),
-                    daemon=True
-                ).start()
-                return jsonify({"status": "started", "action": action,
-                                "mode": "closed_loop", "distance_mm": distance_cm * 10})
+                return jsonify(get_control_service().move_distance(
+                    direction, distance_cm * 10, motor_speed))
             elif angle_deg:
                 arc_mm = (angle_deg / 360.0) * PI * WHEEL_BASE_M * 1000.0
                 direction = {"left": "left", "right": "right"}[action]
-                service = get_control_service()
-                threading.Thread(
-                    target=service.move_distance,
-                    args=(direction, arc_mm, motor_speed),
-                    daemon=True
-                ).start()
-                return jsonify({"status": "started", "action": action,
-                                "mode": "closed_loop", "angle_deg": angle_deg})
+                return jsonify(get_control_service().move_distance(
+                    direction, arc_mm, motor_speed))
 
         # 无 distance/angle → 开环时间控制
         milliseconds = int(float(request.args.get('time', 0)))
