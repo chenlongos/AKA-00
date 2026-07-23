@@ -80,8 +80,7 @@ exec ./init.sh
 HEADER
 
 # Generate VERSION (for both build modes)
-git -C "$SCRIPT_DIR" describe --tags --always --dirty 2>/dev/null > "$SCRIPT_DIR/VERSION" || \
-    echo "dev-$(date +%Y%m%d%H%M)" > "$SCRIPT_DIR/VERSION"
+echo "$(date +%s)" > "$SCRIPT_DIR/VERSION"
 
 # Append payload (base64-encoded tar.gz)
 echo "Packaging project..."

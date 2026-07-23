@@ -5,17 +5,22 @@ import Card from "../components/Card";
 import ControlButton from "../components/ControlButton";
 import ConfirmDialog from "../components/ConfirmDialog";
 
-interface VersionInfo {
-    version?: string;
-    current?: string;
-    latest?: string;
+interface CheckResult {
+    current_version?: string;
+    latest_version?: string;
+    update_available?: boolean;
+    hardware_desc?: string;
+    software_desc?: string;
+    url?: string;
     message?: string;
 }
 
 const OTAPage = () => {
     const {scalePx} = useViewportScale();
-    const [currentVersion, setCurrentVersion] = useState<string>("加载中...");
-    const [latestVersion, setLatestVersion] = useState<string | null>(null);
+    const [currentVersion, setCurrentVersion] = useState("加载中...");
+    const [latestVersion, setLatestVersion] = useState("");
+    const [hasUpdate, setHasUpdate] = useState(false);
+    const [updateDesc, setUpdateDesc] = useState("");
     const [checking, setChecking] = useState(false);
     const [upgrading, setUpgrading] = useState(false);
     const [status, setStatus] = useState("");
@@ -24,35 +29,26 @@ const OTAPage = () => {
     const [upgradeProgress, setUpgradeProgress] = useState(0);
     const [upgradeMsg, setUpgradeMsg] = useState("");
 
-    useEffect(() => {
-        fetchVersion();
-    }, []);
-
-    const fetchVersion = async () => {
-        try {
-            const res = await fetch("/api/ota/version");
-            const data: VersionInfo = await res.json();
-            setCurrentVersion(data.version || data.current || "未知");
-        } catch {
-            setCurrentVersion("获取失败");
-        }
-    };
+    useEffect(() => { checkUpdate(); }, []);
 
     const checkUpdate = async () => {
         setChecking(true);
-        setStatus("正在检查更新...");
-        setLatestVersion(null);
+        setStatus("正在检查...");
         try {
             const res = await fetch("/api/ota/check");
-            const data: VersionInfo = await res.json();
-            if (data.latest) {
-                setLatestVersion(data.latest);
-                setStatus(data.latest !== currentVersion ? `发现新版本: ${data.latest}` : "已是最新版本");
+            const data = await res.json() as CheckResult;
+            if (data.current_version) setCurrentVersion(data.current_version);
+            if (data.latest_version) setLatestVersion(data.latest_version);
+            setHasUpdate(data.update_available === true);
+            if (data.update_available) {
+                const parts = [data.hardware_desc, data.software_desc].filter(Boolean);
+                setUpdateDesc(parts.join("；") || "有新版本可用");
+                setStatus("发现新版本");
             } else {
-                setStatus(data.message || "检查完成");
+                setStatus("已是最新版本");
             }
         } catch {
-            setStatus("检查更新失败");
+            setStatus("检查失败");
         }
         finally { setChecking(false); }
     };
@@ -181,7 +177,12 @@ const OTAPage = () => {
                         {latestVersion && (
                             <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: scalePx(8)}}>
                                 <span style={{color: "var(--color-text-dim)"}}>最新版本</span>
-                                <span style={{fontWeight: 600, color: "var(--color-primary)", fontFamily: "monospace"}}>{latestVersion}</span>
+                                <span style={{fontWeight: 600, color: "var(--color-text)", fontFamily: "monospace"}}>{latestVersion}</span>
+                            </div>
+                        )}
+                        {hasUpdate && (
+                            <div style={{marginTop: scalePx(6), color: "var(--color-success)", fontSize: scalePx(13)}}>
+                                {updateDesc}
                             </div>
                         )}
                     </div>
@@ -194,7 +195,7 @@ const OTAPage = () => {
                         <ControlButton variant="primary" size="full" onClick={checkUpdate} disabled={checking}>
                             {checking ? "检查中..." : "检查更新"}
                         </ControlButton>
-                        {latestVersion && latestVersion !== currentVersion && (
+                        {hasUpdate && (
                             <ControlButton variant="success" size="full" onClick={doUpgrade} disabled={upgrading}>
                                 {upgrading ? "升级中..." : "立即升级"}
                             </ControlButton>

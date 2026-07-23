@@ -11,7 +11,7 @@ from app.config import config as hw_config
 
 ota_bp = Blueprint("ota", __name__, url_prefix="/api/ota")
 
-APP_DIR = "/root/AKA-00"
+APP_DIR = os.path.join(os.path.dirname(__file__), "..", "..")  # app/routes/ota.py → 项目根
 OTA_DIR = os.path.join(APP_DIR, ".ota")
 VERSION_FILE = os.path.join(APP_DIR, "VERSION")
 
@@ -20,15 +20,17 @@ _upgrade_tasks = {}
 
 # ---- 更新源配置 ----
 CHECK_URL = hw_config.ota_check_url or os.environ.get("OTA_CHECK_URL", "")
-DOWNLOAD_URL = hw_config.ota_download_url or os.environ.get("OTA_DOWNLOAD_URL", "")
 DOWNLOAD_TIMEOUT = int(os.environ.get("OTA_TIMEOUT", "60"))
 
 
 def _version():
+    """返回 (版本号, Unix时间戳)"""
     if os.path.exists(VERSION_FILE):
-        with open(VERSION_FILE) as f:
-            return f.read().strip()
-    return "unknown"
+        parts = open(VERSION_FILE).read().strip().split()
+        if len(parts) >= 2:
+            return parts[0], parts[1]
+        return parts[0], "0"
+    return "unknown", "0"
 
 
 # ============================================================
@@ -37,7 +39,8 @@ def _version():
 
 @ota_bp.route("/version")
 def version():
-    return jsonify({"version": _version(), "service": "AKA-00"})
+    v, ts = _version()
+    return jsonify({"version": v, "updated": int(ts), "service": "AKA-00"})
 
 
 @ota_bp.route("/upgrade/progress")
@@ -51,32 +54,31 @@ def upgrade_progress():
 
 @ota_bp.route("/check")
 def check():
-    """检查远程是否有新版本"""
-    current = _version()
+    """检查远程是否有新版本（时间戳对比）"""
     try:
         info = _fetch_release_info()
     except Exception as e:
         return jsonify({
             "status": "error",
             "message": f"无法连接更新服务器: {e}",
-            "current": current,
         }), 502
 
     if info is None:
-        return jsonify({
-            "status": "error",
-            "message": "未找到可用更新",
-            "current": current,
-        }), 404
+        return jsonify({"status": "error", "message": "未找到可用更新"}), 404
 
-    latest = info["version"]
-    has_update = latest != current
+    cur_ver, cur_ts = _version()
+    remote_ts = int(info["version"])
+    has_update = remote_ts > int(cur_ts)
+    print(f"[ota] local={cur_ts} remote={remote_ts} update={has_update}", flush=True)
 
     return jsonify({
-        "current": current,
-        "latest": latest,
+        "current_version": cur_ver,
+        "current_updated": int(cur_ts),
+        "remote_updated": remote_ts,
         "update_available": has_update,
-        "size": info.get("size", 0),
+        "latest_version": info.get("version_number", ""),
+        "hardware_desc": info.get("hardware_desc", ""),
+        "software_desc": info.get("software_desc", ""),
         "url": info.get("url", ""),
     })
 
@@ -201,14 +203,31 @@ def _http_get_json(url):
 
 
 def _fetch_release_info():
-    """获取远程版本信息，返回 {"version": "...", "url": "...", "size": ...} 或 None。"""
+    """获取远程版本信息，返回 {"version": "<unix_ts>", "url": "..."} 或 None。"""
     if not CHECK_URL:
         return None
     data = _http_get_json(CHECK_URL)
+
+    inner = data.get("data", data)
+    url = inner.get("imageUrl", inner.get("url", ""))
+
+    # 用 updatedAt 字段计算 Unix 时间戳
+    updated = inner.get("updatedAt", "")
+    ts = "0"
+    if updated:
+        try:
+            import datetime
+            dt = datetime.datetime.fromisoformat(updated.replace("Z", "+00:00"))
+            ts = str(int(dt.timestamp()))
+        except Exception:
+            ts = "0"
+
     return {
-        "version": str(data.get("version", "")),
-        "url": str(data.get("url", DOWNLOAD_URL)),
-        "size": int(data.get("size", 0)),
+        "version": ts,
+        "version_number": str(inner.get("versionNumber", "")),
+        "url": url,
+        "hardware_desc": str(inner.get("hardwareDesc", "")),
+        "software_desc": str(inner.get("softwareDesc", "")),
     }
 
 
