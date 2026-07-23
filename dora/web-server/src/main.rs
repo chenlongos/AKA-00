@@ -204,10 +204,10 @@ async fn run() -> Result<()> {
             let addr = SocketAddr::from(([0, 0, 0, 0], https_port));
             log::info!("[web-server] Listening on https://0.0.0.0:{}", https_port);
             Some(tokio::spawn(async move {
-                axum_server::bind_rustls(addr, axum_cfg)
+                let _ = axum_server::bind_rustls(addr, axum_cfg)
                     .serve(https_app.into_make_service())
-                    .await
-                    .unwrap_or_else(|e| log::warn!("[web-server] https: {e}"));
+                    .await;
+                log::info!("[web-server] HTTPS shut down");
             }))
         }
         Err(e) => {

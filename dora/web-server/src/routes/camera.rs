@@ -23,6 +23,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/api/camera/close", post(close))
         .route("/api/camera/stream", get(stream))
         .route("/api/camera/snapshot", get(snapshot))
+        .route("/api/camera/speed", get(speed))
 }
 
 const BOUNDARY: &str = "dora-frame";
@@ -131,6 +132,21 @@ pub async fn snapshot(
     Ok(Json(serde_json::json!({
         "image": b64
     })))
+}
+
+// ── GET /api/camera/speed → 电机速度数据（Sim2Real 依赖）──
+
+async fn speed(State(s): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    let motor = s.motor.status();
+    Json(serde_json::json!({
+        "left_speed": motor.left_speed,
+        "right_speed": motor.right_speed,
+        "left_target": 0.0,
+        "right_target": 0.0,
+        "gripper_status": "unknown",
+        "gripper_target": 0,
+        "timestamp_ms": 0,
+    }))
 }
 
 // ── helpers ──
