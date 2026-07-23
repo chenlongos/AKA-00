@@ -24,6 +24,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/api/camera/stream", get(stream))
         .route("/api/camera/snapshot", get(snapshot))
         .route("/api/camera/speed", get(speed))
+        .route("/api/camera/all_status", get(all_status))
 }
 
 const BOUNDARY: &str = "dora-frame";
@@ -146,6 +147,31 @@ async fn speed(State(s): State<Arc<AppState>>) -> Json<serde_json::Value> {
         "gripper_status": "unknown",
         "gripper_target": 0,
         "timestamp_ms": 0,
+    }))
+}
+
+// ── GET /api/camera/all_status → 状态 + 图片（Sim2Real 依赖）──
+
+async fn all_status(State(s): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    let motor = s.motor.status();
+    let jpeg = s.camera.current_frame();
+    let image = if !jpeg.is_empty() {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode(&jpeg)
+    } else {
+        String::new()
+    };
+
+    Json(serde_json::json!({
+        "left_speed": motor.left_speed,
+        "right_speed": motor.right_speed,
+        "left_target": 0.0,
+        "right_target": 0.0,
+        "gripper_status": "unknown",
+        "gripper_target": 0,
+        "timestamp_ms": 0,
+        "image": if image.is_empty() { serde_json::Value::Null } else { serde_json::json!(image) },
+        "image_format": "jpeg",
     }))
 }
 
