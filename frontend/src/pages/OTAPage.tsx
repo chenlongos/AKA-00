@@ -29,7 +29,12 @@ const OTAPage = () => {
     const [upgradeProgress, setUpgradeProgress] = useState(0);
     const [upgradeMsg, setUpgradeMsg] = useState("");
 
-    useEffect(() => { checkUpdate(); }, []);
+    useEffect(() => {
+        fetch("/api/ota/version")
+            .then(r => r.json())
+            .then(d => { if (d.version) setCurrentVersion(d.version); })
+            .catch(() => {});
+    }, []);
 
     const checkUpdate = async () => {
         setChecking(true);
@@ -174,16 +179,16 @@ const OTAPage = () => {
                             <span style={{color: "var(--color-text-dim)"}}>当前版本</span>
                             <span style={{fontWeight: 600, fontFamily: "monospace"}}>{currentVersion}</span>
                         </div>
-                        {latestVersion && (
-                            <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: scalePx(8)}}>
-                                <span style={{color: "var(--color-text-dim)"}}>最新版本</span>
-                                <span style={{fontWeight: 600, color: "var(--color-text)", fontFamily: "monospace"}}>{latestVersion}</span>
-                            </div>
-                        )}
                         {hasUpdate && (
-                            <div style={{marginTop: scalePx(6), color: "var(--color-success)", fontSize: scalePx(13)}}>
-                                {updateDesc}
-                            </div>
+                            <>
+                                <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: scalePx(8)}}>
+                                    <span style={{color: "var(--color-text-dim)"}}>最新版本</span>
+                                    <span style={{fontWeight: 600, color: "var(--color-text)", fontFamily: "monospace"}}>{latestVersion}</span>
+                                </div>
+                                <div style={{marginTop: scalePx(6), fontSize: scalePx(13)}}>
+                                    {updateDesc}
+                                </div>
+                            </>
                         )}
                     </div>
                 </Card>

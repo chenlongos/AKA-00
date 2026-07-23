@@ -21,6 +21,7 @@ _upgrade_tasks = {}
 # ---- 更新源配置 ----
 CHECK_URL = hw_config.ota_check_url or os.environ.get("OTA_CHECK_URL", "")
 DOWNLOAD_TIMEOUT = int(os.environ.get("OTA_TIMEOUT", "60"))
+CHECK_TIMEOUT = 5  # 检查更新超时（秒）
 
 
 def _version():
@@ -29,7 +30,7 @@ def _version():
         parts = open(VERSION_FILE).read().strip().split()
         if len(parts) >= 2:
             return parts[0], parts[1]
-        return parts[0], "0"
+        return parts[0], parts[0]  # 纯时间戳格式
     return "unknown", "0"
 
 
@@ -189,14 +190,16 @@ def _md5(path):
     return h.hexdigest()
 
 
-def _http_get_json(url):
+def _http_get_json(url, timeout=None):
     """GET 请求，返回解析后的 JSON"""
+    if timeout is None:
+        timeout = DOWNLOAD_TIMEOUT
     req = urllib.request.Request(url, headers={
         "User-Agent": "AKA-00-OTA/1.0",
         "Accept": "application/json",
     })
     try:
-        with urllib.request.urlopen(req, timeout=DOWNLOAD_TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         raise Exception(f"HTTP {e.code}: {e.reason}")
@@ -206,7 +209,7 @@ def _fetch_release_info():
     """获取远程版本信息，返回 {"version": "<unix_ts>", "url": "..."} 或 None。"""
     if not CHECK_URL:
         return None
-    data = _http_get_json(CHECK_URL)
+    data = _http_get_json(CHECK_URL, timeout=CHECK_TIMEOUT)
 
     inner = data.get("data", data)
     url = inner.get("imageUrl", inner.get("url", ""))
