@@ -84,8 +84,6 @@ def check():
         has_update = False
     else:
         has_update = remote_ts > int(cur_ts)
-    print(f"[ota] local={cur_ver}@{cur_ts} remote={remote_ver}@{remote_ts} update={has_update}", flush=True)
-
     return jsonify({
         "current_version": cur_ver,
         "current_updated": int(cur_ts),
