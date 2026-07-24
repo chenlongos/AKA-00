@@ -397,11 +397,13 @@ async fn wifi_connect(
     // 所以 "set_network 0 ssid \"X\"" 当一个 argv 传会被 busybox 当成未知命令。
     // Full wpa_supplicant 自带的 wpa_cli 会自己 join + tokenize，所以两种都 OK。
     // 我们按独立 argv 走，兼容两边。
+    // 中文 SSID 用 hex 编码传给 wpa_cli
+    let ssid_hex: String = ssid.as_bytes().iter().map(|b| format!("{:02x}", b)).collect();
     let ssid_resp = wpa_cli(&[
         "set_network",
         &net_id,
         "ssid",
-        &format!("\"{ssid}\""),
+        &format!("\"{ssid_hex}\""),
     ]).await;
     append_diag(&format!(
         "[4] set_network ssid argv=[set_network, {net_id:?}, ssid, \"{ssid}\"] -> {ssid_resp:?}"

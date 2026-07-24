@@ -92,16 +92,36 @@ def get_wifi_list():
 
 def do_connect(ssid, password):
     ensure_wpa_env()
-    os.system(f"wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} remove_network all > /dev/null")
-    net_id = subprocess.getoutput(f"wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} add_network").strip().split('\n')[-1]
+    # 中文 SSID 用 hex 编码传给 wpa_cli，避免 shell 乱码
+    ssid_hex = ssid.encode("utf-8").hex()
 
-    os.system(f"wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} set_network {net_id} ssid '\"{ssid}\"'")
+    subprocess.run(
+        ["wpa_cli", "-p", WIFI_CTRL_PATH, "-i", WIFI_INTERFACE, "remove_network", "all"],
+        capture_output=True, timeout=5)
+    r = subprocess.run(
+        ["wpa_cli", "-p", WIFI_CTRL_PATH, "-i", WIFI_INTERFACE, "add_network"],
+        capture_output=True, text=True, timeout=5)
+    net_id = r.stdout.strip().split('\n')[0]
+
+    subprocess.run(
+        ["wpa_cli", "-p", WIFI_CTRL_PATH, "-i", WIFI_INTERFACE,
+         "set_network", net_id, "ssid", f'"{ssid_hex}"'],
+        capture_output=True, timeout=5)
     if password:
-        os.system(f"wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} set_network {net_id} psk '\"{password}\"'")
+        subprocess.run(
+            ["wpa_cli", "-p", WIFI_CTRL_PATH, "-i", WIFI_INTERFACE,
+             "set_network", net_id, "psk", f'"{password}"'],
+            capture_output=True, timeout=5)
     else:
-        os.system(f"wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} set_network {net_id} key_mgmt NONE")
+        subprocess.run(
+            ["wpa_cli", "-p", WIFI_CTRL_PATH, "-i", WIFI_INTERFACE,
+             "set_network", net_id, "key_mgmt", "NONE"],
+            capture_output=True, timeout=5)
 
-    os.system(f"wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} select_network {net_id}")
+    subprocess.run(
+        ["wpa_cli", "-p", WIFI_CTRL_PATH, "-i", WIFI_INTERFACE,
+         "select_network", net_id],
+        capture_output=True, timeout=5)
 
     for _ in range(15):
         status = subprocess.getoutput(f"wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} status")
