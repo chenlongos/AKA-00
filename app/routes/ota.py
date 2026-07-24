@@ -299,7 +299,10 @@ def _install(path):
 
     if magic == b"\x1f\x8b":
         with tarfile.open(path, mode="r:gz") as tar:
-            tar.extractall(path=staging)
+            # 过滤掉 ../ 等危险路径，防止解压到 staging 外
+            safe_members = [m for m in tar.getmembers()
+                            if not m.name.startswith("/") and ".." not in m.name]
+            tar.extractall(path=staging, members=safe_members)
     else:
         _extract_selfext(path, staging)
 
