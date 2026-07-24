@@ -73,10 +73,14 @@ def check():
     remote_ts = int(info["version"])
 
     # 版本号相同 → 只同步时间戳，不需要更新
-    if cur_ver.lstrip("v") == remote_ver and remote_ver:
-        if remote_ts > int(cur_ts):
-            with open(VERSION_FILE, "w") as f:
-                f.write(f"{cur_ver} {remote_ts}")
+    if remote_ver and cur_ver.lstrip("v") == remote_ver:
+        if remote_ts > int(cur_ts or "0"):
+            try:
+                with open(VERSION_FILE, "w") as f:
+                    f.write(f"{cur_ver} {remote_ts}")
+                print(f"[ota] synced local timestamp to {remote_ts}", flush=True)
+            except Exception as e:
+                print(f"[ota] sync timestamp failed: {e}", flush=True)
         has_update = False
     else:
         has_update = remote_ts > int(cur_ts)
