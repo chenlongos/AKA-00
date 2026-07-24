@@ -307,6 +307,13 @@ def _install(path):
     else:
         _extract_selfext(path, staging)
 
+    # 处理 tar.gz 常见的顶层目录（如 AKA-00/run.py）
+    items = os.listdir(staging)
+    if len(items) == 1 and os.path.isdir(os.path.join(staging, items[0])):
+        inner = os.path.join(staging, items[0])
+        if os.path.exists(os.path.join(inner, "run.py")):
+            staging = inner
+
     if not os.path.exists(os.path.join(staging, "run.py")):
         raise ValueError("invalid firmware: run.py not found")
 
