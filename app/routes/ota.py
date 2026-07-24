@@ -128,19 +128,12 @@ def upgrade():
         try:
             os.makedirs(OTA_DIR, exist_ok=True)
             tmp_path = os.path.join(OTA_DIR, f"download_{task_id}.tmp")
-            total_size = info.get("size", 0)
-
             _upgrade_tasks[task_id] = {"progress": 0, "status": "downloading", "message": "正在下载固件..."}
-            _download_with_progress(download_url, tmp_path, task_id, total_size)
+            _download_with_progress(download_url, tmp_path, task_id, info.get("size", 0))
 
-            _upgrade_tasks[task_id] = {"progress": 100, "status": "installing", "message": "正在安装..."}
-            _install(tmp_path)
-
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-
+            # 写重启脚本（shell 做原子替换，Python 不碰自己的文件）
+            _write_restart_script(tmp_path)
             _upgrade_tasks[task_id] = {"progress": 100, "status": "done", "message": "安装完成，即将重启"}
-            _restart()
         except Exception as e:
             _upgrade_tasks[task_id] = {"progress": 0, "status": "error", "message": str(e)}
 
@@ -177,18 +170,9 @@ def update():
 
     def _do_install():
         try:
-            _upgrade_tasks[task_id] = {"progress": 60, "status": "installing", "message": "正在解压..."}
-            _install(tmp_path)
-
-            # 更新本地 VERSION 为当前时间
-            with open(VERSION_FILE, "w") as f:
-                f.write(f"uploaded {int(time.time())}")
-
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-
+            _upgrade_tasks[task_id] = {"progress": 60, "status": "installing", "message": "正在准备..."}
+            _write_restart_script(tmp_path)
             _upgrade_tasks[task_id] = {"progress": 100, "status": "done", "message": "安装完成，即将重启"}
-            _restart()
         except Exception as e:
             _upgrade_tasks[task_id] = {"progress": 0, "status": "error", "message": str(e)}
 
@@ -288,94 +272,63 @@ def _download_with_progress(url, dest, task_id, total_size=0):
                     }
 
 
-def _install(path):
-    staging = os.path.join(OTA_DIR, "staging")
-    if os.path.exists(staging):
-        shutil.rmtree(staging)
-    os.makedirs(staging)
-
-    with open(path, "rb") as f:
-        magic = f.read(2)
-
-    if magic == b"\x1f\x8b":
-        with tarfile.open(path, mode="r:gz") as tar:
-            # 过滤掉 ../ 等危险路径，防止解压到 staging 外
-            safe_members = [m for m in tar.getmembers()
-                            if not m.name.startswith("/") and ".." not in m.name]
-            tar.extractall(path=staging, members=safe_members)
-    else:
-        _extract_selfext(path, staging)
-
-    # 处理 tar.gz 常见的顶层目录（如 AKA-00/run.py）
-    items = os.listdir(staging)
-    if len(items) == 1 and os.path.isdir(os.path.join(staging, items[0])):
-        inner = os.path.join(staging, items[0])
-        if os.path.exists(os.path.join(inner, "run.py")):
-            staging = inner
-
-    if not os.path.exists(os.path.join(staging, "run.py")):
-        raise ValueError("invalid firmware: run.py not found")
-
-    for item in os.listdir(staging):
-        src = os.path.join(staging, item)
-        dst = os.path.join(APP_DIR, item)
-        if os.path.isdir(dst):
-            shutil.rmtree(dst)
-        elif os.path.exists(dst) or os.path.islink(dst):
-            os.remove(dst)
-        if os.path.isdir(src):
-            shutil.copytree(src, dst, symlinks=True, ignore_dangling_symlinks=True)
-        else:
-            shutil.copy2(src, dst)
-
-    for name in ["init.sh", "uart_init.sh"]:
-        p = os.path.join(APP_DIR, name)
-        if os.path.exists(p):
-            os.chmod(p, 0o755)
-
-    shutil.rmtree(staging)
-
-
-def _extract_selfext(executable, dest):
-    import base64
-    try:
-        subprocess.run(
-            ["sed", "-n", "/^#__PAYLOAD_BELOW__$/,$p", executable],
-            stdout=open(os.path.join(dest, "payload.b64"), "w"),
-            check=True,
-        )
-    except subprocess.CalledProcessError as e:
-        raise ValueError(f"payload extract failed (sed): {e}")
-
-    # 用 Python 解码 base64 再解压 tar，避免依赖系统 base64 命令
-    try:
-        b64_path = os.path.join(dest, "payload.b64")
-        tar_path = os.path.join(dest, "payload.tar.gz")
-        with open(b64_path) as f:
-            f.readline()  # 跳过 #__PAYLOAD_BELOW__ 行
-            encoded = f.read()
-        with open(tar_path, "wb") as f:
-            f.write(base64.b64decode(encoded))
-        with tarfile.open(tar_path, mode="r:gz") as tar:
-            tar.extractall(path=dest)
-        os.remove(b64_path)
-        os.remove(tar_path)
-    except Exception as e:
-        raise ValueError(f"decode failed: {e}")
-
-
-def _restart():
-    script = os.path.join(OTA_DIR, "restart.sh")
-    with open(script, "w") as f:
-        f.write("""#!/bin/sh
-sleep 2
+def _write_restart_script(firmware_path):
+    """写 shell 安装脚本——由 shell 停进程、解压、替换、重启"""
+    script_path = os.path.join(OTA_DIR, "install.sh")
+    with open(script_path, "w") as f:
+        f.write(f"""#!/bin/sh
+set -e
+echo "[OTA] stopping old process..."
 kill $(pgrep -f "python3.*run.py") 2>/dev/null || true
-sleep 1
-cd /root/AKA-00 && exec ./init.sh
+sleep 2
+
+echo "[OTA] extracting..."
+rm -rf {OTA_DIR}/staging
+mkdir -p {OTA_DIR}/staging
+
+MAGIC=$(head -c2 "{firmware_path}" 2>/dev/null)
+if [ "$MAGIC" = "$(printf '\\x1f\\x8b')" ]; then
+    tar xzf "{firmware_path}" -C {OTA_DIR}/staging
+else
+    sed -n '/^#__PAYLOAD_BELOW__$/,$p' "{firmware_path}" | tail -n +2 | python3 -c "
+import base64, sys, tarfile, tempfile, os
+tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.tar.gz')
+tmp.write(base64.b64decode(sys.stdin.buffer.read()))
+tmp.close()
+tarfile.open(tmp.name, mode='r:gz').extractall(path='{OTA_DIR}/staging')
+os.unlink(tmp.name)
+"
+fi
+
+# 进入可能的子目录
+if [ -d {OTA_DIR}/staging/*/ ] 2>/dev/null; then
+    cd {OTA_DIR}/staging/*/
+else
+    cd {OTA_DIR}/staging
+fi
+
+echo "[OTA] installing..."
+for item in * .[!.]*; do
+    [ "$item" = "." ] && continue
+    [ "$item" = ".." ] && continue
+    [ ! -e "$item" ] && continue
+    dst="{APP_DIR}/$item"
+    if [ -d "$dst" ]; then rm -rf "$dst"; fi
+    cp -r "$item" "$dst"
+done
+
+chmod +x {APP_DIR}/*.sh 2>/dev/null || true
+rm -rf {OTA_DIR}/staging
+rm -f "{firmware_path}"
+
+echo "[OTA] restarting..."
+cd {APP_DIR} && exec ./init.sh
 """)
-    os.chmod(script, 0o755)
+    os.chmod(script_path, 0o755)
     subprocess.Popen(
-        ["/bin/sh", script],
+        ["/bin/sh", script_path],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
+
+
