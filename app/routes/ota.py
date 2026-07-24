@@ -290,7 +290,7 @@ def _download_with_progress(url, dest, task_id, total_size=0):
 
 def _install(path):
     # 先停旧进程，避免覆盖正在运行的文件
-    subprocess.run(["pkill", "-f", "python3.*run.py"], capture_output=True)
+    subprocess.run("kill $(pgrep -f 'python3.*run.py') 2>/dev/null", shell=True)
     time.sleep(1)
 
     staging = os.path.join(OTA_DIR, "staging")
@@ -363,7 +363,7 @@ def _restart():
     with open(script, "w") as f:
         f.write("""#!/bin/sh
 sleep 2
-pkill -f "python3.*run.py" 2>/dev/null || true
+kill $(pgrep -f "python3.*run.py") 2>/dev/null || true
 sleep 1
 cd /root/AKA-00 && exec ./init.sh
 """)
