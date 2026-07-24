@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import tarfile
+import time
 import threading
 import urllib.request
 from flask import Blueprint, request, jsonify
@@ -68,9 +69,18 @@ def check():
         return jsonify({"status": "error", "message": "未找到可用更新"}), 404
 
     cur_ver, cur_ts = _version()
+    remote_ver = info.get("version_number", "").lstrip("v")
     remote_ts = int(info["version"])
-    has_update = remote_ts > int(cur_ts)
-    print(f"[ota] local={cur_ts} remote={remote_ts} update={has_update}", flush=True)
+
+    # 版本号相同 → 只同步时间戳，不需要更新
+    if cur_ver.lstrip("v") == remote_ver and remote_ver:
+        if remote_ts > int(cur_ts):
+            with open(VERSION_FILE, "w") as f:
+                f.write(f"{cur_ver} {remote_ts}")
+        has_update = False
+    else:
+        has_update = remote_ts > int(cur_ts)
+    print(f"[ota] local={cur_ver}@{cur_ts} remote={remote_ver}@{remote_ts} update={has_update}", flush=True)
 
     return jsonify({
         "current_version": cur_ver,
@@ -165,6 +175,10 @@ def update():
         try:
             _upgrade_tasks[task_id] = {"progress": 60, "status": "installing", "message": "正在解压..."}
             _install(tmp_path)
+
+            # 更新本地 VERSION 为当前时间
+            with open(VERSION_FILE, "w") as f:
+                f.write(f"uploaded {int(time.time())}")
 
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
@@ -271,27 +285,27 @@ def _download_with_progress(url, dest, task_id, total_size=0):
 
 
 def _install(path):
+    # 先停旧进程，避免覆盖正在运行的文件
+    subprocess.run(["pkill", "-f", "python3.*run.py"], capture_output=True)
+    time.sleep(1)
+
     staging = os.path.join(OTA_DIR, "staging")
     if os.path.exists(staging):
         shutil.rmtree(staging)
     os.makedirs(staging)
 
-    # 判断格式
     with open(path, "rb") as f:
         magic = f.read(2)
 
     if magic == b"\x1f\x8b":
-        # 标准 tar.gz
         with tarfile.open(path, mode="r:gz") as tar:
             tar.extractall(path=staging)
     else:
-        # 自解压 aka-server
         _extract_selfext(path, staging)
 
     if not os.path.exists(os.path.join(staging, "run.py")):
         raise ValueError("invalid firmware: run.py not found")
 
-    # 覆盖安装
     for item in os.listdir(staging):
         src = os.path.join(staging, item)
         dst = os.path.join(APP_DIR, item)
@@ -304,7 +318,6 @@ def _install(path):
         else:
             shutil.copy2(src, dst)
 
-    # 确保脚本可执行
     for name in ["init.sh", "uart_init.sh"]:
         p = os.path.join(APP_DIR, name)
         if os.path.exists(p):
