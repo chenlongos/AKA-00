@@ -80,12 +80,12 @@ exec ./init.sh
 HEADER
 
 # Generate VERSION (for both build modes)
-# 手动维护版本号：保留已有版本号，只更新时间戳
+# 手动维护版本号：保留已有版本号，只更新时间戳（@ 分隔）
 if [ -f "$SCRIPT_DIR/VERSION" ]; then
-    ver=$(head -1 "$SCRIPT_DIR/VERSION" | awk '{print $1}')
-    echo "$ver $(date +%s)" > "$SCRIPT_DIR/VERSION"
+    ver=$(head -1 "$SCRIPT_DIR/VERSION" | cut -d@ -f1)
+    echo "${ver}@$(date +%s)" > "$SCRIPT_DIR/VERSION"
 else
-    echo "v0.1.0 $(date +%s)" > "$SCRIPT_DIR/VERSION"
+    echo "v0.1.0@$(date +%s)" > "$SCRIPT_DIR/VERSION"
 fi
 
 # Append payload (base64-encoded tar.gz)
@@ -124,12 +124,12 @@ if [ "$1" = "--ota" ] || [ "$2" = "--ota" ]; then
 
     # Generate VERSION file from git tag
     git -C "$SCRIPT_DIR" describe --tags --always --dirty 2>/dev/null > "$SCRIPT_DIR/VERSION" || \
-        # 手动维护版本号：保留已有版本号，只更新时间戳
+        # 手动维护版本号：保留已有版本号，只更新时间戳（@ 分隔）
 if [ -f "$SCRIPT_DIR/VERSION" ]; then
-    ver=$(head -1 "$SCRIPT_DIR/VERSION" | awk '{print $1}')
-    echo "$ver $(date +%s)" > "$SCRIPT_DIR/VERSION"
+    ver=$(head -1 "$SCRIPT_DIR/VERSION" | cut -d@ -f1)
+    echo "${ver}@$(date +%s)" > "$SCRIPT_DIR/VERSION"
 else
-    echo "v0.1.0 $(date +%s)" > "$SCRIPT_DIR/VERSION"
+    echo "v0.1.0@$(date +%s)" > "$SCRIPT_DIR/VERSION"
 fi
 
     echo "Building OTA package..."

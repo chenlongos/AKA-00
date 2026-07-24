@@ -26,12 +26,12 @@ CHECK_TIMEOUT = 5  # 检查更新超时（秒）
 
 
 def _version():
-    """返回 (版本号, Unix时间戳)"""
+    """返回 (版本号, Unix时间戳)。支持空格或 @ 分隔。"""
     if os.path.exists(VERSION_FILE):
-        parts = open(VERSION_FILE).read().strip().split()
-        if len(parts) >= 2:
-            return parts[0], parts[1]
-        return parts[0], parts[0]  # 纯时间戳格式
+        raw = open(VERSION_FILE).read().strip()
+        sep = "@" if "@" in raw else " "
+        parts = raw.rsplit(sep, 1) if sep in raw else [raw, raw]
+        return parts[0], parts[1]
     return "unknown", "0"
 
 
