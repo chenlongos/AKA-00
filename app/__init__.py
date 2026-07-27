@@ -37,6 +37,10 @@ def create_app():
     app.register_blueprint(wifi_bp)  # WiFi 路由注册到根路径
     app.register_blueprint(frontend_bp)
 
+    # 启动状态上报（云端）
+    from app.services.status_reporter import start as start_reporter
+    start_reporter()
+
     # 启动状态采集线程
     from src.state import get_state_collector
     collector = get_state_collector()

@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 
 from app.services import get_control_service
+from app.services.status_reporter import log_command
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 

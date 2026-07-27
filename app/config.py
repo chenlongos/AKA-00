@@ -13,6 +13,7 @@ class HardwareConfig:
 
     demo_server_url: str = "http://124.222.162.228:8888"
     ota_check_url: str = "https://api.chenlongrobot.com/api/user/robot-versions/featured"
+    status_report_url: str = "https://api.chenlongrobot.com/api/robot-actions"
 
     # 距离标定: D = m / P + c
     calib_m: float = 2671.82

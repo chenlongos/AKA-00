@@ -125,6 +125,9 @@ class ControlWebSocket(tornado.websocket.WebSocketHandler):
             return
         # 摇杆: [0xAA, x, y]
         if message[0] == 0xAA:
+            from app.services.status_reporter import log_command
+            log_command({"type": "joystick", "x": message[1] if message[1] < 128 else message[1] - 256,
+                         "y": message[2] if message[2] < 128 else message[2] - 256})
             x = message[1] if message[1] < 128 else message[1] - 256
             y = message[2] if message[2] < 128 else message[2] - 256
             left = max(-60, min(60, y + x))
