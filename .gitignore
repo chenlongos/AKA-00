@@ -5,3 +5,4 @@ static
 output/
 checkpoints/
 dist/
+.DS_Store

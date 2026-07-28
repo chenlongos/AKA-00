@@ -3,6 +3,28 @@ from flask import Flask, make_response, request
 
 def create_app():
     app = Flask(__name__, static_folder="../static", template_folder="../templates")
+
+    # 如果上次 OTA 安装未完成标记，在服务启动后标记为完成
+    try:
+        import json, os, time
+        status_file = "/root/aka-ota-status.json"
+        if os.path.exists(status_file):
+            with open(status_file) as f:
+                s = json.load(f)
+            if s.get("status") in ("downloading", "installing"):
+                v, ts = "", "0"
+                ver_file = os.path.join(os.path.dirname(__file__), "..", "VERSION")
+                if os.path.exists(ver_file):
+                    raw = open(ver_file).read().strip()
+                    sep = "@" if "@" in raw else " "
+                    parts = raw.rsplit(sep, 1) if sep in raw else [raw, raw]
+                    v, ts = parts[0], parts[1]
+                with open(status_file, "w") as f:
+                    json.dump({"status": "completed", "version": v, "updated": int(ts),
+                               "finished_at": int(time.time())}, f)
+    except Exception:
+        pass
+
     from .services import init_control_service
     from .routes.api import api_bp
     from .routes.wifi import wifi_bp

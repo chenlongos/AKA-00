@@ -29,7 +29,98 @@ const OTAPage = () => {
     const [upgradeProgress, setUpgradeProgress] = useState(0);
     const [upgradeMsg, setUpgradeMsg] = useState("");
 
+    const OTA_TASK_KEY = "ota_task";
+
+    // Shared polling logic — used by both initial mount (resume) and new upgrade
+    const startPolling = (taskId: string, type: "upgrade" | "upload") => {
+        if (type === "upgrade") setUpgrading(true);
+        else setUploading(true);
+
+        const poll = setInterval(async () => {
+            try {
+                const pr = await fetch(`/api/ota/upgrade/progress?task_id=${taskId}`);
+                const pd = await pr.json();
+                setUpgradeProgress(pd.progress || 0);
+                setUpgradeMsg(pd.message || "");
+
+                if (pd.status === "done") {
+                    clearInterval(poll);
+                    setUpgradeProgress(100);
+                    setUpgradeMsg("");
+                    waitForService();
+                } else if (pd.status === "error") {
+                    clearInterval(poll);
+                    setUpgrading(false);
+                    setUploading(false);
+                    setStatus(`升级失败: ${pd.message}`);
+                    localStorage.removeItem(OTA_TASK_KEY);
+                } else if (pd.status === "unknown") {
+                    // Task lost (backend restarted) — wait for service
+                    clearInterval(poll);
+                    setUpgradeProgress(100);
+                    setUpgradeMsg("");
+                    waitForService();
+                }
+            } catch {
+                // Connection lost — wait for service
+                clearInterval(poll);
+                setUpgradeProgress(100);
+                setUpgradeMsg("");
+                waitForService();
+            }
+        }, 500);
+    };
+
+    // After backend is killed for restart, poll /api/ota/version until it comes back
+    const waitForService = () => {
+        setUpgrading(false);
+        setUploading(false);
+        setStatus("服务重启中，等待恢复...");
+        localStorage.removeItem(OTA_TASK_KEY);
+        let attempts = 0;
+        const check = setInterval(async () => {
+            attempts++;
+            try {
+                const r = await fetch("/api/ota/version");
+                if (r.ok) {
+                    clearInterval(check);
+                    setStatus("更新完成！");
+                    const d = await r.json();
+                    if (d.version) setCurrentVersion(d.version);
+                    setHasUpdate(false);
+                    setLatestVersion("");
+                }
+            } catch {
+                if (attempts > 60) {  // ~30s timeout
+                    clearInterval(check);
+                    setStatus("服务恢复超时，请手动刷新页面");
+                }
+            }
+        }, 500);
+    };
+
+    // On mount: check persistent OTA status and recover if needed
     useEffect(() => {
+        fetch("/api/ota/status")
+            .then(r => r.json())
+            .then(s => {
+                if (s.status === "completed") {
+                    setStatus("更新完成！");
+                    if (s.version) setCurrentVersion(s.version);
+                    localStorage.removeItem(OTA_TASK_KEY);
+                } else if (s.status === "downloading" || s.status === "installing") {
+                    const saved = localStorage.getItem(OTA_TASK_KEY);
+                    if (saved && s.task_id) {
+                        try {
+                            const {taskId, type} = JSON.parse(saved);
+                            setStatus("检测到正在进行的更新...");
+                            startPolling(taskId, type);
+                        } catch { /* ignore parse error */ }
+                    }
+                }
+            })
+            .catch(() => {});
+
         fetch("/api/ota/version")
             .then(r => r.json())
             .then(d => { if (d.version) setCurrentVersion(d.version); })
@@ -77,29 +168,8 @@ const OTAPage = () => {
                 return;
             }
 
-            const taskId = data.task_id;
-            const poll = setInterval(async () => {
-                try {
-                    const pr = await fetch(`/api/ota/upgrade/progress?task_id=${taskId}`);
-                    const pd = await pr.json();
-                    setUpgradeProgress(pd.progress || 0);
-                    setUpgradeMsg(pd.message || "");
-
-                    if (pd.status === "done") {
-                        clearInterval(poll);
-                        setUpgrading(false);
-                        setStatus("固件升级成功，设备即将重启");
-                    } else if (pd.status === "error") {
-                        clearInterval(poll);
-                        setUpgrading(false);
-                        setStatus(`升级失败: ${pd.message}`);
-                    }
-                } catch {
-                    clearInterval(poll);
-                    setUpgrading(false);
-                    setStatus("进度查询失败");
-                }
-            }, 500);
+            localStorage.setItem(OTA_TASK_KEY, JSON.stringify({taskId: data.task_id, type: "upgrade"}));
+            startPolling(data.task_id, "upgrade");
         } catch {
             setUpgrading(false);
             setStatus("升级请求失败");
@@ -125,29 +195,8 @@ const OTAPage = () => {
                 return;
             }
 
-            const taskId = data.task_id;
-            const poll = setInterval(async () => {
-                try {
-                    const pr = await fetch(`/api/ota/upgrade/progress?task_id=${taskId}`);
-                    const pd = await pr.json();
-                    setUpgradeProgress(pd.progress || 0);
-                    setUpgradeMsg(pd.message || "");
-
-                    if (pd.status === "done") {
-                        clearInterval(poll);
-                        setUploading(false);
-                        setStatus("固件安装成功，设备即将重启");
-                    } else if (pd.status === "error") {
-                        clearInterval(poll);
-                        setUploading(false);
-                        setStatus(`安装失败: ${pd.message}`);
-                    }
-                } catch {
-                    clearInterval(poll);
-                    setUploading(false);
-                    setStatus("进度查询失败");
-                }
-            }, 500);
+            localStorage.setItem(OTA_TASK_KEY, JSON.stringify({taskId: data.task_id, type: "upload"}));
+            startPolling(data.task_id, "upload");
         } catch (e) {
             setUploading(false);
             setStatus(`上传请求失败: ${e}`);
@@ -201,7 +250,7 @@ const OTAPage = () => {
                             {checking ? "检查中..." : "检查更新"}
                         </ControlButton>
                         {hasUpdate && (
-                            <ControlButton variant="success" size="full" onClick={doUpgrade} disabled={upgrading}>
+                            <ControlButton variant="success" size="full" onClick={doUpgrade} disabled={upgrading || uploading}>
                                 {upgrading ? "升级中..." : "立即升级"}
                             </ControlButton>
                         )}
@@ -220,12 +269,12 @@ const OTAPage = () => {
                         boxShadow: "0 6px 15px rgba(0,0,0,0.5)",
                     }}>
                         {uploading ? "上传中..." : "选择固件文件"}
-                        <input type="file" onChange={handleUpload} style={{display: "none"}} disabled={uploading} />
+                        <input type="file" onChange={handleUpload} style={{display: "none"}} disabled={uploading || upgrading} />
                     </label>
                 </Card>
 
                 {/* 升级进度条 */}
-                {upgrading && (
+                {(upgrading || uploading) && (
                     <Card marginBottom={12}>
                         <div style={{textAlign: "center"}}>
                             <div style={{fontSize: scalePx(13), fontWeight: 600, marginBottom: scalePx(10), color: "var(--color-text)"}}>

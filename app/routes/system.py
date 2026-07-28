@@ -5,6 +5,14 @@ from app.services.status_reporter import _get_cpu_usage, _get_mem_usage, _get_di
 system_bp = Blueprint("system", __name__, url_prefix="/api/system")
 
 
+@system_bp.route("/info")
+def info():
+    return jsonify({
+        "ip": get_wifi_ip(),
+        "mac": get_mac_address("wlan0"),
+    })
+
+
 @system_bp.route("/ip")
 def ip():
     return jsonify({"ip": get_wifi_ip()})

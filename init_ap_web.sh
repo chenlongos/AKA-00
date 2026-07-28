@@ -90,6 +90,13 @@ ip link set wlan0 up
 ip link set wlan1 up
 
 sleep 5
+
+# Disable conflicting inittab respawn — init.sh handles its own restart
+if grep -q '^acm:.*init\.sh' /etc/inittab 2>/dev/null; then
+    sed -i 's/^acm:/# acm:/' /etc/inittab
+    kill -HUP 1 2>/dev/null || true
+fi
+
 chmod +x /root/AKA-00/init.sh
 /root/AKA-00/init.sh
 exit 0

@@ -3,9 +3,8 @@ import json
 import os
 import shutil
 import subprocess
-import tarfile
-import time
 import threading
+import time
 import urllib.request
 from flask import Blueprint, request, jsonify
 from app.config import config as hw_config
@@ -15,9 +14,31 @@ ota_bp = Blueprint("ota", __name__, url_prefix="/api/ota")
 APP_DIR = os.path.join(os.path.dirname(__file__), "..", "..")  # app/routes/ota.py → 项目根
 OTA_DIR = os.path.join(APP_DIR, ".ota")
 VERSION_FILE = os.path.join(APP_DIR, "VERSION")
+STATUS_FILE = "/root/aka-ota-status.json"
 
 # 进度追踪（task_id → {progress, status, message}）
 _upgrade_tasks = {}
+
+
+def _write_ota_status(status: str, **extra):
+    """持久化 OTA 状态到磁盘，跨后端重启保留。"""
+    try:
+        data = {"status": status, "timestamp": int(time.time()), **extra}
+        with open(STATUS_FILE, "w") as f:
+            json.dump(data, f)
+    except Exception:
+        pass
+
+
+def _read_ota_status() -> dict:
+    """读取持久化的 OTA 状态。"""
+    try:
+        if os.path.exists(STATUS_FILE):
+            with open(STATUS_FILE) as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {"status": "idle"}
 
 # ---- 更新源配置 ----
 CHECK_URL = hw_config.ota_check_url or os.environ.get("OTA_CHECK_URL", "")
@@ -25,8 +46,31 @@ DOWNLOAD_TIMEOUT = int(os.environ.get("OTA_TIMEOUT", "60"))
 CHECK_TIMEOUT = 5  # 检查更新超时（秒）
 
 
+def _parse_semver(ver: str) -> tuple:
+    """解析 git describe 输出为可比较的元组。
+
+    'v1.2.3'              → (1, 2, 3, 0)
+    'v1.2.3-4-gabc'       → (1, 2, 3, 4)    ← tag 后 4 个 commit，更新！
+    'v1.2.3-dirty'        → (1, 2, 3, 0)
+    'abc123'              → ()               ← 无 tag，解析失败
+    """
+    try:
+        s = ver.lstrip("v")
+        # Split: "1.2.3" / "1.2.3-4-gabc" / "1.2.3-dirty"
+        parts = s.split("-")
+        nums = parts[0].split(".")
+        major, minor, patch = int(nums[0]), int(nums[1]) if len(nums) > 1 else 0, int(nums[2]) if len(nums) > 2 else 0
+        # Commit count after tag: "v1.2.3-4-gabc" → 4; "v1.2.3" → 0
+        commits = 0
+        if len(parts) > 1 and parts[1].isdigit():
+            commits = int(parts[1])
+        return (major, minor, patch, commits)
+    except (ValueError, IndexError):
+        return ()
+
+
 def _version():
-    """返回 (版本号, Unix时间戳)。支持空格或 @ 分隔。"""
+    """返回 (版本号, Unix时间戳)。VERSION 文件格式: 'v1.2.3@1722169200'。"""
     if os.path.exists(VERSION_FILE):
         raw = open(VERSION_FILE).read().strip()
         sep = "@" if "@" in raw else " "
@@ -54,9 +98,22 @@ def upgrade_progress():
     return jsonify(task)
 
 
+@ota_bp.route("/status")
+def ota_status():
+    """返回当前 OTA 状态（内存 + 磁盘双重检查）。"""
+    # 优先查内存中的活跃任务
+    for tid, task in _upgrade_tasks.items():
+        if task.get("status") in ("downloading", "installing"):
+            return jsonify({"status": task["status"], "progress": task.get("progress", 0),
+                            "message": task.get("message", ""), "task_id": tid})
+    # 再查磁盘持久化状态
+    disk = _read_ota_status()
+    return jsonify(disk)
+
+
 @ota_bp.route("/check")
 def check():
-    """检查远程是否有新版本（时间戳对比）"""
+    """检查远程是否有新版本（semver 对比）。"""
     try:
         info = _fetch_release_info()
     except Exception as e:
@@ -72,21 +129,18 @@ def check():
     remote_ver = info.get("version_number", "").lstrip("v")
     remote_ts = int(info["version"])
 
-    # 版本号相同 → 只同步时间戳，不需要更新
-    if remote_ver and cur_ver.lstrip("v") == remote_ver:
-        if remote_ts > int(cur_ts or "0"):
-            try:
-                with open(VERSION_FILE, "w") as f:
-                    f.write(f"{cur_ver} {remote_ts}")
-                print(f"[ota] synced local timestamp to {remote_ts}", flush=True)
-            except Exception as e:
-                print(f"[ota] sync timestamp failed: {e}", flush=True)
-        has_update = False
+    lv = _parse_semver(cur_ver)
+    rv = _parse_semver(remote_ver)
+
+    if lv and rv:
+        has_update = rv > lv
     else:
-        has_update = remote_ts > int(cur_ts)
+        # 版本号无法解析 → 时间戳兜底（兼容旧格式）
+        has_update = remote_ts > int(cur_ts or "0")
+
     return jsonify({
         "current_version": cur_ver,
-        "current_updated": int(cur_ts),
+        "current_updated": int(cur_ts or "0"),
         "remote_updated": remote_ts,
         "update_available": has_update,
         "latest_version": info.get("version_number", ""),
@@ -111,8 +165,16 @@ def upgrade():
     if info is None:
         return jsonify({"status": "error", "message": "未找到可用更新"}), 404
 
-    if info.get("version") == _version():
-        return jsonify({"status": "ok", "message": "已是最新版本", "version": _version()})
+    cur_ver, cur_ts = _version()
+    remote_ver = info.get("version_number", "").lstrip("v")
+    remote_ts = int(info["version"])
+
+    lv = _parse_semver(cur_ver)
+    rv = _parse_semver(remote_ver)
+    if lv and rv and rv <= lv:
+        return jsonify({"status": "ok", "message": "已是最新版本", "version": cur_ver})
+    if not lv and remote_ts <= int(cur_ts or "0"):
+        return jsonify({"status": "ok", "message": "已是最新版本", "version": cur_ver})
 
     download_url = info.get("url", "")
     if not download_url:
@@ -121,19 +183,22 @@ def upgrade():
     import uuid
     task_id = uuid.uuid4().hex[:8]
     _upgrade_tasks[task_id] = {"progress": 0, "status": "downloading", "message": "准备下载..."}
+    _write_ota_status("downloading", task_id=task_id)
 
     def _do_upgrade():
         try:
             os.makedirs(OTA_DIR, exist_ok=True)
             tmp_path = os.path.join(OTA_DIR, f"download_{task_id}.tmp")
             _upgrade_tasks[task_id] = {"progress": 0, "status": "downloading", "message": "正在下载固件..."}
+
             _download_with_progress(download_url, tmp_path, task_id, info.get("size", 0))
 
-            # 写重启脚本（shell 做原子替换，Python 不碰自己的文件）
+            _write_ota_status("installing", task_id=task_id)
             _write_restart_script(tmp_path)
-            _upgrade_tasks[task_id] = {"progress": 100, "status": "done", "message": "安装完成，即将重启"}
+            _upgrade_tasks[task_id] = {"progress": 100, "status": "done", "message": "安装完成，服务重启中..."}
         except Exception as e:
             _upgrade_tasks[task_id] = {"progress": 0, "status": "error", "message": str(e)}
+            _write_ota_status("error", task_id=task_id, message=str(e))
 
     threading.Thread(target=_do_upgrade, daemon=True).start()
     return jsonify({"status": "ok", "task_id": task_id})
@@ -165,14 +230,16 @@ def update():
             return jsonify({"status": "error", "message": f"md5 mismatch: {actual}"}), 400
 
     _upgrade_tasks[task_id] = {"progress": 50, "status": "installing", "message": "正在安装固件..."}
+    _write_ota_status("installing", task_id=task_id)
 
     def _do_install():
         try:
             _upgrade_tasks[task_id] = {"progress": 60, "status": "installing", "message": "正在准备..."}
             _write_restart_script(tmp_path)
-            _upgrade_tasks[task_id] = {"progress": 100, "status": "done", "message": "安装完成，即将重启"}
+            _upgrade_tasks[task_id] = {"progress": 100, "status": "done", "message": "安装完成，服务重启中..."}
         except Exception as e:
             _upgrade_tasks[task_id] = {"progress": 0, "status": "error", "message": str(e)}
+            _write_ota_status("error", task_id=task_id, message=str(e))
 
     threading.Thread(target=_do_install, daemon=True).start()
     return jsonify({"status": "ok", "task_id": task_id, "message": "upload received, installing..."})
@@ -271,56 +338,31 @@ def _download_with_progress(url, dest, task_id, total_size=0):
 
 
 def _write_restart_script(firmware_path):
-    """写 shell 安装脚本——由 shell 停进程、解压、替换、重启"""
-    script_path = os.path.join(OTA_DIR, "install.sh")
+    """OTA: 固件是 aka-00-server 自解压脚本，搬移到 /tmp 后 spawn 执行 --update。
+    aka-00-server --update 负责解压覆盖 + 重启，不需要 tar.gz + staging + swap。"""
+    update_path = "/tmp/aka-ota-update"
+    shutil.move(firmware_path, update_path)
+    os.chmod(update_path, 0o755)
+
+    script_path = "/tmp/aka-ota-install.sh"
     with open(script_path, "w") as f:
         f.write(f"""#!/bin/sh
 set -e
-echo "[OTA] stopping old process..."
-kill $(pgrep -f "python3.*run.py") 2>/dev/null || true
+LOCK_FILE="/tmp/aka-ota-lock"
+
+echo "[OTA] acquiring lock..."
+touch "$LOCK_FILE"
+
+# Give the HTTP response time to flush before killing Python
+sleep 3
+
+echo "[OTA] stopping old Python..."
+killall python3 2>/dev/null || true
 sleep 2
+killall -9 python3 2>/dev/null || true
 
-echo "[OTA] extracting..."
-rm -rf {OTA_DIR}/staging
-mkdir -p {OTA_DIR}/staging
-
-MAGIC=$(head -c2 "{firmware_path}" 2>/dev/null)
-if [ "$MAGIC" = "$(printf '\\x1f\\x8b')" ]; then
-    tar xzf "{firmware_path}" -C {OTA_DIR}/staging
-else
-    sed -n '/^#__PAYLOAD_BELOW__$/,$p' "{firmware_path}" | tail -n +2 | python3 -c "
-import base64, sys, tarfile, tempfile, os
-tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.tar.gz')
-tmp.write(base64.b64decode(sys.stdin.buffer.read()))
-tmp.close()
-tarfile.open(tmp.name, mode='r:gz').extractall(path='{OTA_DIR}/staging')
-os.unlink(tmp.name)
-"
-fi
-
-# 进入可能的子目录
-if [ -d {OTA_DIR}/staging/*/ ] 2>/dev/null; then
-    cd {OTA_DIR}/staging/*/
-else
-    cd {OTA_DIR}/staging
-fi
-
-echo "[OTA] installing..."
-for item in * .[!.]*; do
-    [ "$item" = "." ] && continue
-    [ "$item" = ".." ] && continue
-    [ ! -e "$item" ] && continue
-    dst="{APP_DIR}/$item"
-    if [ -d "$dst" ]; then rm -rf "$dst"; fi
-    cp -r "$item" "$dst"
-done
-
-chmod +x {APP_DIR}/*.sh 2>/dev/null || true
-rm -rf {OTA_DIR}/staging
-rm -f "{firmware_path}"
-
-echo "[OTA] restarting..."
-cd {APP_DIR} && exec ./init.sh
+echo "[OTA] running update..."
+exec /tmp/aka-ota-update --update
 """)
     os.chmod(script_path, 0o755)
     subprocess.Popen(

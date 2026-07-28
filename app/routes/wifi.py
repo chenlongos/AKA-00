@@ -50,6 +50,17 @@ def get_current_wifi_ip():
     return ip if ip else "未分配"
 
 
+def _decode_ssid(ssid: str) -> str:
+    """wpa_cli 对非 ASCII 的 SSID 返回 hex 转义序列，如 \\xe4\\xbb\\x95 → 仕"""
+    if "\\x" not in ssid:
+        return ssid
+    try:
+        hex_str = ssid.replace("\\x", "")
+        return bytes.fromhex(hex_str).decode("utf-8")
+    except Exception:
+        return ssid
+
+
 def get_wifi_list():
     if not ensure_wpa_env():
         return {"list": [], "error": "WPA_INIT_FAILED"}
@@ -63,14 +74,14 @@ def get_wifi_list():
     if "wpa_state=COMPLETED" in current_status:
         ssid_match = re.search(r"^ssid=(.*)$", current_status, re.MULTILINE)
         if ssid_match:
-            connected_ssid = ssid_match.group(1)
+            connected_ssid = _decode_ssid(ssid_match.group(1))
 
     unique_wifi = {}
     lines = raw_results.split('\n')
     for line in lines[1:]:
         parts = line.split('\t')
         if len(parts) >= 5:
-            ssid = parts[4].strip()
+            ssid = _decode_ssid(parts[4].strip())
             if not ssid:
                 continue
             signal = int(parts[2])
@@ -140,7 +151,7 @@ def get_ip():
     """获取当前IP（STA模式IP，未连接时返回AP模式IP）"""
     status_raw = subprocess.getoutput(f"wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} status")
     ssid_match = re.search(r"^ssid=(.*)$", status_raw, re.MULTILINE)
-    current_ssid = ssid_match.group(1) if ssid_match else None
+    current_ssid = _decode_ssid(ssid_match.group(1)) if ssid_match else None
 
     # 未连接时返回AP模式IP 192.168.4.1
     ip = get_current_wifi_ip() if current_ssid else "192.168.4.1"
@@ -153,7 +164,7 @@ def wifi_status():
     """获取 WiFi 连接状态"""
     status_raw = subprocess.getoutput(f"wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} status")
     ssid_match = re.search(r"^ssid=(.*)$", status_raw, re.MULTILINE)
-    current_ssid = ssid_match.group(1) if ssid_match else None
+    current_ssid = _decode_ssid(ssid_match.group(1)) if ssid_match else None
 
     # 未连接时返回AP模式IP 192.168.4.1
     ip = get_current_wifi_ip() if current_ssid else "192.168.4.1"
