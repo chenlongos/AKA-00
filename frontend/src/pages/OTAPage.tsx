@@ -25,6 +25,7 @@ const OTAPage = () => {
     const [upgrading, setUpgrading] = useState(false);
     const [status, setStatus] = useState("");
     const [uploading, setUploading] = useState(false);
+    const [restarting, setRestarting] = useState(false);
     const [showConfirm, setShowConfirm] = useState(false);
     const [upgradeProgress, setUpgradeProgress] = useState(0);
     const [upgradeMsg, setUpgradeMsg] = useState("");
@@ -75,15 +76,21 @@ const OTAPage = () => {
     const waitForService = () => {
         setUpgrading(false);
         setUploading(false);
-        setStatus("服务重启中，等待恢复...");
+        setRestarting(true);
+        setUpgradeProgress(100);
+        setUpgradeMsg("服务重启中...");
         localStorage.removeItem(OTA_TASK_KEY);
         let attempts = 0;
+        let dots = 0;
         const check = setInterval(async () => {
             attempts++;
+            dots = (dots + 1) % 4;
+            setUpgradeMsg("服务重启中" + ".".repeat(dots));
             try {
                 const r = await fetch("/api/ota/version");
                 if (r.ok) {
                     clearInterval(check);
+                    setRestarting(false);
                     setStatus("更新完成！");
                     const d = await r.json();
                     if (d.version) setCurrentVersion(d.version);
@@ -93,6 +100,7 @@ const OTAPage = () => {
             } catch {
                 if (attempts > 60) {  // ~30s timeout
                     clearInterval(check);
+                    setRestarting(false);
                     setStatus("服务恢复超时，请手动刷新页面");
                 }
             }
@@ -246,11 +254,11 @@ const OTAPage = () => {
                 <Card marginBottom={12}>
                     <h3 style={{fontSize: scalePx(14), fontWeight: 600, marginBottom: scalePx(10)}}>在线升级</h3>
                     <div style={{display: "flex", gap: scalePx(8)}}>
-                        <ControlButton variant="primary" size="full" onClick={checkUpdate} disabled={checking}>
+                        <ControlButton variant="primary" size="full" onClick={checkUpdate} disabled={checking || restarting}>
                             {checking ? "检查中..." : "检查更新"}
                         </ControlButton>
                         {hasUpdate && (
-                            <ControlButton variant="success" size="full" onClick={doUpgrade} disabled={upgrading || uploading}>
+                            <ControlButton variant="success" size="full" onClick={doUpgrade} disabled={upgrading || uploading || restarting}>
                                 {upgrading ? "升级中..." : "立即升级"}
                             </ControlButton>
                         )}
@@ -268,13 +276,13 @@ const OTAPage = () => {
                         cursor: "pointer",
                         boxShadow: "0 6px 15px rgba(0,0,0,0.5)",
                     }}>
-                        {uploading ? "上传中..." : "选择固件文件"}
-                        <input type="file" onChange={handleUpload} style={{display: "none"}} disabled={uploading || upgrading} />
+                        {uploading ? "上传中..." : restarting ? "重启中..." : "选择固件文件"}
+                        <input type="file" onChange={handleUpload} style={{display: "none"}} disabled={uploading || upgrading || restarting} />
                     </label>
                 </Card>
 
                 {/* 升级进度条 */}
-                {(upgrading || uploading) && (
+                {(upgrading || uploading || restarting) && (
                     <Card marginBottom={12}>
                         <div style={{textAlign: "center"}}>
                             <div style={{fontSize: scalePx(13), fontWeight: 600, marginBottom: scalePx(10), color: "var(--color-text)"}}>
@@ -286,14 +294,19 @@ const OTAPage = () => {
                                 overflow: "hidden",
                             }}>
                                 <div style={{
-                                    width: `${upgradeProgress}%`, height: "100%",
-                                    background: upgradeProgress === 100 ? "var(--color-success)" : "var(--color-primary)",
+                                    width: restarting ? "100%" : `${upgradeProgress}%`,
+                                    height: "100%",
+                                    background: restarting ? "var(--color-success)" :
+                                        upgradeProgress === 100 ? "var(--color-success)" : "var(--color-primary)",
                                     borderRadius: scalePx(4),
                                     transition: "width 0.3s ease",
+                                    ...(restarting ? {
+                                        animation: "pulse 1.5s ease-in-out infinite",
+                                    } : {}),
                                 }} />
                             </div>
                             <div style={{fontSize: scalePx(12), color: "var(--color-text-dim)", marginTop: scalePx(6)}}>
-                                {upgradeProgress}%
+                                {restarting ? "" : `${upgradeProgress}%`}
                             </div>
                         </div>
                     </Card>
