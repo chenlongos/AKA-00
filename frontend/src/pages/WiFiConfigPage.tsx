@@ -53,9 +53,13 @@ const WiFiConfigPage = () => {
         setMessages(prev => ({...prev, [net.id]: "正在连接并获取地址..."}));
         try {
             const r = await fetch("/connect", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ssid: net.ssid, password: pwd})});
-            const [status, info] = (await r.text()).split("|");
-            setMessages(prev => ({...prev, [net.id]: info}));
-            if (status === "success") setTimeout(loadList, 2500);
+            const d = await r.json();
+            if (r.ok) {
+                setMessages(prev => ({...prev, [net.id]: `连接成功! IP: ${d.ip}`}));
+                setTimeout(loadList, 2500);
+            } else {
+                setMessages(prev => ({...prev, [net.id]: d.error || "连接失败"}));
+            }
         } catch { setMessages(prev => ({...prev, [net.id]: "请求超时"})); }
         finally { setConnecting(false); }
     };

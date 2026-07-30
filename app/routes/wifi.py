@@ -139,9 +139,9 @@ def do_connect(ssid, password):
         if "wpa_state=COMPLETED" in status:
             os.system(f"udhcpc -i {WIFI_INTERFACE} -n -q -T 5")
             ip = subprocess.getoutput(f"ip addr show {WIFI_INTERFACE} | grep 'inet ' | awk '{{print $2}}' | cut -d/ -f1")
-            return f"success|连接成功! IP: {ip}"
+            return True, ip
         time.sleep(1)
-    return "error|连接超时"
+    return False, "连接超时"
 
 
 # ========== WiFi 路由 ==========
@@ -187,5 +187,9 @@ def wifi_connect():
     data = request.get_json()
     ssid = data.get("ssid", "")
     password = data.get("password", "")
-    result = do_connect(ssid, password)
-    return result
+    if not ssid:
+        return jsonify({"error": "ssid 不能为空"}), 400
+    success, info = do_connect(ssid, password)
+    if success:
+        return jsonify({"ip": info}), 200
+    return jsonify({"error": info}), 408
