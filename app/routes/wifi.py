@@ -139,13 +139,20 @@ def do_connect(ssid, password):
          "select_network", net_id],
         capture_output=True, timeout=5)
 
-    for _ in range(15):
+    for attempt in range(10):
+        time.sleep(0.8)
         status = subprocess.getoutput(f"wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} status")
         if "wpa_state=COMPLETED" in status:
-            os.system(f"udhcpc -i {WIFI_INTERFACE} -n -q -T 5")
+            os.system(f"udhcpc -i {WIFI_INTERFACE} -n -q -T 3")
             ip = subprocess.getoutput(f"ip addr show {WIFI_INTERFACE} | grep 'inet ' | awk '{{print $2}}' | cut -d/ -f1")
-            return True, ip
-        time.sleep(1)
+            return True, ip.strip() or "获取中..."
+        # Fail fast on clear error states
+        if any(s in status for s in ["FAIL", "UNKNOWN", "reason=WRONG_KEY",
+                                       "wpa_state=DISCONNECTED", "wpa_state=INACTIVE"]):
+            return False, "连接失败，请检查密码或信号"
+        # Give up early if still scanning after 3 attempts (AP out of range)
+        if attempt >= 2 and "wpa_state=SCANNING" in status:
+            return False, "未找到该网络"
     return False, "连接超时"
 
 
