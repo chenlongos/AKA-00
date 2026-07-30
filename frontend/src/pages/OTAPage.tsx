@@ -1,4 +1,4 @@
-import {useEffect, useState} from "react";
+import {useEffect, useRef, useState} from "react";
 import {useViewportScale} from "../hooks/useViewportScale";
 import Header from "../components/Header";
 import Card from "../components/Card";
@@ -29,8 +29,14 @@ const OTAPage = () => {
     const [showConfirm, setShowConfirm] = useState(false);
     const [upgradeProgress, setUpgradeProgress] = useState(0);
     const [upgradeMsg, setUpgradeMsg] = useState("");
+    const intervalsRef = useRef<number[]>([]);
 
     const OTA_TASK_KEY = "ota_task";
+
+    // Cleanup all intervals on unmount (prevent background polling on other pages)
+    useEffect(() => {
+        return () => intervalsRef.current.forEach(clearInterval);
+    }, []);
 
     // Shared polling logic — used by both initial mount (resume) and new upgrade
     const startPolling = (taskId: string, type: "upgrade" | "upload") => {
@@ -46,30 +52,33 @@ const OTAPage = () => {
 
                 if (pd.status === "done") {
                     clearInterval(poll);
+                    intervalsRef.current = intervalsRef.current.filter(id => id !== poll);
                     setUpgradeProgress(100);
                     setUpgradeMsg("");
                     waitForService();
                 } else if (pd.status === "error") {
                     clearInterval(poll);
+                    intervalsRef.current = intervalsRef.current.filter(id => id !== poll);
                     setUpgrading(false);
                     setUploading(false);
                     setStatus(`升级失败: ${pd.message}`);
                     localStorage.removeItem(OTA_TASK_KEY);
                 } else if (pd.status === "unknown") {
-                    // Task lost (backend restarted) — wait for service
                     clearInterval(poll);
+                    intervalsRef.current = intervalsRef.current.filter(id => id !== poll);
                     setUpgradeProgress(100);
                     setUpgradeMsg("");
                     waitForService();
                 }
             } catch {
-                // Connection lost — wait for service
                 clearInterval(poll);
+                intervalsRef.current = intervalsRef.current.filter(id => id !== poll);
                 setUpgradeProgress(100);
                 setUpgradeMsg("");
                 waitForService();
             }
         }, 500);
+        intervalsRef.current.push(poll);
     };
 
     // After backend is killed for restart, poll /api/ota/version until it comes back
@@ -90,6 +99,7 @@ const OTAPage = () => {
                 const r = await fetch("/api/ota/version");
                 if (r.ok) {
                     clearInterval(check);
+                    intervalsRef.current = intervalsRef.current.filter(id => id !== check);
                     setRestarting(false);
                     setStatus("更新完成！");
                     const d = await r.json();
@@ -100,11 +110,13 @@ const OTAPage = () => {
             } catch {
                 if (attempts > 60) {  // ~30s timeout
                     clearInterval(check);
+                    intervalsRef.current = intervalsRef.current.filter(id => id !== check);
                     setRestarting(false);
                     setStatus("服务恢复超时，请手动刷新页面");
                 }
             }
         }, 500);
+        intervalsRef.current.push(check);
     };
 
     // On mount: check persistent OTA status and recover if needed
