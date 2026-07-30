@@ -13,7 +13,16 @@ use crate::AppState;
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/system/ip", get(get_ip))
+        .route("/api/system/info", get(get_info))
         .route("/api/system/heartbeat", get(heartbeat))
+}
+
+async fn get_info(State(_s): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    let ip = crate::routes::control::detect_local_ip().await;
+    Json(serde_json::json!({
+        "ip": ip,
+        "mac": get_device_mac(),
+    }))
 }
 
 async fn get_ip(State(_s): State<Arc<AppState>>) -> Json<serde_json::Value> {

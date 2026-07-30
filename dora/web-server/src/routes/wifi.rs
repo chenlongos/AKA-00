@@ -191,6 +191,19 @@ async fn current_wifi_ip() -> String {
     String::new()
 }
 
+/// wpa_cli 对非 ASCII SSID 返回 hex 转义序列，如 \\xe4\\xbb\\x95 → 仕
+fn decode_ssid(raw: &str) -> String {
+    if !raw.contains("\\x") {
+        return raw.to_string();
+    }
+    let hex_str: String = raw.replace("\\x", "");
+    let bytes: Vec<u8> = (0..hex_str.len())
+        .step_by(2)
+        .filter_map(|i| u8::from_str_radix(&hex_str[i..(i + 2).min(hex_str.len())], 16).ok())
+        .collect();
+    String::from_utf8(bytes).unwrap_or_else(|_| raw.to_string())
+}
+
 fn parse_connected_ssid(status: &str) -> Option<String> {
     if !status.contains("wpa_state=COMPLETED") {
         return None;
@@ -271,18 +284,19 @@ async fn wifi_scan(State(_s): State<Arc<AppState>>) -> Json<serde_json::Value> {
         if parts.len() < 5 {
             continue;
         }
-        let ssid = parts[4].trim();
-        if ssid.is_empty() {
+        let ssid_raw = parts[4].trim();
+        if ssid_raw.is_empty() {
             continue;
         }
+        let ssid = decode_ssid(ssid_raw);
         let Ok(signal) = parts[2].parse::<i32>() else { continue };
         let flags = parts[3];
         let secured = !(flags == "[ESS]" || flags == "[WPS][ESS]");
         // base64(ssid) 去 padding 当前端 id
         let id = base64::engine::general_purpose::STANDARD
-            .encode(ssid)
+            .encode(&ssid)
             .replace('=', "");
-        let is_connected = connected.as_deref() == Some(ssid);
+        let is_connected = connected.as_deref() == Some(&ssid);
 
         let entry = serde_json::json!({
             "ssid": ssid,
@@ -291,7 +305,7 @@ async fn wifi_scan(State(_s): State<Arc<AppState>>) -> Json<serde_json::Value> {
             "secured": secured,
             "is_connected": is_connected,
         });
-        match unique.get(ssid) {
+        match unique.get(&ssid) {
             Some(prev) => {
                 let prev_signal = prev["signal"].as_i64().unwrap_or(i64::MIN);
                 if signal as i64 > prev_signal {
@@ -464,15 +478,20 @@ async fn wifi_connect(
             .into_response();
     }
 
-    // 等连接完成，最多 15s。超时把当前 wpa_state 一起带回错误消息，
-    // 前端能直接看到卡在哪一步（SCANNING / ASSOCIATING / 4WAY_HANDSHAKE 等）。
+    // 等连接完成，最多 10 轮。认证失败 / AP 不在范围立刻返回。
     let mut last_state = String::new();
-    for _ in 0..15 {
-        tokio::time::sleep(Duration::from_secs(1)).await;
+    for attempt in 0..10 {
+        tokio::time::sleep(Duration::from_millis(800)).await;
         let status = wpa_cli(&["status"]).await;
+        // 抓 wpa_state
+        for line in status.lines() {
+            if let Some(s) = line.strip_prefix("wpa_state=") {
+                last_state = s.to_string();
+                break;
+            }
+        }
         if status.contains("wpa_state=COMPLETED") {
-            // 触发 DHCP 拿 IP
-            cmd_run(&["udhcpc", "-i", WIFI_INTERFACE, "-n", "-q", "-T", "5"]).await;
+            cmd_run(&["udhcpc", "-i", WIFI_INTERFACE, "-n", "-q", "-T", "3"]).await;
             let ip = current_wifi_ip().await;
             return (
                 StatusCode::OK,
@@ -480,19 +499,31 @@ async fn wifi_connect(
             )
                 .into_response();
         }
-        // 抓 wpa_state= 行，下一次循环或超时用
-        for line in status.lines() {
-            if let Some(s) = line.strip_prefix("wpa_state=") {
-                last_state = s.to_string();
-                break;
-            }
+        // 认证失败 / AP 不可达 — 快速返回
+        if last_state == "DISCONNECTED" || last_state == "INACTIVE"
+            || status.contains("FAIL") || status.contains("UNKNOWN")
+            || status.contains("reason=WRONG_KEY")
+        {
+            return (
+                StatusCode::OK,
+                format!("error|连接失败（{}），请检查密码或信号\ndiag:\n{}", last_state, diag),
+            )
+                .into_response();
+        }
+        // 一直在扫描 — AP 不在范围
+        if attempt >= 2 && last_state == "SCANNING" {
+            return (
+                StatusCode::OK,
+                "error|未找到该网络".to_string(),
+            )
+                .into_response();
         }
     }
 
     (
         StatusCode::OK,
         format!(
-            "error|连接超时（15s），最后状态 wpa_state={}\ndiag:\n{}",
+            "error|连接超时（10s），最后状态 wpa_state={}\ndiag:\n{}",
             if last_state.is_empty() { "UNKNOWN" } else { &last_state },
             diag
         ),
