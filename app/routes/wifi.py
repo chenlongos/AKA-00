@@ -66,8 +66,13 @@ def get_wifi_list():
         return {"list": [], "error": "WPA_INIT_FAILED"}
 
     os.system(f"wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} scan > /dev/null 2>&1")
-    time.sleep(1.5)
-    raw_results = subprocess.getoutput(f"wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} scan_results")
+    # 轮询等待扫描完成，最多等 5 秒
+    raw_results = ""
+    for _ in range(10):
+        time.sleep(0.5)
+        raw_results = subprocess.getoutput(f"wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} scan_results")
+        if len(raw_results.split('\n')) > 1:
+            break
 
     current_status = subprocess.getoutput(f"wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} status")
     connected_ssid = None
