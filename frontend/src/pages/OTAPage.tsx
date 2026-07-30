@@ -81,23 +81,27 @@ const OTAPage = () => {
         intervalsRef.current.push(poll);
     };
 
-    // After backend is killed for restart, poll /api/ota/version until it comes back
+    // After OTA: wait for service to go DOWN then come back UP
     const waitForService = () => {
         setUpgrading(false);
         setUploading(false);
         setRestarting(true);
         setUpgradeProgress(100);
-        setUpgradeMsg("服务重启中...");
+        setUpgradeMsg("等待服务下线...");
         localStorage.removeItem(OTA_TASK_KEY);
         let attempts = 0;
         let dots = 0;
+        let phase = "wait_down";  // wait_down → wait_up → done
+
         const check = setInterval(async () => {
             attempts++;
             dots = (dots + 1) % 4;
-            setUpgradeMsg("服务重启中" + ".".repeat(dots));
+            setUpgradeMsg((phase === "wait_down" ? "等待服务下线" : "服务重启中") + ".".repeat(dots));
+
             try {
                 const r = await fetch("/api/ota/version");
-                if (r.ok) {
+                if (phase === "wait_up" && r.ok) {
+                    // Came back up — done!
                     clearInterval(check);
                     intervalsRef.current = intervalsRef.current.filter(id => id !== check);
                     setRestarting(false);
@@ -107,8 +111,15 @@ const OTAPage = () => {
                     setHasUpdate(false);
                     setLatestVersion("");
                 }
+                // phase === "wait_down" && success: still up, keep waiting for it to go down
             } catch {
-                if (attempts > 60) {  // ~30s timeout
+                // Connection failed — service went down
+                if (phase === "wait_down") {
+                    phase = "wait_up";
+                    attempts = 0;
+                }
+                // phase === "wait_up": still down, keep waiting
+                if (phase === "wait_up" && attempts > 60) {
                     clearInterval(check);
                     intervalsRef.current = intervalsRef.current.filter(id => id !== check);
                     setRestarting(false);
