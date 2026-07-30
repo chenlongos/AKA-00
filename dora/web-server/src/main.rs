@@ -85,6 +85,7 @@ pub struct AppState {
     pub motor: Arc<MotorService>,
     pub arm: Arc<ArmService>,
     pub demo: Arc<DemoService>,
+    pub ota: routes::ota::OtaState,
 }
 
 fn main() -> Result<()> {
@@ -126,6 +127,7 @@ async fn run() -> Result<()> {
         motor: Arc::new(MotorService::new(dora.clone())),
         arm: Arc::new(ArmService::new(dora.clone(), config.arm.clone())),
         demo: Arc::new(DemoService::new(dora)),
+        ota: routes::ota::OtaState::default(),
     });
 
     // ── HTTP 路由 ──
