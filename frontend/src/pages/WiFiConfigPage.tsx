@@ -17,7 +17,7 @@ const WiFiConfigPage = () => {
     const [alertMsg, setAlertMsg] = useState("");
     const [retryCount, setRetryCount] = useState(0);
 
-    useEffect(() => { loadList(); }, []);
+    useEffect(() => { updateStatus(); }, []);
 
     const getBars = (signal: number) => {
         const level = signal > -60 ? 4 : signal > -70 ? 3 : signal > -80 ? 2 : 1;
