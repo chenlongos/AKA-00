@@ -15,6 +15,7 @@ const WiFiConfigPage = () => {
     const [passwords, setPasswords] = useState<Record<string, string>>({});
     const [messages, setMessages] = useState<Record<string, string>>({});
     const [alertMsg, setAlertMsg] = useState("");
+    const [retryCount, setRetryCount] = useState(0);
 
     useEffect(() => { loadList(); }, []);
 
@@ -39,11 +40,22 @@ const WiFiConfigPage = () => {
         } catch {}
     };
 
-    const loadList = async () => {
+    const loadList = async (isRetry = false) => {
         if (scanning || connecting) return;
         setScanning(true);
-        try { const r = await fetch("/scan"); const d = await r.json(); setNetworks(d.list || []); await updateStatus(); }
-        finally { setScanning(false); }
+        try {
+            const r = await fetch("/scan"); const d = await r.json();
+            const list = d.list || [];
+            setNetworks(list);
+            await updateStatus();
+            // 第一次扫描为空时自动重试一次
+            if (!isRetry && list.length === 0 && retryCount < 1) {
+                setRetryCount((c: number) => c + 1);
+                setScanning(false);
+                setTimeout(() => loadList(true), 800);
+                return;
+            }
+        } finally { setScanning(false); }
     };
 
     const connect = async (net: WifiNetwork) => {
@@ -85,7 +97,7 @@ const WiFiConfigPage = () => {
                 subtitle={connectionStatus}
                 showClose closeTo="/settings"
                 actions={
-                    <span onClick={loadList}
+                    <span onClick={() => loadList()}
                           style={{color: scanning || connecting ? "var(--color-text-dim)" : "var(--color-primary)", fontSize: scalePx(14), fontWeight: 600, cursor: scanning || connecting ? "not-allowed" : "pointer", userSelect: "none"}}>
                         {scanning ? "刷新中..." : "刷新扫描"}
                     </span>
