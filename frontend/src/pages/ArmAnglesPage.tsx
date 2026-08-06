@@ -6,33 +6,31 @@ import Header from "../components/Header";
 import Card from "../components/Card";
 import SliderRow from "../components/SliderRow";
 
-interface ArmAnglesZP10S {
-    servo0_prepare: number; servo1_prepare: number; servo2_prepare: number;
-    servo2_approach: number; servo2_grab: number;
-    servo0_lift: number; servo1_lift: number; servo2_lift: number;
+/** 新语义化角度配置结构 */
+interface ArmAnglesNew {
+    grab_position: Record<string, number>;
+    lift_position: Record<string, number>;
+    gripper_open: number;
+    gripper_close: number;
 }
-interface ArmAnglesSTS {
-    servo1_prepare: number; servo2_prepare: number; servo3_prepare: number;
-    servo1_enter: number; servo2_enter: number; servo3_enter: number;
-    servo3_grab: number;
-    servo1_lift: number; servo2_lift: number; servo3_lift: number;
-}
-interface ArmAnglesResponse<T> { driver: string; angles: T; }
+
+/** servo key 列表（按 driver 区分，不含夹爪舵机） */
+const ZP10S_SERVOS = ["servo0", "servo1"];
+const STS_SERVOS = ["servo1", "servo2"];
+
+const ZP10S_DEFAULTS: ArmAnglesNew = {
+    grab_position: {servo0: 245, servo1: 180},
+    lift_position: {servo0: 200, servo1: 180},
+    gripper_open: 150,
+    gripper_close: 90,
+};
+
+type Driver = "zp10s" | "sts3215";
 
 const ArmAnglesPage = () => {
     const {scalePx} = useViewportScale();
-    const [driver, setZp] = useState("zp10s");
-    const [zp10s, setZp10s] = useState<ArmAnglesZP10S>({
-        servo0_prepare: 245, servo1_prepare: 180, servo2_prepare: 150,
-        servo2_approach: 150, servo2_grab: 90,
-        servo0_lift: 200, servo1_lift: 180, servo2_lift: 90,
-    });
-    const [sts, setSts] = useState<ArmAnglesSTS>({
-        servo1_prepare: 2300, servo2_prepare: 2100, servo3_prepare: 4000,
-        servo1_enter: 1850, servo2_enter: 2650, servo3_enter: 4000,
-        servo3_grab: 3000,
-        servo1_lift: 2300, servo2_lift: 2100, servo3_lift: 3000,
-    });
+    const [driver, setDriver] = useState<Driver>("zp10s");
+    const [angles, setAngles] = useState<ArmAnglesNew>(ZP10S_DEFAULTS);
     const [status, setStatus] = useState("");
     const [saving, setSaving] = useState(false);
     const location = useLocation();
@@ -40,48 +38,107 @@ const ArmAnglesPage = () => {
     const previewTimerRef = useRef<number | null>(null);
     const requestIdRef = useRef(0);
 
+    const servoKeys = driver === "zp10s" ? ZP10S_SERVOS : STS_SERVOS;
+    const angleRange = driver === "zp10s" ? {min: 0, max: 270} : {min: 0, max: 4095};
+
     useEffect(() => {
         loadConfig();
         return () => { if (previewTimerRef.current !== null) clearTimeout(previewTimerRef.current); };
     }, []);
 
-    const currentAngles = driver === "zp10s" ? zp10s : sts;
-
     const loadConfig = async () => {
         try {
-            const data = await (isAdmin ? api.arm.defaultAngles() : api.arm.angles()) as ArmAnglesResponse<ArmAnglesZP10S | ArmAnglesSTS>;
-            if (data.driver === "zp10s") { setZp10s(data.angles as ArmAnglesZP10S); setZp(data.driver); }
-            else if (data.driver === "sts3215") { setSts(data.angles as ArmAnglesSTS); setZp(data.driver); }
+            const data = await (isAdmin ? api.arm.defaultAngles() : api.arm.angles()) as {driver: string; angles: ArmAnglesNew};
+            if (data.driver === "zp10s" || data.driver === "sts3215") {
+                setDriver(data.driver as Driver);
+                setAngles(data.angles);
+            }
         } catch {}
     };
 
     const saveConfig = async () => {
         setSaving(true); setStatus("");
         const save = isAdmin ? api.arm.saveDefaultAngles : api.arm.saveAngles;
-        try { const r = await save(driver, currentAngles) as {error?: string}; setStatus(r.error ? "保存失败" : (isAdmin ? "出厂默认已保存" : "保存成功")); if (!r.error) setTimeout(() => setStatus(""), 2000); }
-        catch (e) { setStatus("请求失败: " + e); }
-        finally { setSaving(false); }
+        try {
+            const r = await save(driver, angles) as {error?: string};
+            setStatus(r.error ? "保存失败" : (isAdmin ? "出厂默认已保存" : "保存成功"));
+            if (!r.error) setTimeout(() => setStatus(""), 2000);
+        } catch (e) {
+            setStatus("请求失败: " + e);
+        } finally {
+            setSaving(false);
+        }
     };
 
-    const queuePreview = (key: string, value: number, nextAngles: ArmAnglesZP10S | ArmAnglesSTS) => {
+    /** 更新 grab_position 中某个 servo */
+    const updGrab = (servoKey: string, value: number) => {
+        setAngles(prev => {
+            const next: ArmAnglesNew = {
+                ...prev,
+                grab_position: {...prev.grab_position, [servoKey]: value},
+            };
+            queuePreview(`grab_position.${servoKey}`, value, next);
+            return next;
+        });
+    };
+
+    /** 更新 lift_position 中某个 servo */
+    const updLift = (servoKey: string, value: number) => {
+        setAngles(prev => {
+            const next: ArmAnglesNew = {
+                ...prev,
+                lift_position: {...prev.lift_position, [servoKey]: value},
+            };
+            queuePreview(`lift_position.${servoKey}`, value, next);
+            return next;
+        });
+    };
+
+    /** 更新 gripper_open / gripper_close */
+    const updScalar = (key: "gripper_open" | "gripper_close", value: number) => {
+        setAngles(prev => {
+            const next: ArmAnglesNew = {...prev, [key]: value};
+            queuePreview(key, value, next);
+            return next;
+        });
+    };
+
+    const queuePreview = (key: string, value: number, nextAngles: ArmAnglesNew) => {
         if (previewTimerRef.current !== null) clearTimeout(previewTimerRef.current);
         setStatus(`已调整 ${key}: ${value}`);
         previewTimerRef.current = window.setTimeout(async () => {
             const reqId = ++requestIdRef.current; setSaving(true);
-            try { const r = await api.arm.preview(driver, key, value, nextAngles); if (r?.error) throw new Error(r.error); if (reqId === requestIdRef.current) setStatus(`已同步 ${key}: ${value}`); }
-            catch (e) { if (reqId === requestIdRef.current) setStatus("同步失败: " + e); }
-            finally { if (reqId === requestIdRef.current) setSaving(false); }
+            try {
+                const r = await api.arm.preview(driver, key, value, nextAngles);
+                if (r?.error) throw new Error(r.error);
+                if (reqId === requestIdRef.current) setStatus(`已同步 ${key}: ${value}`);
+            } catch (e) {
+                if (reqId === requestIdRef.current) setStatus("同步失败: " + e);
+            } finally {
+                if (reqId === requestIdRef.current) setSaving(false);
+            }
         }, 80);
     };
 
-    const updZ = (key: keyof ArmAnglesZP10S, v: number) => setZp10s(prev => { const n = {...prev, [key]: v}; queuePreview(key, v, n); return n; });
-    const updS = (key: keyof ArmAnglesSTS, v: number) => setSts(prev => { const n = {...prev, [key]: v}; queuePreview(key, v, n); return n; });
-
     const statusBg = (s: string) => s.includes("成功") || s.includes("生效") ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)";
     const statusClr = (s: string) => s.includes("成功") || s.includes("生效") ? "var(--color-success)" : "var(--color-danger)";
-    const sectionTitle = (t: string) => (
-        <div style={{fontSize: scalePx(10), fontWeight: 700, color: "var(--color-text-dim)", textTransform: "uppercase", letterSpacing: "1px", marginBottom: scalePx(8), marginTop: scalePx(4)}}>{t}</div>
+
+    const sectionTitle = (t: string, subtitle?: string) => (
+        <div style={{marginBottom: scalePx(8), marginTop: scalePx(4)}}>
+            <div style={{fontSize: scalePx(10), fontWeight: 700, color: "var(--color-text-dim)", textTransform: "uppercase", letterSpacing: "1px"}}>{t}</div>
+            {subtitle && <div style={{fontSize: scalePx(9), color: "var(--color-text-muted)", marginTop: scalePx(2)}}>{subtitle}</div>}
+        </div>
     );
+
+    /** servo ID 对应的中文标签 */
+    const servoLabel = (sk: string, driver: Driver) => {
+        if (driver === "zp10s") {
+            const map: Record<string, string> = {servo0: "底座旋转", servo1: "腕部"};
+            return map[sk] || sk;
+        }
+        const map: Record<string, string> = {servo1: "底座旋转", servo2: "腕部"};
+        return map[sk] || sk;
+    };
 
     return (
         <div style={{
@@ -102,10 +159,9 @@ const ArmAnglesPage = () => {
                         {!isAdmin && (
                             <button onClick={async () => {
                                 try {
-                                    const def = await api.arm.defaultAngles() as {angles?: object};
+                                    const def = await api.arm.defaultAngles() as {angles?: ArmAnglesNew};
                                     if (def.angles) {
-                                        if (driver === "zp10s") setZp10s(def.angles as ArmAnglesZP10S);
-                                        else setSts(def.angles as ArmAnglesSTS);
+                                        setAngles(def.angles);
                                         setStatus("已恢复默认值，请点击保存");
                                         setTimeout(() => setStatus(""), 3000);
                                     }
@@ -125,34 +181,58 @@ const ArmAnglesPage = () => {
             {status && <div style={{textAlign: "center", padding: scalePx(8), background: statusBg(status), color: statusClr(status), fontSize: scalePx(12)}}>{status}</div>}
 
             <div style={{padding: scalePx(12)}}>
+                {/* 夹取位置 */}
                 <Card>
                     <div style={{padding: scalePx(4)}}>
-                        {sectionTitle("角度配置")}
-                        {driver === "zp10s" ? (
-                            <>
-                                <SliderRow label="Servo0 准备位" value={zp10s.servo0_prepare} min={0} max={270} onChange={v => updZ("servo0_prepare", v)} />
-                                <SliderRow label="Servo1 准备位" value={zp10s.servo1_prepare} min={0} max={270} onChange={v => updZ("servo1_prepare", v)} />
-                                <SliderRow label="Servo2 准备位" value={zp10s.servo2_prepare} min={0} max={270} onChange={v => updZ("servo2_prepare", v)} />
-                                <SliderRow label="Servo2 接近位" value={zp10s.servo2_approach} min={0} max={270} onChange={v => updZ("servo2_approach", v)} />
-                                <SliderRow label="Servo2 抓取位" value={zp10s.servo2_grab} min={0} max={270} onChange={v => updZ("servo2_grab", v)} />
-                                <SliderRow label="Servo0 抬起位" value={zp10s.servo0_lift} min={0} max={270} onChange={v => updZ("servo0_lift", v)} />
-                                <SliderRow label="Servo1 抬起位" value={zp10s.servo1_lift} min={0} max={270} onChange={v => updZ("servo1_lift", v)} />
-                                <SliderRow label="Servo2 抬起位" value={zp10s.servo2_lift} min={0} max={270} onChange={v => updZ("servo2_lift", v)} />
-                            </>
-                        ) : (
-                            <>
-                                <SliderRow label="Servo1 准备位" value={sts.servo1_prepare} min={0} max={4095} onChange={v => updS("servo1_prepare", v)} />
-                                <SliderRow label="Servo2 准备位" value={sts.servo2_prepare} min={0} max={4095} onChange={v => updS("servo2_prepare", v)} />
-                                <SliderRow label="Servo3 准备位" value={sts.servo3_prepare} min={0} max={4095} onChange={v => updS("servo3_prepare", v)} />
-                                <SliderRow label="Servo1 进入位" value={sts.servo1_enter} min={0} max={4095} onChange={v => updS("servo1_enter", v)} />
-                                <SliderRow label="Servo2 进入位" value={sts.servo2_enter} min={0} max={4095} onChange={v => updS("servo2_enter", v)} />
-                                <SliderRow label="Servo3 进入位" value={sts.servo3_enter} min={0} max={4095} onChange={v => updS("servo3_enter", v)} />
-                                <SliderRow label="Servo3 抓取位" value={sts.servo3_grab} min={0} max={4095} onChange={v => updS("servo3_grab", v)} />
-                                <SliderRow label="Servo1 抬起位" value={sts.servo1_lift} min={0} max={4095} onChange={v => updS("servo1_lift", v)} />
-                                <SliderRow label="Servo2 抬起位" value={sts.servo2_lift} min={0} max={4095} onChange={v => updS("servo2_lift", v)} />
-                                <SliderRow label="Servo3 抬起位" value={sts.servo3_lift} min={0} max={4095} onChange={v => updS("servo3_lift", v)} />
-                            </>
-                        )}
+                        {sectionTitle("夹取位置", "抓取时各舵机的目标角度")}
+                        {servoKeys.map(sk => (
+                            <SliderRow
+                                key={`grab-${sk}`}
+                                label={`${servoLabel(sk, driver)} (${sk})`}
+                                value={angles.grab_position[sk] ?? 0}
+                                min={angleRange.min}
+                                max={angleRange.max}
+                                onChange={v => updGrab(sk, v)}
+                            />
+                        ))}
+                    </div>
+                </Card>
+
+                {/* 抬起位置 */}
+                <Card>
+                    <div style={{padding: scalePx(4)}}>
+                        {sectionTitle("抬起位置", "抓取后抬起时各舵机的目标角度")}
+                        {servoKeys.map(sk => (
+                            <SliderRow
+                                key={`lift-${sk}`}
+                                label={`${servoLabel(sk, driver)} (${sk})`}
+                                value={angles.lift_position[sk] ?? 0}
+                                min={angleRange.min}
+                                max={angleRange.max}
+                                onChange={v => updLift(sk, v)}
+                            />
+                        ))}
+                    </div>
+                </Card>
+
+                {/* 夹爪 */}
+                <Card>
+                    <div style={{padding: scalePx(4)}}>
+                        {sectionTitle("夹爪开闭", "夹爪张开和闭合的角度")}
+                        <SliderRow
+                            label="夹爪张开"
+                            value={angles.gripper_open}
+                            min={angleRange.min}
+                            max={angleRange.max}
+                            onChange={v => updScalar("gripper_open", v)}
+                        />
+                        <SliderRow
+                            label="夹爪闭合"
+                            value={angles.gripper_close}
+                            min={angleRange.min}
+                            max={angleRange.max}
+                            onChange={v => updScalar("gripper_close", v)}
+                        />
                     </div>
                 </Card>
             </div>

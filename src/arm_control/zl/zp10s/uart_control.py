@@ -1,7 +1,7 @@
 import serial
 import time
 
-from src.arm_control.angle_config import load_arm_angles
+from src.arm_control.angle_config import load_arm_angles, get_gripper_open, get_gripper_close
 
 
 class ZP10S:
@@ -17,18 +17,31 @@ class ZP10S:
         self._angles = load_arm_angles("zp10s")
 
     def update_angles(self, angles):
-        self._angles = {**self._angles, **angles}
+        """合并新角度到运行时配置。"""
+        # 深度合并 grab_position / lift_position
+        for group_key in ("grab_position", "lift_position"):
+            if group_key in angles and isinstance(angles[group_key], dict):
+                if group_key not in self._angles or not isinstance(self._angles[group_key], dict):
+                    self._angles[group_key] = {}
+                self._angles[group_key] = {**self._angles[group_key], **angles[group_key]}
+        for scalar_key in ("gripper_open", "gripper_close"):
+            if scalar_key in angles:
+                self._angles[scalar_key] = angles[scalar_key]
 
-    def _angle(self, key, default):
-        return self._angles.get(key, default)
+    def _pos(self, group_key: str, servo_key: str) -> int:
+        """读取某个位姿组中某个舵机的角度。"""
+        group = self._angles.get(group_key, {})
+        if isinstance(group, dict):
+            return int(group.get(servo_key, 150))
+        return 150
 
     @property
-    def id2_angle_open(self):
-        return self._angle("servo2_prepare", 150)
+    def gripper_open_angle(self) -> int:
+        return get_gripper_open(self._angles)
 
     @property
-    def id2_angle_close(self):
-        return self._angle("servo2_grab", 90)
+    def gripper_close_angle(self) -> int:
+        return get_gripper_close(self._angles)
 
     def close(self):
         if self.ser.is_open:
@@ -41,6 +54,7 @@ class ZP10S:
         cmd = f"#{servo_id:03d}P{pulse:04d}T{1000}!"
         self.ser.write(cmd.encode('ascii'))
         self.ser.flush()
+
     def _send_cmd(self, servo_id, cmd):
         cmd = f"#{servo_id:03d}{cmd}"
         self.ser.write(cmd.encode('ascii'))
@@ -52,57 +66,36 @@ class ZP10S:
 
     def release_torque(self):
         self._send_cmd(255, "PULK")
+
     def restoring_torque(self):
         self._send_cmd(255, "PULR")
+
     def set_angle(self, servo_id, angle):
         if not 0 <= angle <= 270:
             raise ValueError("angle must be 0~270")
         self._send_frame(servo_id, angle)
 
+
 def grab(servo):
-    servo.set_angle(2,servo.id2_angle_open)
+    """抓取动作：张开夹爪 → 夹取位姿 → 闭合夹爪 → 抬起位姿"""
+    # 1. 张开夹爪
+    servo.set_angle(2, servo.gripper_open_angle)
     time.sleep(0.5)
-    servo.set_angle(0, servo._angle("servo0_prepare", 245))
-    servo.set_angle(1, servo._angle("servo1_prepare", 180))
-    servo.set_angle(2, servo._angle("servo2_approach", 150))
+
+    # 2. 夹取位姿（手臂舵机到位）
+    servo.set_angle(0, servo._pos("grab_position", "servo0"))
+    servo.set_angle(1, servo._pos("grab_position", "servo1"))
     time.sleep(1)
-    servo.set_angle(2,servo.id2_angle_close)
+
+    # 3. 闭合夹爪
+    servo.set_angle(2, servo.gripper_close_angle)
     time.sleep(2)
-    servo.set_angle(0, servo._angle("servo0_lift", 200))
-    servo.set_angle(1, servo._angle("servo1_lift", 180))
-    servo.set_angle(2, servo._angle("servo2_lift", 90))
-def release_pos(servo):
-    servo.set_angle(0,140)
-    servo.set_angle(1,220)
-    servo.set_angle(2,servo.id2_angle_close)
-def grab_test(servo):
-    grab(servo)
-    time.sleep(2)
-    release_pos(servo)
-    time.sleep(2)
-    servo.set_angle(0,70)
-    servo.set_angle(1,230)
-    servo.set_angle(2,servo.id2_angle_close)
-    time.sleep(2)
-    servo.set_angle(2,servo.id2_angle_open)
+
+    # 4. 抬起位姿（手臂舵机抬起）
+    servo.set_angle(0, servo._pos("lift_position", "servo0"))
+    servo.set_angle(1, servo._pos("lift_position", "servo1"))
+
 
 def release(servo):
-    servo.set_angle(2,servo.id2_angle_open)
-
-def main():
-    zp10s = ZP10S()
-    print("ZP10S 转到135")
-    zp10s.set_angle(1, 135)
-    time.sleep(2)
-    print("ZP10S 转到20")
-    zp10s.set_angle(1, 20)
-    time.sleep(2)
-    print("ZP10S 转到90")
-    zp10s.set_angle(1, 90)
-    time.sleep(2)
-    print("ZP10S 转到250")
-    zp10s.set_angle(1, 250)
-
-
-if __name__ == '__main__':
-    main()
+    """张开夹爪。"""
+    servo.set_angle(2, servo.gripper_open_angle)

@@ -1,12 +1,13 @@
-from src.arm_control.zl.zp10s.uart_control import ZP10S, grab_test
-from src.base_control.n20.__init__ import N20, forward, backward, turn_left, turn_right, brake, sleep as n20_sleep
+from src.arm_control.zl.zp10s.uart_control import ZP10S, grab, release
 import time, subprocess
 
 def arm_test():
     subprocess.run(['sh','./arm_init.sh'], capture_output=True, text=True)
     servo = ZP10S()
     print("开始机械臂测试")
-    grab_test(servo)
+    grab(servo)
+    time.sleep(2)
+    release(servo)
     print("结束机械臂测试")
 
 def moter_test():

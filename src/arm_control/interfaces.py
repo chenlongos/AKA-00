@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 import sys
-from typing import Literal, Optional, Protocol, runtime_checkable
+from typing import Any, Literal, Optional, Protocol, runtime_checkable
 
 GripperStatus = Literal["open", "closed", "moving", "unknown"]
 
@@ -52,7 +52,7 @@ class MockGripper:
     def get_status(self) -> GripperStatus:
         return self._status
 
-    def update_angles(self, angles: dict[str, int]) -> None:
+    def update_angles(self, angles: dict[str, Any]) -> None:
         pass
 
     def preview_angle(self, key: str, angle: int) -> None:
@@ -81,11 +81,11 @@ class ZP10SGripperAdapter:
     def get_status(self) -> GripperStatus:
         return self._status
 
-    def update_angles(self, angles: dict[str, int]) -> None:
+    def update_angles(self, angles: dict[str, Any]) -> None:
         self._zp10s.update_angles(angles)
 
     def preview_angle(self, key: str, angle: int) -> None:
-        servo_id = _extract_servo_id(key)
+        servo_id = _resolve_servo_id(key, gripper_servo=2)
         self._zp10s.set_angle(servo_id, angle)
 
 
@@ -115,19 +115,42 @@ class STS3215GripperAdapter:
             return "closed"
         return "moving"
 
-    def update_angles(self, angles: dict[str, int]) -> None:
+    def update_angles(self, angles: dict[str, Any]) -> None:
         self._servo.update_angles(angles)
 
     def preview_angle(self, key: str, angle: int) -> None:
-        servo_id = _extract_servo_id(key)
+        servo_id = _resolve_servo_id(key, gripper_servo=3)
         self._servo.move_to_position(servo_id, angle)
 
 
 def _extract_servo_id(key: str) -> int:
+    """从 key 中提取舵机 ID。
+
+    支持两种格式:
+      - 旧格式: "servo0_prepare" → 0
+      - 新格式: "grab_position.servo1" → 1, "lift_position.servo2" → 2
+    不处理 gripper_open / gripper_close（无 servo ID）。
+    """
+    # 新格式: "xxx.servoN"
+    match = re.search(r"\.servo(\d+)$", key)
+    if match:
+        return int(match.group(1))
+    # 旧格式: "servoN_..."
     match = re.match(r"servo(\d+)_", key)
-    if not match:
-        raise ValueError(f"invalid servo key: {key}")
-    return int(match.group(1))
+    if match:
+        return int(match.group(1))
+    # 纯 "servoN"
+    match = re.match(r"^servo(\d+)$", key)
+    if match:
+        return int(match.group(1))
+    raise ValueError(f"invalid servo key: {key}")
+
+
+def _resolve_servo_id(key: str, gripper_servo: int) -> int:
+    """解析 servo ID，对 gripper_open/gripper_close 使用驱动对应的夹爪舵机 ID。"""
+    if key in ("gripper_open", "gripper_close"):
+        return gripper_servo
+    return _extract_servo_id(key)
 
 
 def create_gripper(

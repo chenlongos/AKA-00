@@ -1,10 +1,12 @@
 {
-  "servo0_lift": 150,
-  "servo0_prepare": 41,
-  "servo1_lift": 150,
-  "servo1_prepare": 228,
-  "servo2_approach": 150,
-  "servo2_grab": 150,
-  "servo2_lift": 150,
-  "servo2_prepare": 44
+  "grab_position": {
+    "servo0": 41,
+    "servo1": 228
+  },
+  "lift_position": {
+    "servo0": 150,
+    "servo1": 150
+  },
+  "gripper_open": 44,
+  "gripper_close": 150
 }
