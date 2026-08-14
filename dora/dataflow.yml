@@ -50,6 +50,13 @@ nodes:
     outputs:
       - demo_status
 
+  - id: screen-node
+    path: target/release/screen-node
+    inputs:
+      image: camera/image
+    outputs:
+      - screen_status
+
   - id: web-server
     path: target/release/web-server
     inputs:

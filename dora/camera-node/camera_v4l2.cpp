@@ -105,19 +105,28 @@ bool Camera::open(const char* device, int target_w, int target_h) {
 
     _enumerate_formats(_fd);
 
-    // ── 1. 尝试 MJPEG @ 目标分辨率 ──
+    // ── 1. 优先 MJPEG（web-server 原生直通转发给浏览器；screen-node 解 JPEG）──
+    //     YUYV 曾被试过让 screen-node 免解码直写屏，但打破了 web 预览
+    //     （web-server 只认 JPEG/RGB）。回退 MJPEG 后两端都能正常工作。
     std::cout << "[camera] trying MJPEG " << target_w << "x" << target_h << "..." << std::endl;
     _width = target_w;
     _height = target_h;
     _fmt = V4L2_PIX_FMT_MJPEG;
     bool mjpeg_ok = _probe_fmt(_fmt, _width, _height);
 
+    std::string format_name = "MJPEG";
     if (!mjpeg_ok) {
-        std::fprintf(stderr, "[camera] MJPEG not supported by this device\n");
-        close(); return false;
+        std::cout << "[camera] MJPEG unavailable, falling back to YUYV" << std::endl;
+        _width  = target_w;
+        _height = target_h;
+        _fmt    = V4L2_PIX_FMT_YUYV;
+        if (!_probe_fmt(_fmt, _width, _height)) {
+            std::fprintf(stderr, "[camera] neither MJPEG nor YUYV supported by this device\n");
+            close(); return false;
+        }
+        format_name = "YUYV";
     }
 
-    // ── 3. 设置 MJPEG 编码参数 ──
     if (_fmt == V4L2_PIX_FMT_MJPEG)
         _configure_mjpeg(_fd);
 
@@ -126,7 +135,8 @@ bool Camera::open(const char* device, int target_w, int target_h) {
     _start_stream();
 
     std::cout << "[camera] V4L2 " << _width << "x" << _height
-              << " MJPEG (target was " << target_w << "x"
+              << " " << format_name
+              << " (target was " << target_w << "x"
               << target_h << ")" << std::endl;
     return true;
 }

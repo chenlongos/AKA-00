@@ -4,4 +4,9 @@ dist/
 build-cross/
 camera-node/camera-node
 .DS_Store
-*/static
+*/static# 临时构建产物（交叉编译验证用，不提交大二进制）
+camera-node/camera-node-new
+screen-node-cpp/screen-node
+screen-node-cpp/screen-node-new
+screen-node-cpp/libdora_c_ffi_fixed.a
+screen-node-cpp/Makefile.scr

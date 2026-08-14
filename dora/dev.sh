@@ -142,6 +142,7 @@ build_crate motor-bridge
 build_crate arm-bridge
 build_crate demo-node
 build_crate state-node
+build_crate screen-node
 
 # camera-node 是 C++，走 make
 if [ -f camera-node/Makefile ] && [ -f camera-node/main.cc ]; then

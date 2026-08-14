@@ -317,42 +317,22 @@ cross_compile_dora_runtime() {
         info "使用已缓存的 dora-rs 源码: $dora_src"
     fi
 
-    # Fix: 强制 Zenoh IPv4 监听 (SG2002 内核无 IPv6)
-    _orb python3 -c "
-src = open('$dora_src/libraries/core/src/topics.rs', 'r').read()
-if 'SG2002: 强制 IPv4' not in src:
-    src = src.replace(
-        'let mut zenoh_config = zenoh::Config::default();',
-        'let mut zenoh_config = zenoh::Config::default();\n'
-        '            // SG2002: 强制 IPv4（内核无 IPv6）\n'
-        '            zenoh_config.insert_json5(\"listen/endpoints\", r#\"[\"tcp/0.0.0.0:0\"]\"#).ok();'
-    )
-    src = src.replace('tcp/[::]', 'tcp/0.0.0.0')
-    open('$dora_src/libraries/core/src/topics.rs', 'w').write(src)
-    print('  [patch] OK: [::] -> 0.0.0.0 + listen/endpoints')
-else:
-    print('  [patch] SKIP: 已 patch 过')
-" 2>&1
-
     # 配置交叉编译: rust-lld linker + Xuantie sysroot lib 路径 (供 libdl 等)
     local sysroot_lib="/home/junbo_dai/riscv64-linux-musl-x86_64/sysroot/usr/lib64v0p7_xthead/lp64d"
     local sysroot_lib2="/home/junbo_dai/riscv64-linux-musl-x86_64/sysroot/lib64v0p7_xthead/lp64d"
+
+    # Cargo 用大写的 <TRIPLE> 前缀读这些 env（linker / rustflags）。
+    # 这里用 tr 生成 (macOS bash 3.2 不支持 ${var^^})，避免写进 dora-rs 源码树。
+    local triple_var
+    triple_var=$(printf '%s' "$TARGET" | tr '[:lower:]-' '[:upper:]_')
 
     _orb bash -c "
         . \"\$HOME/.cargo/env\"
         export CC_riscv64gc_unknown_linux_musl='$RISCV64_GCC'
         export CFLAGS_riscv64gc_unknown_linux_musl='-mcpu=c906fdv -mabi=lp64d'
+        export CARGO_TARGET_${triple_var}_LINKER='rust-lld'
+        export CARGO_TARGET_${triple_var}_RUSTFLAGS='-C target-feature=+crt-static -C link-arg=-L$sysroot_lib -C link-arg=-L$sysroot_lib2'
         cd '$dora_src'
-        mkdir -p .cargo
-        cat > .cargo/config.toml << 'CFGEOF'
-[target.$TARGET]
-linker = \"rust-lld\"
-rustflags = [
-    \"-C\", \"target-feature=+crt-static\",
-    \"-C\", \"link-arg=-L$sysroot_lib\",
-    \"-C\", \"link-arg=-L$sysroot_lib2\",
-]
-CFGEOF
         cargo build -p dora-cli --target '$TARGET' --release --no-default-features 2>&1 | \
             grep -E 'Compiling|Finished|error' | sed 's/^/    /'
     " 2>&1
@@ -487,6 +467,43 @@ build_phase "Rust 项目节点" "fatal" cross_compile_rust_nodes
 
 # ── Phase 3: 交叉编译 camera-node (C++) ───────────────────────────────────────
 
+# libdora_c_ffi.a 由 Rust (LLVM 19) 编译，包含现代 ISA 扩展 (如 zifencei)，
+# 而 Xuantie GCC 10.2 的 ld 只认识旧的扩展名。修复: 用 objcopy 清除
+# .riscv.attributes 段，消掉 ISA 版本冲突。camera-node / screen-node 共用。
+# 入参: 源 .a 路径；输出固定版到 $1_fixed（返回该路径）。
+fix_dora_ffi_attributes() {
+    local src_a="$1"
+    local fixed_a="$BUILD_DIR/libdora_c_ffi_fixed.a"
+    local objcopy_bin="$RISCV64_TOOLCHAIN/bin/riscv64-unknown-linux-musl-objcopy"
+
+    # 注意: 本函数把日志打到 stdout 直接展示，不设计成被 `$(...)` 捕获。
+    # 固定版路径固定为 $BUILD_DIR/libdora_c_ffi_fixed.a，调用方直接引用即可。
+    info "修复 libdora_c_ffi.a (清除 .riscv.attributes)..."
+    if $HAS_ORB; then
+        _orb bash -c "
+            set -e
+            tmp=\$(mktemp -d)
+            cd \"\$tmp\"
+            ar x '$src_a'
+            for f in *.o; do
+                '$objcopy_bin' --remove-section=.riscv.attributes \"\$f\" 2>/dev/null || true
+            done
+            ar rcs '$fixed_a' *.o
+            rm -rf \"\$tmp\"
+        " 2>&1
+    else
+        tmp=$(mktemp -d)
+        cd "$tmp"
+        ar x "$src_a"
+        for f in *.o; do
+            "$objcopy_bin" --remove-section=.riscv.attributes "$f" 2>/dev/null || true
+        done
+        ar rcs "$fixed_a" *.o
+        rm -rf "$tmp"
+    fi
+    ok "已生成兼容版本: $fixed_a"
+}
+
 cross_compile_camera_node() {
     if $SKIP_CAMERA; then
         skip "camera-node (--skip-camera)"
@@ -526,38 +543,8 @@ cross_compile_camera_node() {
 
     # camera-node 直接用 V4L2 采集 MJPEG，不需要 OpenCV
     # 参考: tests/bench_camera_v4l2.cpp
-    #
-    # 关键: libdora_c_ffi.a 由 Rust (LLVM 19) 编译，包含了现代 ISA 扩展
-    # (如 zifencei)，而 Xuantie GCC 10.2 的 ld 只认识旧的扩展名。
-    # 修复: 用 objcopy 清除 .riscv.attributes 段，消掉 ISA 版本冲突。
-
+    fix_dora_ffi_attributes "$dora_ffi_lib"
     local camera_fixed_ffi="$BUILD_DIR/libdora_c_ffi_fixed.a"
-    local objcopy_bin="$RISCV64_TOOLCHAIN/bin/riscv64-unknown-linux-musl-objcopy"
-
-    info "修复 libdora_c_ffi.a (清除 .riscv.attributes)..."
-    if $HAS_ORB; then
-        _orb bash -c "
-            set -e
-            tmp=\$(mktemp -d)
-            cd \"\$tmp\"
-            ar x '$dora_ffi_lib'
-            for f in *.o; do
-                '$objcopy_bin' --remove-section=.riscv.attributes \"\$f\" 2>/dev/null || true
-            done
-            ar rcs '$camera_fixed_ffi' *.o
-            rm -rf \"\$tmp\"
-        " 2>&1
-    else
-        tmp=$(mktemp -d)
-        cd "$tmp"
-        ar x "$dora_ffi_lib"
-        for f in *.o; do
-            "$objcopy_bin" --remove-section=.riscv.attributes "$f" 2>/dev/null || true
-        done
-        ar rcs "$camera_fixed_ffi" *.o
-        rm -rf "$tmp"
-    fi
-    ok "已生成兼容版本: $camera_fixed_ffi"
 
     # 生成交叉编译 Makefile
     cat > "$BUILD_DIR/Makefile.camera" << MAKEFILE_EOF
@@ -628,6 +615,111 @@ MAKEFILE_EOF
 
 build_phase "camera-node (C++)" "fatal" cross_compile_camera_node
 
+# ── Phase 3.5: 交叉编译 screen-node (C++) ─────────────────────────────────────
+# 取代 Rust screen-node：C++ 直接 YUYV→RGB565 写屏，链路更省、延迟更低。
+# 依赖 libdora_c_ffi.a（Phase 2 产物），与 camera-node 同样的 ISA 修复。
+
+cross_compile_screen_node() {
+    local screen_dir="$SCRIPT_DIR/screen-node-cpp"
+
+    if [ ! -f "$screen_dir/screen-node.cpp" ]; then
+        warn "screen-node-cpp/screen-node.cpp 不存在 — 跳过 screen-node (C++)"
+        return 0
+    fi
+
+    # libdora_c_ffi.a 查找优先级 (同 camera-node)
+    local dora_ffi_lib=""
+    local ffi_candidates=(
+        "$PACKAGE_DIR/lib/libdora_c_ffi.a"
+        "$SCRIPT_DIR/libs/libdora_c_ffi.a"
+        "$SCRIPT_DIR/target/$TARGET/release/libdora_c_ffi.a"
+    )
+    for candidate in "${ffi_candidates[@]}"; do
+        if [ -f "$candidate" ]; then
+            dora_ffi_lib="$candidate"
+            ok "libdora_c_ffi.a ← $candidate"
+            break
+        fi
+    done
+    if [ -z "$dora_ffi_lib" ]; then
+        fail "screen-node: libdora_c_ffi.a 在所有候选位置都不存在"
+        return 1
+    fi
+
+    fix_dora_ffi_attributes "$dora_ffi_lib"
+    local screen_fixed_ffi="$BUILD_DIR/libdora_c_ffi_fixed.a"
+
+    # libjpeg-turbo 交叉产物（RISCV64 musl 静态），screen-node 解 MJPEG 用。
+    # 持久化于 $SCRIPT_DIR/libs/jpeg/（libjpeg.a + jpeglib.h + jconfig*）。
+    local jpeg_dir="$SCRIPT_DIR/libs/jpeg"
+    if [ ! -f "$jpeg_dir/libjpeg.a" ]; then
+        fail "screen-node 需要已交叉编译的 libjpeg-turbo 静态库: $jpeg_dir/libjpeg.a"
+        fail "  见 dora/libs/jpeg/ —— 交叉编译请用 libjpeg-turbo (CMake, riscv64 musl, WITH_SIMD=0)"
+        return 1
+    fi
+
+    info "编译 screen-node (C++, MJPEG→libjpeg→RGB565 写屏)..."
+    cat > "$BUILD_DIR/Makefile.screen" << MAKEFILE_EOF
+# 交叉编译 screen-node — 由 build_release.sh 生成
+# 目标: riscv64 musl, SG2002/CV1812
+# 源文件: screen-node.cpp（MJPEG→libjpeg 解码→RGB565 写 /dev/fb0；兼容 YUYV）
+
+CXX      := $RISCV64_GXX
+CXXFLAGS := -std=c++17 -O3 -Wall -mcpu=c906fdv -mabi=lp64d
+LDFLAGS  := -static
+
+TARGET     := $PACKAGE_DIR/bin/screen-node
+SRCS       := $screen_dir/screen-node.cpp
+OBJS       := $BUILD_DIR/screen-node-main.o
+
+DORA_FFI_LIB := $screen_fixed_ffi
+JPEG_LIB     := $jpeg_dir/libjpeg.a
+INCLUDES     := -I$screen_dir -I$jpeg_dir
+
+.PHONY: all clean
+
+all: \$(TARGET)
+
+$BUILD_DIR/screen-node-main.o: $screen_dir/screen-node.cpp $screen_dir/node_api.h $screen_dir/log.h $jpeg_dir/jpeglib.h
+	@printf '  %b[CC]%b  screen-node.cpp\n' '\033[0;36m' '\033[0m'
+	@\$(CXX) \$(CXXFLAGS) \$(INCLUDES) -c -o \$@ $screen_dir/screen-node.cpp
+
+\$(TARGET): \$(OBJS) \$(DORA_FFI_LIB) \$(JPEG_LIB)
+	@printf '  %b[LD]%b  screen-node\n' '\033[0;36m' '\033[0m'
+	@\$(CXX) \$(CXXFLAGS) \$(LDFLAGS) -o \$@ \$(OBJS) \$(DORA_FFI_LIB) \$(JPEG_LIB) -lpthread
+
+clean:
+	rm -f \$(TARGET) \$(OBJS)
+MAKEFILE_EOF
+
+    if $HAS_ORB; then
+        if _orb bash -c "
+            export PATH=\"$RISCV64_TOOLCHAIN/bin:\$PATH\"
+            make -f \"$BUILD_DIR/Makefile.screen\" 2>&1
+        "; then
+            ok "screen-node (C++) 编译完成"
+        else
+            fail "screen-node (C++) 编译失败"
+            return 1
+        fi
+    else
+        export PATH="$RISCV64_TOOLCHAIN/bin:$PATH"
+        if make -f "$BUILD_DIR/Makefile.screen" 2>&1 | sed 's/^/    /'; then
+            ok "screen-node (C++) 编译完成"
+        else
+            fail "screen-node (C++) 编译失败"
+            return 1
+        fi
+    fi
+
+    # 清理临时 .a
+    rm -f "$screen_fixed_ffi"
+
+    return 0
+}
+
+build_phase "screen-node (C++)" "fatal" cross_compile_screen_node
+
 # ── Phase 4: 生成板子适配文件 ─────────────────────────────────────────────────
 
 phase "生成板子适配文件"
@@ -636,6 +728,17 @@ phase "生成板子适配文件"
 info "复制配置文件..."
 cp "$SCRIPT_DIR/config.toml" "$PACKAGE_DIR/etc/"
 ok "etc/config.toml"
+
+# zenoh-config：SG2002 内核无 IPv6，强制 zenoh 走 IPv4（tcp/0.0.0.0:0），
+# 否则 dora runtime 启动时 bind tcp/[::]:0 会报 "Address family not supported"。
+cat > "$PACKAGE_DIR/etc/zenoh-config.json5" << ZENOH_EOF
+{
+  listen: {
+    endpoints: ["tcp/0.0.0.0:0"],
+  },
+}
+ZENOH_EOF
+ok "etc/zenoh-config.json5 (IPv4 监听)"
 
 # 复制前端静态文件 (web-server 从 ./static/ 读取)
 info "复制静态文件..."
@@ -747,6 +850,19 @@ else
     WEB_DEMO_CMD_OUTPUT=""
 fi
 
+# screen-node 可选：既要有二进制、又要有 camera（screen-node 订阅 camera/image，
+# 缺 camera 时若还引用会成悬空 producer）。
+if [ -f "$PACKAGE_DIR/bin/screen-node" ] && [ -f "$PACKAGE_DIR/bin/camera-node" ]; then
+    SCREEN_NODE="  - id: screen-node
+    path: bin/screen-node
+    inputs:
+      image: camera/image
+    outputs:
+      - screen_status"
+else
+    SCREEN_NODE=""
+fi
+
 cat > "$PACKAGE_DIR/etc/dataflow.yml" << EOF
 # dora 数据流 — SG2002 板子部署版
 # 由 build_release.sh 自动生成
@@ -768,6 +884,7 @@ ${CAMERA_NODE}
       - arm_status
 
 ${DEMO_NODE}
+${SCREEN_NODE}
   - id: state-node
     path: bin/state-node
     inputs:
@@ -827,6 +944,9 @@ else
     echo "Cleaning stale dora shared memory from previous run..."
     rm -f /dev/shm/dora-* 2>/dev/null || true
     rm -f /dev/shm/zenoh-* 2>/dev/null || true
+    # shmem_* 是 dora arrow IPC 的一次性共享内存残留，dataflow 异常退出/重启时常堆积，
+    # 在 107MB 的板子上能把内存挤爆 (OOM → camera SIGBUS)。必须在启动 dora 前清掉。
+    rm -f /dev/shm/shmem_* 2>/dev/null || true
 fi
 
 # ── 1.5. 摄像头分辨率（camera-node 从环境变量读取）──
@@ -842,6 +962,20 @@ LOG_LEVEL=$(grep -E '^\s*level\s*=' "$DORA_HOME/etc/config.toml" 2>/dev/null | c
 export CAMERA_LOG_LEVEL="${CAMERA_LOG_LEVEL:-${LOG_LEVEL:-info}}"
 export RUST_LOG="${RUST_LOG:-$LOG_LEVEL}"
 echo "  log level: ${CAMERA_LOG_LEVEL}"
+
+# ── 1.5.2. SG2002 屏显引擎 ──
+# ST7796S framebuffer 默认显示引擎关闭（state=0），不打开则写 /dev/fb0 不会显示。
+# demo2.c 要求"运行前确保 /sys/class/graphics/fb0/state 为 1"。
+if [ -w "$DORA_HOME/../sys/class/graphics/fb0/state" ] || [ -w /sys/class/graphics/fb0/state ]; then
+    echo 1 > /sys/class/graphics/fb0/state 2>/dev/null || true
+    echo 0 > /sys/class/graphics/fb0/blank 2>/dev/null || true
+    echo "  display engine: on (fb0 state=1)"
+fi
+
+# ── 1.5.3. SG2002 内核无 IPv6: 强制 zenoh IPv4 监听 ──
+# 不设 ZENOH_CONFIG 时 dora runtime 默认 bind tcp/[::]:0，本板无 IPv6 会启动失败。
+export ZENOH_CONFIG="$DORA_HOME/etc/zenoh-config.json5"
+echo "  zenoh: IPv4 (tcp/0.0.0.0)"
 
 # demo-node 默认 cwd=demo，告诉它绝对路径
 export DEMO_BASE_DIR="$DORA_HOME/demo"
@@ -879,7 +1013,7 @@ fi
 echo ""
 echo "Verifying binaries..."
 MISSING=""
-for bin in web-server motor-bridge arm-bridge demo-node state-node; do
+for bin in web-server motor-bridge arm-bridge demo-node state-node screen-node; do
     if [ -f "$DORA_HOME/bin/$bin" ]; then
         echo "  OK  bin/$bin"
     else
@@ -999,7 +1133,7 @@ fi
 # 进程名清单（精确匹配 basename，不用 -f 避免误伤 grep/cat/vim）。
 # dora 启动器 (dora run / dora up / dora coordinator / dora daemon)
 # 可执行文件名都是 dora，子命令名是命令行参数、不在 comm 里。
-NAMES="dora camera-node web-server motor-bridge arm-bridge demo-node state-node"
+NAMES="dora camera-node web-server motor-bridge arm-bridge demo-node state-node screen-node"
 
 # 内部：杀 pid 及其同 process group 的所有进程。
 # 拿不到 pgid（进程已死）时静默跳过。
@@ -1061,6 +1195,7 @@ if [ -d /dev/shm ]; then
     echo "Cleaning /dev/shm (dora shared memory)..."
     rm -f /dev/shm/dora-* 2>/dev/null || true
     rm -f /dev/shm/zenoh-* 2>/dev/null || true
+    rm -f /dev/shm/shmem_* 2>/dev/null || true
 fi
 
 if [ -n "$KILLED" ]; then

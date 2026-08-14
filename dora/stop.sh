@@ -14,7 +14,7 @@ dora destroy 2>/dev/null || true
 
 # 2. SIGTERM graceful（让 dora node 刷完 buffer / 关闭 serial）
 #    名单和 build_release.sh 那份对齐 (dev 子集)。
-for name in camera-node web-server motor-bridge arm-bridge demo-node state-node dora-daemon dora-coordinator; do
+for name in camera-node web-server motor-bridge arm-bridge demo-node state-node screen-node dora-daemon dora-coordinator; do
     pgrep -f "$name" 2>/dev/null | while read pid; do
         [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
     done
@@ -25,7 +25,7 @@ done
 sleep 2
 
 # 4. SIGKILL 兜底
-for name in camera-node web-server motor-bridge arm-bridge demo-node state-node dora-daemon dora-coordinator; do
+for name in camera-node web-server motor-bridge arm-bridge demo-node state-node screen-node dora-daemon dora-coordinator; do
     pgrep -f "$name" 2>/dev/null | while read pid; do
         [ -n "$pid" ] && kill -9 "$pid" 2>/dev/null || true
     done
@@ -45,5 +45,7 @@ kill_port 5000    # vite dev server (forwarded /api)
 # 6. /dev/shm 清理（如果有，buildroot 才有）
 rm -f /dev/shm/dora-* 2>/dev/null || true
 rm -f /dev/shm/zenoh-* 2>/dev/null || true
+# shmem_* = dora arrow IPC 一次性共享内存残留，异常退出/重启会堆积，把板子内存挤爆
+rm -f /dev/shm/shmem_* 2>/dev/null || true
 
 echo "✅ Dora stopped"
