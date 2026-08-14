@@ -17,6 +17,7 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/motor/status", get(status))
         .route("/api/motor/direct", get(direct))
+        .route("/api/motor/raw_command", get(raw_command))
 }
 
 #[derive(Deserialize, Default)]
@@ -40,4 +41,13 @@ async fn status(State(s): State<Arc<AppState>>) -> Json<serde_json::Value> {
         "left_speed":  s.left_speed,    // m/s
         "right_speed": s.right_speed,   // m/s
     }))
+}
+
+async fn raw_command(
+    State(s): State<Arc<AppState>>,
+    Query(p): Query<std::collections::HashMap<String, String>>,
+) -> Json<serde_json::Value> {
+    let cmd = p.get("cmd").map(String::as_str).unwrap_or("");
+    let result = s.motor.raw_command(cmd).await;
+    Json(result)
 }

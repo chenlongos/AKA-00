@@ -836,6 +836,13 @@ export CAMERA_WIDTH="${CAM_WIDTH:-640}"
 export CAMERA_HEIGHT="${CAM_HEIGHT:-480}"
 echo "  camera: ${CAMERA_WIDTH}x${CAMERA_HEIGHT} MJPEG"
 
+# ── 1.5.1. 摄像头日志级别（camera-node/C++ 读 CAMERA_LOG_LEVEL，跟随 [logging] level）──
+# camera-node 的 fps 报告是 debug 级；不设这个就永远被 INFO 隐藏，看不出是否真出帧。
+LOG_LEVEL=$(grep -E '^\s*level\s*=' "$DORA_HOME/etc/config.toml" 2>/dev/null | cut -d'"' -f2)
+export CAMERA_LOG_LEVEL="${CAMERA_LOG_LEVEL:-${LOG_LEVEL:-info}}"
+export RUST_LOG="${RUST_LOG:-$LOG_LEVEL}"
+echo "  log level: ${CAMERA_LOG_LEVEL}"
+
 # demo-node 默认 cwd=demo，告诉它绝对路径
 export DEMO_BASE_DIR="$DORA_HOME/demo"
 echo "  demo base: $DEMO_BASE_DIR"

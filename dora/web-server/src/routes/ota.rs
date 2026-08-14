@@ -19,12 +19,45 @@ fn app_dir() -> PathBuf {
 fn version_file() -> PathBuf { app_dir().join("VERSION") }
 fn ota_dir() -> PathBuf { app_dir().join(".ota") }
 fn status_file() -> PathBuf { PathBuf::from("/root/aka-ota-status.json") }
+fn gen_task_id() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos();
+    format!("{:08x}", nanos)
+}
 fn lock_file() -> PathBuf { PathBuf::from("/tmp/aka-ota-lock") }
 
-// ── 进度状态（内存） ──────────────────────────────
+// ── 进度状态（内存，支持多 task） ──────────────────────────────
 #[derive(Clone, Default)]
 pub struct OtaState {
-    pub status: Arc<Mutex<Option<OtaProgress>>>,
+    pub tasks: Arc<Mutex<std::collections::HashMap<String, OtaProgress>>>,
+}
+
+impl OtaState {
+    /// 获取或设置某个 task 的进度（缺省返回 idle）
+    pub fn get_progress(&self, task_id: &str) -> OtaProgress {
+        let map = self.tasks.lock().unwrap();
+        map.get(task_id).cloned().unwrap_or(OtaProgress {
+            progress: 0,
+            status: "unknown".into(),
+            message: "".into(),
+        })
+    }
+
+    /// 设置某个 task 的进度
+    pub fn set_progress(&self, task_id: &str, progress: OtaProgress) {
+        let mut map = self.tasks.lock().unwrap();
+        map.insert(task_id.to_string(), progress);
+    }
+
+    /// 查找第一个活跃的 downloading/installing 任务（给 /api/ota/status 用）
+    pub fn active_progress(&self) -> Option<OtaProgress> {
+        let map = self.tasks.lock().unwrap();
+        map.values()
+            .find(|p| p.status == "downloading" || p.status == "installing")
+            .cloned()
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -101,7 +134,9 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/api/ota/version", get(get_version))
         .route("/api/ota/check", get(check_update))
         .route("/api/ota/upgrade", post(do_upgrade))
+        .route("/api/ota/update", post(do_update))
         .route("/api/ota/status", get(get_ota_status))
+        .route("/api/ota/upgrade/progress", get(get_upgrade_progress))
 }
 
 async fn get_version(State(_s): State<Arc<AppState>>) -> Json<VersionResponse> {
@@ -114,11 +149,9 @@ async fn get_version(State(_s): State<Arc<AppState>>) -> Json<VersionResponse> {
 }
 
 async fn get_ota_status(State(s): State<Arc<AppState>>) -> Json<serde_json::Value> {
-    // 优先查内存
-    if let Some(ref progress) = *s.ota.status.lock().unwrap() {
-        if progress.status == "downloading" || progress.status == "installing" {
-            return Json(serde_json::json!(progress));
-        }
+    // 优先查内存中的活跃任务
+    if let Some(progress) = s.ota.active_progress() {
+        return Json(serde_json::json!(progress));
     }
     // 再查磁盘
     Json(read_ota_status())
@@ -181,47 +214,45 @@ async fn do_upgrade(State(s): State<Arc<AppState>>) -> Json<serde_json::Value> {
         return Json(serde_json::json!({"status": "error", "message": "未找到下载地址"}));
     }
 
-    // 更新内存状态
-    {
-        let mut p = s.ota.status.lock().unwrap();
-        *p = Some(OtaProgress { progress: 0, status: "downloading".into(), message: "准备下载...".into() });
-    }
+    // 生成 task_id
+    let task_id = gen_task_id();
+
+    s.ota.set_progress(&task_id, OtaProgress { progress: 0, status: "downloading".into(), message: "准备下载...".into() });
     write_ota_status("downloading", &[]);
 
-    let state = s.ota.status.clone();
+    let state = s.ota.clone();
+    let tid = task_id.clone();
     tokio::spawn(async move {
-        let _ = do_download_and_install(&url, &state).await;
+        let _ = do_download_and_install(&url, &tid, &state).await;
     });
 
-    Json(serde_json::json!({"status": "ok", "message": "正在后台下载安装"}))
+    Json(serde_json::json!({"status": "ok", "task_id": task_id}))
 }
 
 async fn do_download_and_install(
     url: &str,
-    state: &Arc<Mutex<Option<OtaProgress>>>,
+    task_id: &str,
+    state: &OtaState,
 ) -> Result<(), String> {
-    // 下载
-    {
-        let mut p = state.lock().unwrap();
-        *p = Some(OtaProgress { progress: 0, status: "downloading".into(), message: "正在下载固件...".into() });
-    }
+    state.set_progress(task_id, OtaProgress { progress: 0, status: "downloading".into(), message: "正在下载固件...".into() });
 
     let client = reqwest::Client::new();
-    let resp = client.get(url).send().await.map_err(|e| e.to_string())?;
+    let mut resp = client.get(url).send().await.map_err(|e| e.to_string())?;
     let total = resp.content_length().unwrap_or(0);
     let mut downloaded: u64 = 0;
     let mut bytes = Vec::new();
 
-    let mut stream = resp.bytes_stream();
-    use futures_util::StreamExt;
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| e.to_string())?;
+    loop {
+        let chunk = match resp.chunk().await {
+            Ok(Some(c)) => c,
+            Ok(None) => break,
+            Err(e) => return Err(format!("download chunk: {e}")),
+        };
         downloaded += chunk.len() as u64;
         bytes.extend_from_slice(&chunk);
         if total > 0 {
             let pct = (downloaded * 100 / total).min(99) as u32;
-            let mut p = state.lock().unwrap();
-            *p = Some(OtaProgress {
+            state.set_progress(task_id, OtaProgress {
                 progress: pct,
                 status: "downloading".into(),
                 message: format!("正在下载... {}%", pct),
@@ -236,13 +267,11 @@ async fn do_download_and_install(
     { use std::os::unix::fs::PermissionsExt; let _ = std::fs::set_permissions(&update_path, std::fs::Permissions::from_mode(0o755)); }
 
     write_ota_status("installing", &[]);
-    {
-        let mut p = state.lock().unwrap();
-        *p = Some(OtaProgress { progress: 100, status: "installing".into(), message: "正在安装...".into() });
-    }
+    state.set_progress(task_id, OtaProgress { progress: 100, status: "installing".into(), message: "正在安装...".into() });
 
     // 写 install 脚本
     write_install_script();
+    state.set_progress(task_id, OtaProgress { progress: 100, status: "done".into(), message: "安装完成，服务重启中...".into() });
 
     Ok(())
 }
@@ -279,13 +308,63 @@ exec /tmp/aka-ota-update --update
         .spawn();
 }
 
+// ── /api/ota/upgrade/progress?task_id=... ──
+async fn get_upgrade_progress(
+    State(s): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Json<serde_json::Value> {
+    let task_id = params.get("task_id").map(String::as_str).unwrap_or("");
+    Json(serde_json::json!(s.ota.get_progress(task_id)))
+}
+
+// ── /api/ota/update (POST multipart file upload) ──
+async fn do_update(
+    State(s): State<Arc<AppState>>,
+    mut multipart: axum::extract::Multipart,
+) -> Json<serde_json::Value> {
+    let task_id = gen_task_id();
+    let update_path = PathBuf::from("/tmp/aka-ota-update");
+
+    let mut saved = false;
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let name = field.name().unwrap_or("").to_string();
+        if name == "firmware" {
+            let data = match field.bytes().await {
+                Ok(b) => b,
+                Err(e) => return Json(serde_json::json!({"status": "error", "message": format!("read upload: {e}")})),
+            };
+            std::fs::write(&update_path, &data).ok();
+            #[cfg(unix)]
+            { use std::os::unix::fs::PermissionsExt; let _ = std::fs::set_permissions(&update_path, std::fs::Permissions::from_mode(0o755)); }
+            saved = true;
+            break;
+        }
+    }
+
+    if !saved {
+        return Json(serde_json::json!({"status": "error", "message": "no firmware file"}));
+    }
+
+    s.ota.set_progress(&task_id, OtaProgress { progress: 50, status: "installing".into(), message: "正在安装固件...".into() });
+    write_ota_status("installing", &[("task_id", serde_json::json!(&task_id))]);
+
+    let state = s.ota.clone();
+    let tid = task_id.clone();
+    tokio::spawn(async move {
+        write_install_script();
+        state.set_progress(&tid, OtaProgress { progress: 100, status: "done".into(), message: "安装完成，服务重启中...".into() });
+    });
+
+    Json(serde_json::json!({"status": "ok", "task_id": task_id, "message": "upload received, installing..."}))
+}
+
 async fn fetch_remote(url: &str) -> Result<(i64, String, String, String, String), String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()
         .map_err(|e| e.to_string())?;
 
-    let resp = client.get(url).send().await.map_err(|e| e.to_string())?;
+    let mut resp = client.get(url).send().await.map_err(|e| e.to_string())?;
     let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
 
     let inner = data.get("data").unwrap_or(&data);

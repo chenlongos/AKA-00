@@ -90,6 +90,21 @@ impl MotorService {
         self.send_control(cmd).await;
     }
 
+    /// 发送原始 JSON 命令到 motor-bridge（调试用）
+    pub async fn raw_command(&self, cmd: &str) -> serde_json::Value {
+        if cmd.is_empty() {
+            return serde_json::json!({"error": "cmd is required"});
+        }
+        // 尝试解析 cmd 为 JSON，如果失败则包装为 {command: cmd}
+        let payload: serde_json::Value = serde_json::from_str(cmd)
+            .unwrap_or_else(|_| serde_json::json!({"command": cmd}));
+        let bytes = serde_json::to_vec(&payload).unwrap_or_default();
+        match dora_send::send_output(&self.node, "motor_cmd", &bytes).await {
+            Ok(()) => serde_json::json!({"status": "sent", "cmd": cmd}),
+            Err(e) => serde_json::json!({"error": e.to_string(), "cmd": cmd}),
+        }
+    }
+
     /// 重新初始化电机底盘（tt_pid ESP32 重置等）
     pub async fn reinitialize(&self) {
         let json = serde_json::json!({"command": "reinitialize"});

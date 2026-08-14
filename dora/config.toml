@@ -2,8 +2,8 @@
 # 对应 app/config.py 的 HardwareConfig
 
 [camera]
-width = 320
-height = 240
+width = 640
+height = 480
 fps = 24
 jpeg_quality = 30
 

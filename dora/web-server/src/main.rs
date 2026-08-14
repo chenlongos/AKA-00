@@ -14,7 +14,7 @@ mod services;
 use std::io::BufReader;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 
 use arrow::array::AsArray;
 use dora_node_api::{DoraNode, Event};
@@ -86,6 +86,7 @@ pub struct AppState {
     pub arm: Arc<ArmService>,
     pub demo: Arc<DemoService>,
     pub ota: routes::ota::OtaState,
+    pub demo_downloads: routes::demo::DownloadProgressMap,
 }
 
 fn main() -> Result<()> {
@@ -128,6 +129,7 @@ async fn run() -> Result<()> {
         arm: Arc::new(ArmService::new(dora.clone(), config.arm.clone())),
         demo: Arc::new(DemoService::new(dora)),
         ota: routes::ota::OtaState::default(),
+        demo_downloads: Arc::new(StdMutex::new(std::collections::HashMap::new())),
     });
 
     // ── HTTP 路由 ──

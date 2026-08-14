@@ -1,11 +1,18 @@
 //! 机械臂 HTTP 路由 —— 匹配前端 api.ts 中的 arm.* 调用
 //!
 //! 对应 `app/routes/arm.py` 的 3 个接口：
-//!   GET  /api/arm/angles          → 返回当前 driver 与 angles
+//!   GET  /api/arm/angles          → 返回当前 driver 与 angles（语义化格式）
 //!   POST /api/arm/angles          → 写回 angles（body: {driver, angles}）
 //!   POST /api/arm/angles/preview  → 写回并立即触发一次 set_angle（body: {driver, key, value, angles}）
+//!
+//! 角度配置结构（v0.5.2+ 语义化格式）:
+//!   {
+//!     "grab_position": {"servo0": 245, "servo1": 180},
+//!     "lift_position": {"servo0": 200, "servo1": 180},
+//!     "gripper_open": 150,
+//!     "gripper_close": 90
+//!   }
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use axum::{
@@ -15,6 +22,7 @@ use axum::{
 use axum::routing::{get, post};
 use serde::Deserialize;
 
+use crate::services::arm::{parse_arm_key, SemanticAngles};
 use crate::AppState;
 
 pub fn router() -> Router<Arc<AppState>> {
@@ -37,20 +45,20 @@ async fn get_angles(State(s): State<Arc<AppState>>) -> Json<serde_json::Value> {
 struct SaveBody {
     driver: String,
     #[serde(default)]
-    angles: BTreeMap<String, u16>,
+    angles: SemanticAngles,
 }
 
 async fn save_angles(
     State(s): State<Arc<AppState>>,
     Json(body): Json<SaveBody>,
 ) -> (axum::http::StatusCode, Json<serde_json::Value>) {
-    match s.arm.save_angles(&body.driver, &body.angles) {
-        Ok(()) => (
+    match s.arm.save_angles_semantic(&body.driver, &body.angles) {
+        Ok(angles) => (
             axum::http::StatusCode::OK,
             Json(serde_json::json!({
                 "status": "success",
                 "driver": body.driver,
-                "angles": s.arm.load_angles(),
+                "angles": angles,
             })),
         ),
         Err(msg) => (
@@ -66,7 +74,7 @@ struct PreviewBody {
     key: String,
     value: u16,
     #[serde(default)]
-    angles: BTreeMap<String, u16>,
+    angles: SemanticAngles,
 }
 
 // ── GET/POST /api/arm/angles/default → arm_angles_default.json ──
@@ -81,10 +89,10 @@ fn default_path() -> std::path::PathBuf {
 async fn get_default(State(s): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let driver = s.arm.driver_name().to_string();
     let path = default_path();
-    let angles: BTreeMap<String, u16> = std::fs::read_to_string(&path)
+    let angles: SemanticAngles = std::fs::read_to_string(&path)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default();
+        .unwrap_or_else(|| s.arm.load_angles());
     Json(serde_json::json!({ "driver": driver, "angles": angles }))
 }
 
@@ -92,7 +100,7 @@ async fn get_default(State(s): State<Arc<AppState>>) -> Json<serde_json::Value> 
 struct DefaultBody {
     driver: String,
     #[serde(default)]
-    angles: BTreeMap<String, u16>,
+    angles: SemanticAngles,
 }
 
 async fn post_default(
@@ -119,31 +127,35 @@ async fn post_default(
     }
 }
 
-/// "servo0_prepare" → 0；前端 key 形如 "servo<N>_*"
-fn arm_key_to_servo_id(key: &str) -> Option<u8> {
-    key.strip_prefix("servo")?.chars().next()?.to_digit(10).map(|n| n as u8)
-}
-
 async fn preview(
     State(s): State<Arc<AppState>>,
     Json(body): Json<PreviewBody>,
 ) -> (axum::http::StatusCode, Json<serde_json::Value>) {
-    if let Err(msg) = s.arm.save_angles(&body.driver, &body.angles) {
+    if let Err(msg) = s.arm.save_angles_semantic_raw(&body.driver, &body.angles) {
         return (
             axum::http::StatusCode::BAD_REQUEST,
             Json(serde_json::json!({ "error": msg })),
         );
     }
 
-    let servo_id = match arm_key_to_servo_id(&body.key) {
+    // 解析 key → servo_id
+    // - "grab_position.servo0" → 0 (ZP10S) / 1 (STS3215)
+    // - "gripper_open" / "gripper_close" → 2 (ZP10S) / 3 (STS3215)
+    // - 旧格式 "servo0_prepare" → 0
+    let servo_id = match parse_arm_key(&body.key) {
         Some(id) => id,
         None => {
-            return (
-                axum::http::StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "error": format!("invalid key: {}", body.key)
-                })),
-            );
+            // gripper_open / gripper_close → 夹爪舵机 ID
+            if body.key == "gripper_open" || body.key == "gripper_close" {
+                s.arm.gripper_servo_id()
+            } else {
+                return (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "error": format!("invalid key: {}", body.key)
+                    })),
+                );
+            }
         }
     };
 

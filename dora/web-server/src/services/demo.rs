@@ -40,6 +40,23 @@ impl DemoService {
         Self { node, base_dir }
     }
 
+    pub fn base_dir(&self) -> PathBuf {
+        self.base_dir.clone()
+    }
+
+    /// 扫 demo 目录，找到第一个含 init.sh 的子目录名
+    pub fn current_demo_name(&self) -> String {
+        let Ok(rd) = std::fs::read_dir(&self.base_dir) else {
+            return String::new();
+        };
+        for entry in rd.flatten() {
+            if entry.path().is_dir() && entry.path().join("init.sh").is_file() {
+                return entry.file_name().to_string_lossy().to_string();
+            }
+        }
+        String::new()
+    }
+
     /// 扫 demo 目录，列出含 init.sh 的项。
     pub fn list(&self) -> Vec<DemoInfo> {
         let Ok(rd) = std::fs::read_dir(&self.base_dir) else {
