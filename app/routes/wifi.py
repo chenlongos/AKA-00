@@ -51,12 +51,20 @@ def get_current_wifi_ip():
 
 
 def _decode_ssid(ssid: str) -> str:
-    """wpa_cli 对非 ASCII 的 SSID 返回 hex 转义序列，如 \\xe4\\xbb\\x95 → 仕"""
+    """wpa_cli 对非 ASCII 的 SSID 返回 hex 转义序列，如 \\xe4\\xbb\\x95 → 仕。
+
+    逐段还原：每个 \\xHH 还原为对应字节，其余 ASCII 字符原样保留，
+    拼成原始字节流后再整体按 UTF-8 解码。这样中英混排（如 家Home）也能正确显示。
+    """
     if "\\x" not in ssid:
         return ssid
     try:
-        hex_str = ssid.replace("\\x", "")
-        return bytes.fromhex(hex_str).decode("utf-8")
+        raw = re.sub(
+            r"\\x([0-9a-fA-F]{2})",
+            lambda m: chr(int(m.group(1), 16)),
+            ssid,
+        )
+        return raw.encode("latin-1").decode("utf-8")
     except Exception:
         return ssid
 
@@ -108,7 +116,8 @@ def get_wifi_list():
 
 def do_connect(ssid, password):
     ensure_wpa_env()
-    # 中文 SSID 用 hex 编码传给 wpa_cli，避免 shell 乱码
+    # SSID 统一用 hex 编码传给 wpa_cli（不带引号，wpa_supplicant 会把无引号的纯 hex 当字节解析）。
+    # 这样中文/特殊字符/普通 ASCII 都能正确连接，且不依赖 shell 或 locale 编码。
     ssid_hex = ssid.encode("utf-8").hex()
 
     subprocess.run(
@@ -121,7 +130,7 @@ def do_connect(ssid, password):
 
     subprocess.run(
         ["wpa_cli", "-p", WIFI_CTRL_PATH, "-i", WIFI_INTERFACE,
-         "set_network", net_id, "ssid", f'"{ssid_hex}"'],
+         "set_network", net_id, "ssid", ssid_hex],
         capture_output=True, timeout=5)
     if password:
         subprocess.run(
