@@ -34,6 +34,13 @@
 namespace {
 constexpr int SW = 320;   // 屏幕宽
 constexpr int SH = 480;   // 屏幕高
+
+// 方向修正（由环境变量 SCREEN_ORIENT 控制，避免每次改方向都要重编译）：
+//   0 = 无翻转
+//   1 = 水平翻转（翻转 ox）—— 修"上下颠倒"（源图顶底反了）
+//   2 = 垂直翻转（翻转 oy）—— 修"左右镜像"
+//   3 = 180°（水平+垂直都翻）
+int g_orient = 0;
 }  // namespace
 
 /// 帧缓冲封装：open /dev/fb0 → FBIOGET_VSCREENINFO → mmap RGB565 写屏
@@ -112,22 +119,33 @@ static void rgb_to_fb(const uint8_t* rgb, int w, int h,
     const double off_y = (sh * s - out_h) / 2.0;   // 垂直居中裁切
     const size_t stride = (size_t)w * 3;
 
+    // 预计算列→源行映射（只依赖 ox）与行→源列映射（只依赖 oy）。
+    // 逐像素 double 除法/乘法在 riscv64 软浮点上极慢（之前每像素 ~6 次 double 运算，
+    // 320x480=15 万像素直接拖垮帧率）；这里一次性算成整数查表，内层循环只剩
+    // 整数查表 + 字节运算，帧率提升一个量级。
+    int sy_map[SW];                 // 输出列 ox → 源行 sy
+    int sx_map[SH];                 // 输出行 oy → 源列 sx
+    for (int ox = 0; ox < out_w; ++ox) {
+        int sy = (int)(h - 1 - (off_x + ox) / s + 0.5);
+        if (sy < 0) sy = 0; else if (sy >= h) sy = h - 1;
+        sy_map[ox] = sy;
+    }
     for (int oy = 0; oy < out_h; ++oy) {
-        // 旋转后 y（垂直，沿输出行方向），范围 0..sh(=w)，对应源列 sx
-        double rot_y = (off_y + oy) / s;
-        int sx = (int)(rot_y + 0.5);
+        int sx = (int)((off_y + oy) / s + 0.5);
         if (sx < 0) sx = 0; else if (sx >= w) sx = w - 1;
+        sx_map[oy] = sx;
+    }
 
+    for (int oy = 0; oy < out_h; ++oy) {
+        const size_t col_off = (size_t)sx_map[oy] * 3;   // 源列字节偏移
+        // 方向修正：g_orient 控制写屏坐标的翻转，覆盖 4 种方向。
+        //   位0 (值1) = 水平翻转（翻转 ox），位1 (值2) = 垂直翻转（翻转 oy）。
+        const int dst_oy = (g_orient & 2) ? (out_h - 1 - oy) : oy;
+        uint16_t* dst = out + (size_t)dst_oy * out_w;
         for (int ox = 0; ox < out_w; ++ox) {
-            // 旋转后 x（水平，沿输出列方向），范围 0..sw(=h)，翻转后对应源行 sy
-            double rot_x = (off_x + ox) / s;
-            int sy = (int)(h - 1 - rot_x + 0.5);
-            if (sy < 0) sy = 0; else if (sy >= h) sy = h - 1;
-
-            const uint8_t* p = rgb + (size_t)sy * stride + (size_t)sx * 3;
-            int r = p[0], g = p[1], b = p[2];
-            out[(size_t)oy * out_w + ox] =
-                (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+            const int dst_ox = (g_orient & 1) ? (out_w - 1 - ox) : ox;
+            const uint8_t* p = rgb + (size_t)sy_map[ox] * stride + col_off;
+            dst[dst_ox] = (uint16_t)(((p[0] >> 3) << 11) | ((p[1] >> 2) << 5) | (p[2] >> 3));
         }
     }
 }
@@ -202,7 +220,9 @@ static bool is_jpeg(const uint8_t* p, size_t n) {
 }
 
 int main() {
-    CAM_INFO("Starting (display node)");
+    const char* o = getenv("SCREEN_ORIENT");
+    if (o) { g_orient = std::atoi(o); if (g_orient < 0) g_orient = 0; if (g_orient > 3) g_orient = 3; }
+    CAM_INFO("Starting (display node), orient=%d", g_orient);
 
     void* ctx = init_dora_context_from_env();
     if (!ctx) { CAM_ERROR("Failed to init dora context"); return 1; }
