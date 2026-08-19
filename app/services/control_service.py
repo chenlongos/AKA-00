@@ -57,24 +57,40 @@ class ControlService:
             return {"status": "success", "left": left, "right": right, "duration": duration, "mode": "scheduled"}
         return {"status": "success", "left": left, "right": right}
 
-    def move_distance(self, direction: str, distance_mm: float, speed: int) -> dict:
-        """ESP32 MCU 内部执行距离控制。"""
+    def move_distance(self, direction: str, value: float, speed: int) -> dict:
+        """ESP32 MCU 内部执行距离/转向控制（闭环 PID）。
+
+        协议 CMD_MOVE_DISTANCE (0x23) 载荷: dir(1) speed(1) target(4B 大端)
+          dir=0 前进 / dir=1 后退：value = 距离 (mm)
+          dir=2 左转 / dir=3 右转（原地）：value = 角度 (°)
+        固件内部用轮径 62mm、轴距 160mm、PPR 4680 自行换算成编码器计数，
+        因此这里直接发送 mm / 度，不再做任何换算（否则会被固件二次换算）。
+        """
         import struct
         speed = min(100, max(1, abs(speed)))
-        pulses_per_mm = 4680.0 / (3.1415926535 * 62.0)
-        target = int(distance_mm * pulses_per_mm)
         dir_map = {"forward": 0, "backward": 1, "left": 2, "right": 3}
 
         if direction not in dir_map:
             raise ValueError(f"unknown direction: {direction}")
 
+        d = dir_map[direction]
+        if d in (0, 1):
+            target = int(round(value))       # 直行：mm
+            unit = "mm"
+        else:
+            target = int(round(value * 10))  # 转向：0.1°（如 90° → 900）
+            unit = "deg"
+
+        if target <= 0:
+            return {"status": "error", "message": "target must be positive"}
+
         try:
-            payload = struct.pack(">BBi", dir_map[direction], speed, target)
+            payload = struct.pack(">BBi", d, speed, target)
             self._motor_pair._send_cmd_noresp(0x23, payload)
         except Exception:
             return {"status": "error", "message": "CMD_MOVE_DISTANCE failed"}
 
-        return {"status": "started", "mode": "esp32", "target_mm": distance_mm}
+        return {"status": "started", "mode": "esp32", "target": value, "unit": unit}
 
     def send_raw_command(self, cmd: str) -> dict[str, str]:
         raw_sender = getattr(getattr(self._gripper, "_zp10s", None), "_send_raw_cmd", None)
