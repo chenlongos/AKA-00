@@ -23,7 +23,7 @@ def action_control():
     Query params:
       action   - up|down|left|right|stop|grab|release
       speed    - 线速度 m/s (0.01~0.5)，默认 0.25
-      distance - 移动距离 厘米 (cm)，up/down 有效
+      distance - 移动距离 毫米 (mm)，up/down 有效
       angle    - 转动角度 度 (°)，left/right 有效
       time     - 持续时间 毫秒（优先级低于 distance/angle）
     """
@@ -33,23 +33,23 @@ def action_control():
 
     motor_speed = _mps_to_motor(speed_mps)
 
-    distance_cm = request.args.get('distance', type=float)
+    distance_mm = request.args.get('distance', type=float)
     angle_deg   = request.args.get('angle', type=float)
 
     # 参数校验：distance 仅对 up/down 有效，angle 仅对 left/right 有效
     if angle_deg is not None and action not in ("left", "right"):
         return jsonify({"status": "error",
                         "message": "angle 仅对 left/right 动作有效"}), 400
-    if distance_cm is not None and action not in ("up", "down"):
+    if distance_mm is not None and action not in ("up", "down"):
         return jsonify({"status": "error",
                         "message": "distance 仅对 up/down 动作有效"}), 400
 
     try:
         if action in ("up", "down"):
-            if distance_cm:
+            if distance_mm:
                 direction = {"up": "forward", "down": "backward"}[action]
                 return jsonify(get_control_service().move_distance(
-                    direction, distance_cm * 10, motor_speed))
+                    direction, distance_mm, motor_speed))
         elif action in ("left", "right"):
             if angle_deg:
                 direction = {"left": "left", "right": "right"}[action]
