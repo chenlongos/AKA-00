@@ -1,0 +1,17 @@
+{
+    "name": "辰龙机器人控制台",
+    "short_name": "辰龙机器人",
+    "description": "辰龙机器人控制面板",
+    "start_url": "/",
+    "display": "standalone",
+    "orientation": "portrait",
+    "background_color": "#0f172a",
+    "theme_color": "#0f172a",
+    "icons": [
+        {
+            "src": "/vite.svg",
+            "sizes": "any",
+            "type": "image/svg+xml"
+        }
+    ]
+}
