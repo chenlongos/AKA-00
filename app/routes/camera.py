@@ -1,7 +1,5 @@
 from flask import Blueprint, request, jsonify, make_response
 import base64
-import cv2
-import numpy as np
 import time
 
 from src.state import get_state_collector
@@ -19,6 +17,9 @@ def snapshot():
         {"image": "<base64 jpeg>", "width": 320, "height": 240,
          "m": 3062.0, "c": -5.0}
     """
+    import cv2  # 延迟导入，避免拖慢启动
+    import numpy as np
+
     service = CameraService.get_instance()
     service._ensure_camera()
     ret, frame = service.read()
@@ -77,6 +78,8 @@ def video_stream():
     if collector._camera is None or not hasattr(collector._camera, '_frame_ready'):
         return jsonify({"error": "camera not available"}), 500
 
+    import cv2  # 延迟导入，避免拖慢启动
+
     def generate():
         try:
             while True:
@@ -123,6 +126,8 @@ def speed_status():
 
 @camera_bp.route("/all_status")
 def all_status():
+    import cv2  # 延迟导入，避免拖慢启动
+
     collector = get_state_collector()
     status = collector.get_status()
     image = collector.get_image()

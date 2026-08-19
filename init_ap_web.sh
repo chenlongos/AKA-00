@@ -28,11 +28,19 @@ opt router 192.168.4.1
 opt dns 192.168.4.1
 EOF
 
-# 自启脚本 (延时启动，不抢系统网络)
+# 自启脚本 (轮询 wlan0 就绪，代替盲等 sleep 20)
 cat > /etc/init.d/S98apstart <<'EOF'
 #!/bin/sh
-sleep 20
+# 等待 wlan0 就绪（轮询，最多 20 秒）
+i=0
+while [ $i -lt 40 ]; do
+    [ -d /sys/class/net/wlan0 ] && break
+    sleep 0.5
+    i=$((i+1))
+done
+
 killall wpa_supplicant hostapd udhcpd 2>/dev/null
+sleep 1
 
 ifconfig wlan0 192.168.4.1 netmask 255.255.255.0 up
 udhcpd /etc/udhcpd.conf &
@@ -77,19 +85,23 @@ fi
 
 cat > /etc/init.d/S99webstart <<'EOF'
 #!/bin/sh
-sleep 30
+# 等待 wifi phy 就绪（轮询，最多 30 秒，代替盲等 sleep 30）
+i=0
+while [ $i -lt 60 ]; do
+    iw dev 2>/dev/null | grep -q "phy#0" && break
+    sleep 0.5
+    i=$((i+1))
+done
 
 if ! iw dev | grep -q "wlan1"; then
     echo "Creating wlan1 interface..."
     ip link set wlan0 down
     iw phy phy0 interface add wlan1 type managed
-    sleep 2
+    sleep 1
 fi
 
 ip link set wlan0 up
 ip link set wlan1 up
-
-sleep 5
 
 # Disable conflicting inittab respawn — init.sh handles its own restart
 if grep -q '^acm:.*init\.sh' /etc/inittab 2>/dev/null; then
@@ -98,8 +110,7 @@ if grep -q '^acm:.*init\.sh' /etc/inittab 2>/dev/null; then
 fi
 
 chmod +x /root/AKA-00/init.sh
-/root/AKA-00/init.sh
-exit 0
+exec /root/AKA-00/init.sh
 EOF
 
 chmod 755 /etc/init.d/S99webstart

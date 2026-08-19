@@ -7,7 +7,6 @@ import struct
 import subprocess
 import time
 
-import cv2
 import tornado.ioloop
 import tornado.web
 import tornado.httpserver
@@ -88,6 +87,8 @@ class MJPEGStreamHandler(tornado.web.RequestHandler):
     @staticmethod
     def _read_and_encode(collector):
         """在 thread pool 中执行 camera read + JPEG 编码"""
+        import cv2  # 延迟导入，避免拖慢启动
+
         if collector._camera is None:
             return None
         ret, frame = collector._camera.read()

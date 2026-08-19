@@ -2,11 +2,19 @@
 import threading
 import time
 
-try:
-    import cv2
-    _HAS_CV2 = True
-except ImportError:
-    _HAS_CV2 = False
+_cv2 = None  # 延迟导入 OpenCV，首次打开摄像头才加载（省启动时间）
+
+
+def _ensure_cv2():
+    """延迟导入 cv2：成功返回模块，失败返回 None"""
+    global _cv2
+    if _cv2 is None:
+        try:
+            import cv2
+            _cv2 = cv2
+        except ImportError:
+            _cv2 = False
+    return _cv2 if _cv2 else None
 
 
 class Camera:
@@ -46,7 +54,8 @@ class Camera:
 
     def _open(self) -> bool:
         """打开摄像头"""
-        if not _HAS_CV2:
+        cv2 = _ensure_cv2()
+        if cv2 is None:
             return False
         self._cap = cv2.VideoCapture(self._device)
         if self._cap.isOpened():
