@@ -9,36 +9,38 @@ GET /api/control?action=<action>&speed=<speed>&time=<time>&distance=<distance>&a
 ### 参数
 
 | 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
+|------|------|------|
 | action | string | 是 | up / down / left / right / stop / grab / release |
-| speed | float | 否 | 线速度 m/s，范围 0.01~0.5，默认 0.25 |
+| speed | int | 否 | 电机百分比（1~100），默认 50 |
 | time | int | 否 | 持续时间（毫秒），无 distance/angle 时生效 |
 | distance | float | 否 | **移动距离（厘米 cm）**，up/down 有效 |
 | angle | float | 否 | **转动角度（度 °）**，left/right 有效 |
 
 > **优先级**：`distance`/`angle` > `time`。传了 distance 或 angle 就忽略 time。
+>
+> `speed` 是直接发给 ESP32 PID 控制器的目标百分比（`setMotorSpeed(±100)` → `target_rpm = speed × 150 / 100`）。`100%` 对应约 `0.49 m/s`，由 `PWM_RPM_MAX=150 RPM × 轮径62mm × π / 60` 推出。
 
 ### 距离运动示例
 
 ```bash
-# 前进 30 厘米，速度 0.3 m/s
-curl "http://<ip>/api/control?action=up&distance=30&speed=0.3"
+# 前进 30 厘米，速度 50%
+curl "http://<ip>/api/control?action=up&distance=30&speed=50"
 
-# 后退 15 厘米
-curl "http://<ip>/api/control?action=down&distance=15&speed=0.25"
+# 后退 15 厘米，速度 30%
+curl "http://<ip>/api/control?action=down&distance=15&speed=30"
 
-# 左转 90 度
-curl "http://<ip>/api/control?action=left&angle=90&speed=0.2"
+# 左转 90 度，速度 40%
+curl "http://<ip>/api/control?action=left&angle=90&speed=40"
 
-# 右转 45 度
+# 右转 45 度（用默认 speed=50）
 curl "http://<ip>/api/control?action=right&angle=45"
 ```
 
 ### 时间运动示例
 
 ```bash
-# 前进 2 秒，速度 0.3 m/s
-curl "http://<ip>/api/control?action=up&speed=0.3&time=2000"
+# 前进 2 秒，速度 50%
+curl "http://<ip>/api/control?action=up&speed=50&time=2000"
 
 # 停止
 curl "http://<ip>/api/control?action=stop"
@@ -51,15 +53,15 @@ curl "http://<ip>/api/control?action=grab"
 curl "http://<ip>/api/control?action=release"
 ```
 
-### 速度换算
+### speed 物理含义对照
 
-speed（m/s）和电机百分比的关系：
-| m/s | 电机 % |
-|-----|--------|
-| 0.10 | 20% |
-| 0.25 | 50% |
-| 0.40 | 80% |
-| 0.50 | 100% |
+`speed` 是 ESP32 PID 控制器的目标百分比。所有路径（摇杆 / 方向键 / REST+time / REST+distance）共用同一套物理含义：
+
+| speed | 目标 RPM | 约合线速度 |
+|-------|---------|-----------|
+| 30 | 45 | 0.15 m/s |
+| 50 | 75 | 0.24 m/s |
+| 100 | 150 | 0.49 m/s |
 
 ---
 

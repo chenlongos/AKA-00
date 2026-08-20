@@ -47,8 +47,7 @@ const GravityControlPage = () => {
             api.motor.action(nextCmd).catch(() => {});
         } else {
             const pct = (nextCmd === "left" || nextCmd === "right") ? SPEED_LR : speedFBRef.current;
-            const speed = Math.round(pct * 0.5 / 100 * 1000) / 1000;  // % → m/s (50% → 0.25 m/s → motor 50)
-            api.motor.action(nextCmd, speed).catch(() => {});
+            api.motor.action(nextCmd, pct).catch(() => {});  // 直接传百分比
         }
     }, [vibrate]);
 

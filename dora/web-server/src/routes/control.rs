@@ -27,13 +27,12 @@ pub fn router() -> Router<Arc<AppState>> {
 }
 
 // ── REST: GET /api/control?action=up|down|left|right|stop|grab|release&speed=N&distance=N&angle=N&time=N ──
-// speed: m/s (0.01~0.5, default 0.25), distance: cm, angle: degrees
+// speed: 电机百分比 (1~100, default 50), distance: cm, angle: degrees
 
-const MAX_SPEED_MPS: f32 = 0.5;
 const WHEEL_BASE_M: f32 = 0.15;
 
-fn mps_to_motor(mps: f32) -> u8 {
-    ((mps / MAX_SPEED_MPS * 100.0).clamp(1.0, 100.0)) as u8
+fn pct_to_motor(pct: f32) -> u8 {
+    pct.clamp(1.0, 100.0) as u8
 }
 
 #[derive(Deserialize, Default)]
@@ -66,8 +65,7 @@ async fn control_action(
         _ => { return Json(serde_json::json!({"error": "unknown action"})); }
     };
 
-    let mps = p.speed.unwrap_or(0.25).clamp(0.01, 0.5);
-    let motor_speed = mps_to_motor(mps);
+    let motor_speed = pct_to_motor(p.speed.unwrap_or(50.0));
 
     if let Some(dist_cm) = p.distance {
         // 闭环距离控制

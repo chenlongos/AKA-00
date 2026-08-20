@@ -169,7 +169,7 @@ GET /api/ip
 ### 控制接口
 
 ```bash
-GET /api/control?action=<action>&speed=<speed>&time=<time>
+GET /api/control?action=<action>&speed=<speed>&time=<time>&distance=<distance>&angle=<angle>
 ```
 
 参数说明：
@@ -177,14 +177,21 @@ GET /api/control?action=<action>&speed=<speed>&time=<time>
 | 参数 | 类型 | 说明 |
 |------|------|------|
 | action | string | 动作：`up`, `down`, `left`, `right`, `stop`, `grab`, `release` |
-| speed | int | 速度 0-50 |
-| time | int | 持续时间（毫秒） |
+| speed | int | 电机百分比 1~100，默认 50（直接给 ESP32 PID 的 target_rpm） |
+| time | int | 持续时间（毫秒），无 distance/angle 时生效 |
+| distance | float | 移动距离（厘米），up/down 有效 |
+| angle | float | 转动角度（度），left/right 有效 |
+
+> **优先级**：`distance`/`angle` > `time`。
 
 示例：
 
 ```bash
-# 前进
+# 前进 1 秒，速度 30%
 curl "http://192.168.1.100/api/control?action=up&speed=30&time=1000"
+
+# 左转 90 度
+curl "http://192.168.1.100/api/control?action=left&angle=90"
 
 # 抓取
 curl "http://192.168.1.100/api/control?action=grab"

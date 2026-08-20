@@ -9,6 +9,7 @@ export const motor = {
     status: (timestamp?: number) => fetch(`/api/motor/status?timestamp=${timestamp ?? Date.now()}`).then(r => r.json()),
     direct: (left: number, right: number, duration: number = 0) =>
         fetch(`/api/motor/direct?left=${left}&right=${right}&duration=${duration}`).then(r => r.json()),
+    // speed: 电机百分比 (1~100, 默认 50)
     action: (action: string, speed: number = 50, time: number = 0) =>
         fetch(`/api/control?action=${action}&speed=${speed}&time=${time}`).then(r => r.text()),
     rawCommand: (cmd: string) => fetch(`/api/motor/raw_command?cmd=${encodeURIComponent(cmd)}`).then(r => r.json()),

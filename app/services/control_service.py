@@ -31,6 +31,7 @@ class ControlService:
         return motor_pair
 
     def execute_action(self, action: str, speed: int = 50, milliseconds: float = 0) -> dict:
+        # speed: 电机百分比 (1~100)，默认 50
         self._cancel_pending_stop()
         if not (self._apply_base_action(action, speed) or self._apply_arm_action(action)):
             raise ValueError(f"unsupported action: {action}")
