@@ -1,0 +1,21 @@
+[Unit]
+Description=AKA-00 Robot Server (RK3576)
+After=network.target NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=simple
+User=cat
+Environment=AKA_HOME=/home/cat/aka00
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=/home/cat/aka00
+ExecStartPre=/bin/bash /home/cat/aka00/init_ap_web.sh --silent
+ExecStart=/bin/bash /home/cat/aka00/init.sh
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aka-00
+
+[Install]
+WantedBy=multi-user.target

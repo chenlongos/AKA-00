@@ -1,6 +1,6 @@
 #!/bin/sh
 # demo-node 用独立进程组 spawn 这个 init.sh，当前 cwd = demo/<name>/。
-# 路径无关：从 init.sh 自身位置反推仓库根，无论部署在 /root/AKA-00 还是别的目录。
+# 路径无关：从 init.sh 自身位置反推仓库根，无论部署在 /home/cat/aka00 还是别的目录。
 #   demo/<name>/init.sh -> dirname=`demo/<name>` -> ../..=repo 根
 #
 # .so 加载路径在仓库根下的 libs/ 子目录，由用户单独 scp 上来（不打包进 tarball）。

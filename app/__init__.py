@@ -1,4 +1,4 @@
-from flask import Flask, make_response, request
+from flask import Flask, jsonify, make_response, request
 
 
 def create_app():
@@ -26,9 +26,15 @@ def create_app():
         pass
 
     from .services import init_control_service
+    from .services.control_service import HardwareReleasedError
     from .routes.api import api_bp
     from .routes.wifi import wifi_bp
     from .routes.frontend import frontend_bp
+
+    @app.errorhandler(HardwareReleasedError)
+    def handle_hardware_released(exc):
+        # demo 运行期间硬件已让渡，控制类请求统一 503
+        return jsonify({"status": "hardware_released", "error": str(exc)}), 503
 
     @app.before_request
     def handle_cors_preflight():

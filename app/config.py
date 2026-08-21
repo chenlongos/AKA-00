@@ -3,13 +3,13 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class HardwareConfig:
-    """硬件配置。"""
+    """硬件配置 (RK3576)。"""
     arm_driver: str = "zp10s"
-    arm_port: str = "/dev/ttyS2"
+    arm_port: str = "/dev/ttyS10"
     arm_baudrate: int = 115200
 
     base_driver: str = "tt_pid"
-    base_port: str = "/dev/ttyS1"
+    base_port: str = "/dev/ttyS3"
 
     demo_server_url: str = "http://124.222.162.228:8888"
     ota_check_url: str = "https://api.chenlongrobot.com/api/user/robot-versions/featured"

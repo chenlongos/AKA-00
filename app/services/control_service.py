@@ -8,6 +8,10 @@ from src.state import get_state_collector
 _WHEEL_CIRCUMFERENCE_M = 3.1415926535 * 0.062  # 轮径 62mm
 
 
+class HardwareReleasedError(RuntimeError):
+    """硬件已让渡给外部程序（demo）时调用控制接口抛出。"""
+
+
 class ControlService:
     def __init__(self, config):
         self._config = config
@@ -15,12 +19,10 @@ class ControlService:
         self._duration_timer: threading.Timer | None = None
         self._duration_timer_lock = threading.Lock()
         self._arm_lock = threading.Lock()
+        self._hardware_lock = threading.Lock()
+        self._hardware_released = False
         self._motor_pair = self._create_motor_pair()
-        self._gripper = create_gripper(
-            driver=config.arm_driver,
-            port=config.arm_port,
-            baudrate=config.arm_baudrate,
-        )
+        self._gripper = self._create_gripper()
 
     def _create_motor_pair(self):
         motor_pair = create_motor_pair(
@@ -30,8 +32,79 @@ class ControlService:
         get_state_collector().set_motor_pair(motor_pair)
         return motor_pair
 
+    def _create_gripper(self):
+        return create_gripper(
+            driver=self._config.arm_driver,
+            port=self._config.arm_port,
+            baudrate=self._config.arm_baudrate,
+        )
+
+    @property
+    def hardware_released(self) -> bool:
+        return self._hardware_released
+
+    def release_hardware(self, reason: str = "") -> dict[str, object]:
+        """关闭底盘/机械臂串口和摄像头，把硬件让渡给外部程序（如 demo）。
+
+        电机必须先发停转指令再关串口：ESP32 断连后会保持最后一条 PWM 指令。
+        幂等，重复调用无副作用。
+        """
+        with self._hardware_lock:
+            if self._hardware_released:
+                return {"status": "already_released", "reason": reason}
+            self._cancel_pending_stop()
+            try:
+                self._motor_pair.sleep()
+            except Exception:
+                pass
+            try:
+                self._motor_pair.close()
+            except Exception:
+                pass
+            with self._arm_lock:
+                try:
+                    self._gripper.disconnect()
+                except Exception:
+                    pass
+            get_state_collector().set_motor_pair(None)
+            get_state_collector().set_target_speed(0, 0)
+            try:
+                from app.services.camera_service import CameraService
+
+                CameraService.get_instance().close()
+            except Exception:
+                pass
+            self._hardware_released = True
+            return {"status": "released", "reason": reason}
+
+    def acquire_hardware(self) -> dict[str, object]:
+        """重新接管底盘/机械臂串口（demo 退出后调用）。幂等。
+
+        重新创建驱动对象并重新加载 arm_angles.json（demo 运行期间 Web 界面
+        可能更新过角度）。
+        """
+        with self._hardware_lock:
+            if not self._hardware_released:
+                return {"status": "already_acquired"}
+            motor_pair = self._create_motor_pair()
+            gripper = self._create_gripper()
+            # 构造成功后再替换，避免半更新状态
+            self._motor_pair = motor_pair
+            with self._arm_lock:
+                self._gripper = gripper
+            self._hardware_released = False
+            return {"status": "acquired"}
+
+    def _ensure_hardware(self) -> None:
+        if self._hardware_released:
+            raise HardwareReleasedError(
+                "hardware released to external program (demo running), "
+                "stop the demo first"
+            )
+
     def execute_action(self, action: str, speed: int = 50, milliseconds: float = 0) -> dict:
         # speed: 电机百分比 (1~100)，默认 50
+        self._ensure_hardware()
         self._cancel_pending_stop()
         if not (self._apply_base_action(action, speed) or self._apply_arm_action(action)):
             raise ValueError(f"unsupported action: {action}")
@@ -50,6 +123,7 @@ class ControlService:
             right: 右轮速度 (-100 ~ 100)
             duration: 持续时间（秒），0 表示无限
         """
+        self._ensure_hardware()
         self._cancel_pending_stop()
         self._motor_pair.set_speed(left, right)
         get_state_collector().set_target_speed(left, right)
@@ -67,6 +141,7 @@ class ControlService:
         固件内部用轮径 62mm、轴距 160mm、PPR 4680 自行换算成编码器计数，
         因此这里直接发送 mm / 度，不再做任何换算（否则会被固件二次换算）。
         """
+        self._ensure_hardware()
         import struct
         speed = min(100, max(1, abs(speed)))
         dir_map = {"forward": 0, "backward": 1, "left": 2, "right": 3}
@@ -94,6 +169,8 @@ class ControlService:
         return {"status": "started", "mode": "esp32", "target": value, "unit": unit}
 
     def send_raw_command(self, cmd: str) -> dict[str, str]:
+        if self._hardware_released:
+            return {"status": "error", "message": "hardware released (demo running)"}
         raw_sender = getattr(getattr(self._gripper, "_zp10s", None), "_send_raw_cmd", None)
         if cmd and raw_sender is not None:
             raw_sender(cmd)
@@ -108,6 +185,7 @@ class ControlService:
         return {"status": "success", "driver": driver, "angles": angles}
 
     def preview_arm_angle(self, driver: str, key: str, angle: int) -> dict[str, object]:
+        self._ensure_hardware()
         if driver != self._arm_driver:
             raise ValueError(f"driver mismatch: expected {self._arm_driver}, got {driver}")
         previewer = getattr(self._gripper, "preview_angle", None)
@@ -118,6 +196,7 @@ class ControlService:
 
     def reinitialize_motor_pair(self) -> dict[str, object]:
         """重新初始化电机底盘（用于 tt_pid 等需要重置 ESP32 状态的场景）。"""
+        self._ensure_hardware()
         reinit = getattr(self._motor_pair, "reinitialize", None)
         if reinit is not None:
             result = reinit()
@@ -140,7 +219,10 @@ class ControlService:
         timer.start()
 
     def _stop_motors(self) -> None:
-        self._motor_pair.sleep()
+        try:
+            self._motor_pair.sleep()
+        except Exception:
+            pass
         with self._duration_timer_lock:
             self._duration_timer = None
 
@@ -177,10 +259,14 @@ class ControlService:
         return True
 
     def _do_grab(self):
+        if self._hardware_released:
+            return
         with self._arm_lock:
             self._gripper.close()
         get_state_collector().set_gripper_target(0)
 
     def _do_release(self):
+        if self._hardware_released:
+            return
         with self._arm_lock:
             self._gripper.open()

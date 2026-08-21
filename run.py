@@ -260,8 +260,8 @@ if __name__ == "__main__":
     print(f"HTTP listening on port {http_port}")
 
     # HTTPS
-    cert_path = os.getenv("APP_CERT_PATH", "/root/AKA-00/cert.pem")
-    key_path = os.getenv("APP_KEY_PATH", "/root/AKA-00/key.pem")
+    cert_path = os.getenv("APP_CERT_PATH", "/home/cat/aka00/cert.pem")
+    key_path = os.getenv("APP_KEY_PATH", "/home/cat/aka00/key.pem")
     if ensure_cert(cert_path, key_path):
         https_port = int(os.getenv("APP_HTTPS_PORT", "5443" if os.name == "nt" else "443"))
         tornado.httpserver.HTTPServer(

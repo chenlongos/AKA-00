@@ -4,6 +4,7 @@ import re
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 from flask import Blueprint, request, jsonify
 
@@ -11,42 +12,94 @@ from flask import Blueprint, request, jsonify
 WIFI_INTERFACE = os.getenv("WIFI_INTERFACE", "wlan1")
 WIFI_CTRL_PATH = "/var/run/wpa_supplicant"
 
+# wpa_supplicant 配置文件路径（优先从环境变量获取，否则相对于项目根目录）
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+WPA_CONFIG_PATH = os.getenv("WPA_SUPPLICANT_CONF",
+                            str(_PROJECT_ROOT / "services" / "wpa_supplicant.conf"))
+
+# ── sudo 适配：非 root 用户自动加 sudo 前缀 ──────────────────────────────────
+try:
+    _IS_ROOT = (os.geteuid() == 0)
+except AttributeError:
+    _IS_ROOT = True
+SUDO = "" if _IS_ROOT else "sudo "
+SUDO_LIST = [] if _IS_ROOT else ["sudo"]
+
 wifi_bp = Blueprint("wifi", __name__)
 
 
+def _socket_exists(path):
+    """检查 socket 是否存在（非 root 用户使用 sudo 绕过目录权限）"""
+    if _IS_ROOT:
+        return os.path.exists(path)
+    result = subprocess.run(SUDO_LIST + ["test", "-e", path],
+                            capture_output=True, timeout=5)
+    return result.returncode == 0
+
+
+def _wpa_healthy():
+    """检查 wpa_supplicant 是否健康响应"""
+    try:
+        r = subprocess.getoutput(
+            f"{SUDO}wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} status")
+        return "wpa_state=" in r
+    except Exception:
+        return False
+
+
+def _start_wpa():
+    """启动 wpa_supplicant（使用配置文件）"""
+    # 确保控制接口目录存在
+    subprocess.run(SUDO_LIST + ["mkdir", "-p", WIFI_CTRL_PATH],
+                   capture_output=True, timeout=5)
+    if not _IS_ROOT and not os.path.exists(WIFI_CTRL_PATH):
+        return False
+
+    os.system(f"{SUDO}ip link set {WIFI_INTERFACE} up")
+    cmd = f"{SUDO}wpa_supplicant -D nl80211 -i {WIFI_INTERFACE} -c {WPA_CONFIG_PATH} -B"
+    os.system(cmd)
+
+    # 等待 socket 就绪
+    socket_file = f"{WIFI_CTRL_PATH}/{WIFI_INTERFACE}"
+    for _ in range(10):
+        if _socket_exists(socket_file):
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def _restart_wpa():
+    """杀掉并重启 wpa_supplicant"""
+    os.system(f"{SUDO}killall -9 wpa_supplicant 2>/dev/null")
+    time.sleep(0.5)
+    os.system(f"{SUDO}rm -rf {WIFI_CTRL_PATH}/{WIFI_INTERFACE}")
+    time.sleep(0.3)
+    return _start_wpa()
+
+
 def ensure_wpa_env():
-    """确保 wpa_supplicant 已初始化"""
+    """确保 wpa_supplicant 已初始化且健康运行"""
     # 开发环境（模拟器）下跳过
     if os.name == "nt" or sys.platform == "darwin":
         return False
 
-    if not os.path.exists(WIFI_CTRL_PATH):
-        try:
-            os.makedirs(WIFI_CTRL_PATH, exist_ok=True)
-        except PermissionError:
-            return False
+    # 1. 健康检查：wpa_supplicant 正常响应则直接返回
+    if _wpa_healthy():
+        return True
 
+    # 2. Socket 存在但 wpa_cli 无响应 → wpa_supplicant 僵死，需重启
     socket_file = f"{WIFI_CTRL_PATH}/{WIFI_INTERFACE}"
-    if not os.path.exists(socket_file):
-        os.system("killall -9 wpa_supplicant 2>/dev/null")
-        time.sleep(0.5)
-        os.system(f"rm -rf {socket_file}")
-        os.system(f"ip link set {WIFI_INTERFACE} down")
-        os.system(f"ip link set {WIFI_INTERFACE} up")
-        time.sleep(0.5)
-        cmd = f"wpa_supplicant -D nl80211 -i {WIFI_INTERFACE} -C {WIFI_CTRL_PATH} -B"
-        os.system(cmd)
-        for _ in range(10):
-            if os.path.exists(socket_file):
-                return True
-            time.sleep(0.5)
-        return False
-    return True
+    if _socket_exists(socket_file):
+        return _restart_wpa()
+
+    # 3. Socket 不存在 → 首次启动
+    return _start_wpa()
 
 
 def get_current_wifi_ip():
     """获取 wlan1 的当前 IP"""
-    ip = subprocess.getoutput(f"ip addr show {WIFI_INTERFACE} | grep 'inet ' | awk '{{print $2}}' | cut -d/ -f1")
+    ip = subprocess.getoutput(
+        f"ip addr show {WIFI_INTERFACE} | grep 'inet ' | awk '{{print $2}}' | cut -d/ -f1")
     return ip if ip else "未分配"
 
 
@@ -73,16 +126,13 @@ def get_wifi_list():
     if not ensure_wpa_env():
         return {"list": [], "error": "WPA_INIT_FAILED"}
 
-    os.system(f"wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} scan > /dev/null 2>&1")
-    # 轮询等待扫描完成，最多等 5 秒
-    raw_results = ""
-    for _ in range(10):
-        time.sleep(0.5)
-        raw_results = subprocess.getoutput(f"wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} scan_results")
-        if len(raw_results.split('\n')) > 1:
-            break
+    os.system(f"{SUDO}wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} scan > /dev/null 2>&1")
+    time.sleep(1.5)
+    raw_results = subprocess.getoutput(
+        f"{SUDO}wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} scan_results")
 
-    current_status = subprocess.getoutput(f"wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} status")
+    current_status = subprocess.getoutput(
+        f"{SUDO}wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} status")
     connected_ssid = None
     if "wpa_state=COMPLETED" in current_status:
         ssid_match = re.search(r"^ssid=(.*)$", current_status, re.MULTILINE)
@@ -109,68 +159,113 @@ def get_wifi_list():
                 }
 
     return {
-        "list": sorted(unique_wifi.values(), key=lambda x: (not x['is_connected'], -x['signal'])),
+        "list": sorted(unique_wifi.values(),
+                       key=lambda x: (not x['is_connected'], -x['signal'])),
         "connected": connected_ssid
     }
 
 
+def _is_ascii(text):
+    """检查字符串是否仅包含 ASCII 字符"""
+    try:
+        text.encode("ascii")
+        return True
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return False
+
+
+def _wpa_cli_cmd(args, timeout=5):
+    """执行 wpa_cli 命令，返回 (returncode, stdout, stderr)"""
+    cmd = SUDO_LIST + ["wpa_cli", "-p", WIFI_CTRL_PATH, "-i", WIFI_INTERFACE] + args
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    return r.returncode, r.stdout.strip(), r.stderr.strip()
+
+
 def do_connect(ssid, password):
-    ensure_wpa_env()
-    # SSID 统一用 hex 编码传给 wpa_cli（不带引号，wpa_supplicant 会把无引号的纯 hex 当字节解析）。
-    # 这样中文/特殊字符/普通 ASCII 都能正确连接，且不依赖 shell 或 locale 编码。
-    ssid_hex = ssid.encode("utf-8").hex()
+    if not ensure_wpa_env():
+        return (False, "wpa_supplicant 未就绪")
 
-    subprocess.run(
-        ["wpa_cli", "-p", WIFI_CTRL_PATH, "-i", WIFI_INTERFACE, "remove_network", "all"],
-        capture_output=True, timeout=5)
-    r = subprocess.run(
-        ["wpa_cli", "-p", WIFI_CTRL_PATH, "-i", WIFI_INTERFACE, "add_network"],
-        capture_output=True, text=True, timeout=5)
-    net_id = r.stdout.strip().split('\n')[0]
-
-    subprocess.run(
-        ["wpa_cli", "-p", WIFI_CTRL_PATH, "-i", WIFI_INTERFACE,
-         "set_network", net_id, "ssid", ssid_hex],
-        capture_output=True, timeout=5)
-    if password:
-        subprocess.run(
-            ["wpa_cli", "-p", WIFI_CTRL_PATH, "-i", WIFI_INTERFACE,
-             "set_network", net_id, "psk", f'"{password}"'],
-            capture_output=True, timeout=5)
+    # ── SSID 编码：ASCII 用引号包裹，非 ASCII 用 hex 无引号 ──
+    if _is_ascii(ssid):
+        ssid_arg = f'"{ssid}"'
     else:
-        subprocess.run(
-            ["wpa_cli", "-p", WIFI_CTRL_PATH, "-i", WIFI_INTERFACE,
-             "set_network", net_id, "key_mgmt", "NONE"],
-            capture_output=True, timeout=5)
+        ssid_arg = ssid.encode("utf-8").hex()
 
-    subprocess.run(
-        ["wpa_cli", "-p", WIFI_CTRL_PATH, "-i", WIFI_INTERFACE,
-         "select_network", net_id],
-        capture_output=True, timeout=5)
+    # ── 清除已有网络并断开连接 ──
+    rc, out, err = _wpa_cli_cmd(["remove_network", "all"])
+    if rc != 0:
+        log_msg = f"remove_network 失败: {err or out}"
+        print(f"[wifi] {log_msg}")
+        return (False, log_msg)
+    time.sleep(0.5)
 
-    for attempt in range(10):
-        time.sleep(0.8)
-        status = subprocess.getoutput(f"wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} status")
-        if "wpa_state=COMPLETED" in status:
-            os.system(f"udhcpc -i {WIFI_INTERFACE} -n -q -T 3")
-            ip = subprocess.getoutput(f"ip addr show {WIFI_INTERFACE} | grep 'inet ' | awk '{{print $2}}' | cut -d/ -f1")
-            return True, ip.strip() or "获取中..."
-        # Fail fast on clear error states
-        if any(s in status for s in ["FAIL", "UNKNOWN", "reason=WRONG_KEY",
-                                       "wpa_state=DISCONNECTED", "wpa_state=INACTIVE"]):
-            return False, "连接失败，请检查密码或信号"
-        # Give up early if still scanning after 3 attempts (AP out of range)
-        if attempt >= 2 and "wpa_state=SCANNING" in status:
-            return False, "未找到该网络"
-    return False, "连接超时"
+    # ── 添加新网络 ──
+    rc, out, err = _wpa_cli_cmd(["add_network"])
+    if rc != 0:
+        log_msg = f"add_network 失败: {err or out}"
+        print(f"[wifi] {log_msg}")
+        return (False, log_msg)
+    net_id = out.strip().split('\n')[0]
+    if not net_id.isdigit():
+        return (False, f"add_network 返回异常: {out}")
 
+    # ── 设置 SSID ──
+    rc, out, err = _wpa_cli_cmd(["set_network", net_id, "ssid", ssid_arg])
+    if rc != 0:
+        log_msg = f"set_network ssid 失败: {err or out}"
+        print(f"[wifi] {log_msg}")
+        return (False, log_msg)
+
+    # ── 设置认证方式 ──
+    if password:
+        rc, out, err = _wpa_cli_cmd(["set_network", net_id, "psk", f'"{password}"'])
+        if rc != 0:
+            log_msg = f"set_network psk 失败: {err or out}"
+            print(f"[wifi] {log_msg}")
+            return (False, log_msg)
+    else:
+        rc, out, err = _wpa_cli_cmd(["set_network", net_id, "key_mgmt", "NONE"])
+        if rc != 0:
+            log_msg = f"set_network key_mgmt 失败: {err or out}"
+            print(f"[wifi] {log_msg}")
+            return (False, log_msg)
+
+    # ── 选择网络并强制重连 ──
+    rc, out, err = _wpa_cli_cmd(["select_network", net_id])
+    if rc != 0:
+        log_msg = f"select_network 失败: {err or out}"
+        print(f"[wifi] {log_msg}")
+        return (False, log_msg)
+
+    # 强制重连（确保 wpa_supplicant 立即开始连接流程）
+    _wpa_cli_cmd(["reassociate"], timeout=3)
+
+    # ── 等待连接完成 ──
+    for _ in range(20):
+        rc, out, err = _wpa_cli_cmd(["status"])
+        if "wpa_state=COMPLETED" in out:
+            # 连接成功：先释放旧 DHCP 租约，再获取新 IP
+            # 不释放旧租约会导致接口上残留上一个 WiFi 的 IP
+            os.system(f"{SUDO}dhclient -r {WIFI_INTERFACE} 2>/dev/null")
+            time.sleep(0.5)
+            os.system(f"{SUDO}dhclient {WIFI_INTERFACE}")
+            ip = subprocess.getoutput(
+                f"ip addr show {WIFI_INTERFACE} | grep 'inet ' | awk '{{print $2}}' | cut -d/ -f1")
+            return (True, ip.strip() or "获取中...")
+        time.sleep(1)
+
+    # 超时，查看当前状态
+    rc, out, err = _wpa_cli_cmd(["status"])
+    print(f"[wifi] 连接超时, status: {out[:200]}")
+    return (False, "连接超时")
 
 # ========== WiFi 路由 ==========
 
 @wifi_bp.route("/ip", methods=["GET"])
 def get_ip():
     """获取当前IP（STA模式IP，未连接时返回AP模式IP）"""
-    status_raw = subprocess.getoutput(f"wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} status")
+    status_raw = subprocess.getoutput(
+        f"{SUDO}wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} status")
     ssid_match = re.search(r"^ssid=(.*)$", status_raw, re.MULTILINE)
     current_ssid = _decode_ssid(ssid_match.group(1)) if ssid_match else None
 
@@ -183,7 +278,8 @@ def get_ip():
 @wifi_bp.route("/status", methods=["GET"])
 def wifi_status():
     """获取 WiFi 连接状态"""
-    status_raw = subprocess.getoutput(f"wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} status")
+    status_raw = subprocess.getoutput(
+        f"{SUDO}wpa_cli -p {WIFI_CTRL_PATH} -i {WIFI_INTERFACE} status")
     ssid_match = re.search(r"^ssid=(.*)$", status_raw, re.MULTILINE)
     current_ssid = _decode_ssid(ssid_match.group(1)) if ssid_match else None
 

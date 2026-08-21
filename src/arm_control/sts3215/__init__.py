@@ -41,6 +41,10 @@ class STS3215:
     def gripper_close_angle(self) -> int:
         return get_gripper_close(self._angles, "sts3215")
 
+    def close(self):
+        if self.ser.is_open:
+            self.ser.close()
+
     def checksum(self, data: bytes) -> int:
         return (~sum(data)) & 0xFF
 

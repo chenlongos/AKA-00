@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build release packages for SG2002 deployment.
+# Build release packages for RK3576 / Debian 12 deployment.
 #
 # Usage:
 #   ./build_release.sh              # both packages
@@ -16,31 +16,28 @@ OUTPUT="$SCRIPT_DIR/dist/aka-00-server"
 mkdir -p "$SCRIPT_DIR/dist"
 
 # Build frontend if needed
-# Frontend 构建输出在 dora/web-server/static（供 dora dev 模式使用），
-# 同时同步到根 static/ 供 Python Flask 生产部署使用。
 if [ "$1" = "--rebuild" ] || [ ! -d "$SCRIPT_DIR/static" ] || [ -z "$(ls -A "$SCRIPT_DIR/static" 2>/dev/null)" ]; then
     echo "Building frontend..."
     cd "$SCRIPT_DIR/frontend" && npm run build
     cd "$SCRIPT_DIR"
-    # 同步到根 static/ 目录（生产部署需要）
-    if [ -d "$SCRIPT_DIR/dora/web-server/static" ]; then
+    if [ -d "$SCRIPT_DIR/frontend/dist" ]; then
         rm -rf "$SCRIPT_DIR/static"
-        cp -r "$SCRIPT_DIR/dora/web-server/static" "$SCRIPT_DIR/static"
-        echo "Synced dora/web-server/static -> static/"
+        cp -r "$SCRIPT_DIR/frontend/dist" "$SCRIPT_DIR/static"
+        echo "Synced frontend/dist -> static/"
     fi
 fi
 
 # Create the self-extracting executable.
 # Supports two modes:
-#   aka-00-server              — normal run (extract if first time, then start)
-#   aka-00-server --init       — first-time setup (extract + AP hotspot + DHCP)
-#   aka-00-server --update     — force extract + restart (for OTA)
+#   aka-00-server          — normal run (extract if first time, then start server)
+#   aka-00-server --init   — first-time setup (extract + AP hotspot + systemd)
+#   aka-00-server --update — force extract + restart (for OTA)
 cat > "$OUTPUT" <<'HEADER'
 #!/bin/sh
-# AKA-00 Server
+# AKA-00 Server (RK3576)
 set -e
 
-APP_DIR="${AKA_HOME:-/root/AKA-00}"
+APP_DIR="${AKA_HOME:-/home/cat/aka00}"
 
 extract_payload() {
     echo "Installing AKA-00 to $APP_DIR ..."
@@ -61,12 +58,37 @@ finally:
 
 # ── --init: first-time setup ──────────────────────────────────────────
 if [ "$1" = "--init" ]; then
-    echo "=== AKA-00 First-Time Setup ==="
+    echo "=== AKA-00 First-Time Setup (RK3576) ==="
     extract_payload
-    "$APP_DIR/init_ap_web.sh"
+
+    # 1. 安装 systemd 服务
     echo ""
-    echo "Setup complete."
-    echo "  Service will auto-start on next boot."
+    echo "Installing systemd service..."
+    cp "$APP_DIR/services/aka-00.service" /etc/systemd/system/aka-00.service
+    chmod 644 /etc/systemd/system/aka-00.service
+    systemctl daemon-reload
+    systemctl enable aka-00.service
+    echo "✅ systemd service installed"
+
+    # 2. 首次启动（init_ap_web.sh 会创建 AP 热点 + 启动 Python 服务）
+    echo ""
+    echo "Starting AP hotspot + web service..."
+    systemctl start aka-00.service
+    sleep 3
+
+    # 3. 检查状态
+    echo ""
+    if systemctl is-active --quiet aka-00.service; then
+        echo "============================================"
+        echo "  ✅ 部署完成!"
+        echo "  SSID: chenlong-robot-<id>"
+        echo "  访问: http://192.168.4.1"
+        echo "  管理: systemctl status aka-00"
+        echo "============================================"
+    else
+        echo "⚠️  服务启动失败"
+        journalctl -u aka-00.service --no-pager -n 15
+    fi
     exit 0
 fi
 
@@ -134,16 +156,69 @@ COPYFILE_DISABLE=1 tar cz \
     --exclude='.vscode' \
     --exclude='.idea' \
     --exclude='build_release.sh' \
+    --exclude='deploy_openrc_services.sh' \
     --exclude='hardware' \
     . | base64 >> "$OUTPUT"
 
 chmod +x "$OUTPUT"
 echo "Done: $OUTPUT ($(du -h "$OUTPUT" | cut -f1))"
 
+# ---- OTA package (tar.gz) ----
+if [ "$1" = "--ota" ] || [ "$2" = "--ota" ]; then
+    OTA_PKG="$SCRIPT_DIR/dist/aka-ota.tar.gz"
+
+    git -C "$SCRIPT_DIR" describe --tags --always --dirty 2>/dev/null > "$SCRIPT_DIR/VERSION" || \
+    if [ -f "$SCRIPT_DIR/VERSION" ]; then
+        ver=$(head -1 "$SCRIPT_DIR/VERSION" | cut -d@ -f1)
+        echo "${ver}@$(date +%s)" > "$SCRIPT_DIR/VERSION"
+    else
+        echo "v0.1.0@$(date +%s)" > "$SCRIPT_DIR/VERSION"
+    fi
+
+    echo "Building OTA package..."
+    COPYFILE_DISABLE=1 tar czf "$OTA_PKG" \
+        --exclude='dora' \
+        --exclude='frontend' \
+        --exclude='node_modules' \
+        --exclude='dist' \
+        --exclude='.git' \
+        --exclude='__pycache__' \
+        --exclude='*.pyc' \
+        --exclude='images' \
+        --exclude='docs' \
+        --exclude='tests' \
+        --exclude='output' \
+        --exclude='checkpoints' \
+        --exclude='*.zip' \
+        --exclude='*.pdf' \
+        --exclude='.claude' \
+        --exclude='.vscode' \
+        --exclude='.idea' \
+        --exclude='build_release.sh' \
+        --exclude='deploy_openrc_services.sh' \
+        --exclude='hardware' \
+        .
+
+    echo "Done: $OTA_PKG ($(du -h "$OTA_PKG" | cut -f1))"
+    echo ""
+    echo "Upload to GitHub Releases:"
+    echo "  gh release create vX.Y.Z $OTA_PKG --title 'vX.Y.Z'"
+    echo ""
+    echo "Or upload manually at:"
+    echo "  https://github.com/chenlongos/AKA-00/releases/new"
+fi
+
 echo ""
 echo "Deploy:"
 echo "  scp $OUTPUT root@<robot>:/tmp/"
 echo "  ssh root@<robot> '/tmp/aka-00-server'"
 echo ""
-echo "OTA:"
-echo "  上传 aka-00-server 到更新服务器，设备网页点击"检查更新"→"立即升级""
+echo "OTA (self-extracting):"
+echo "  上传 aka-00-server 到更新服务器，设备网页点击\"检查更新\"→\"立即升级\""
+echo ""
+echo "Update (push):"
+echo "  scp $OUTPUT root@<robot>:/usr/local/bin/"
+echo "  ssh cat@<robot> 'rm -rf /home/cat/aka00 && aka-00-server'"
+echo ""
+echo "Update (OTA pull):"
+echo "  连接 AP 热点后访问 http://192.168.4.1/ota → 在线更新"

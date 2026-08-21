@@ -34,6 +34,10 @@ class GripperProtocol(Protocol):
     def get_status(self) -> GripperStatus:
         ...
 
+    def disconnect(self) -> None:
+        """断开底层串口连接，把硬件让渡给外部程序。"""
+        ...
+
 
 class MockGripper:
     """Mock 夹爪，用于 Windows/macOS 开发。"""
@@ -57,6 +61,9 @@ class MockGripper:
 
     def preview_angle(self, key: str, angle: int) -> None:
         print(f"[MockGripper] preview_angle({key}={angle})")
+
+    def disconnect(self) -> None:
+        pass
 
 
 class ZP10SGripperAdapter:
@@ -87,6 +94,9 @@ class ZP10SGripperAdapter:
     def preview_angle(self, key: str, angle: int) -> None:
         servo_id = _resolve_servo_id(key, gripper_servo=2)
         self._zp10s.set_angle(servo_id, angle)
+
+    def disconnect(self) -> None:
+        self._zp10s.close()
 
 
 class STS3215GripperAdapter:
@@ -122,6 +132,9 @@ class STS3215GripperAdapter:
         servo_id = _resolve_servo_id(key, gripper_servo=3)
         self._servo.move_to_position(servo_id, angle)
 
+    def disconnect(self) -> None:
+        self._servo.close()
+
 
 def _extract_servo_id(key: str) -> int:
     """从 key 中提取舵机 ID。
@@ -155,7 +168,7 @@ def _resolve_servo_id(key: str, gripper_servo: int) -> int:
 
 def create_gripper(
     driver: str = "zp10s",
-    port: str = "/dev/ttyS2",
+    port: str = "/dev/ttyS10",
     baudrate: int = 115200,
 ) -> GripperProtocol:
     if os.name == "nt" or sys.platform == "darwin":

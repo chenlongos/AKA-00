@@ -5,7 +5,7 @@ from src.arm_control.angle_config import load_arm_angles, get_gripper_open, get_
 
 
 class ZP10S:
-    def __init__(self, port="/dev/ttyS2", baudrate=115200):
+    def __init__(self, port="/dev/ttyS10", baudrate=115200):
         self.ser = serial.Serial(
             port=port,
             baudrate=baudrate,

@@ -1,10 +1,13 @@
 import os
 import signal
 import shutil
+import sys
+import time
 import urllib.request
 import threading
 from flask import Blueprint, request, jsonify
 from app.config import config
+from app.services import get_control_service
 
 demo_bp = Blueprint("demo", __name__, url_prefix="/api/demo")
 
@@ -54,6 +57,27 @@ def demo_name():
     return jsonify({"name": _find_current_demo()})
 
 
+def _watch_demo_process(proc):
+    """demo 进程退出后重新接管硬件。
+
+    覆盖三种退出路径：/api/demo/stop 停止、demo 自行退出、demo 崩溃。
+    串口设备短暂不可读时重试几次。
+    """
+    try:
+        proc.wait()
+    except Exception:
+        pass
+    last_error = None
+    for _ in range(5):
+        try:
+            get_control_service().acquire_hardware()
+            return
+        except Exception as exc:
+            last_error = exc
+            time.sleep(2)
+    print(f"[demo] hardware re-acquire failed: {last_error}", file=sys.stderr)
+
+
 @demo_bp.route("/init", methods=["POST"])
 def demo_init():
     payload = request.get_json(silent=True)
@@ -85,6 +109,14 @@ def demo_init():
 
     os.chmod(init_script, 0o755)
 
+    # 硬件让渡：停转电机并关闭底盘/机械臂串口和摄像头，避免与 demo 程序抢占
+    # （电机先发停转指令再关串口，防止 ESP32 保持最后的 PWM 输出）
+    try:
+        get_control_service().release_hardware(reason=f"demo:{demo_name}")
+        hardware_status = "released"
+    except Exception as exc:
+        hardware_status = f"release_failed: {exc}"
+
     import subprocess
     try:
         proc = subprocess.Popen(
@@ -97,11 +129,13 @@ def demo_init():
         demo_init._process = proc
         demo_init._name = demo_name
         demo_init._pgid = os.getpgid(proc.pid)
+        threading.Thread(target=_watch_demo_process, args=(proc,), daemon=True).start()
         return jsonify({
             "status": "started",
             "pid": proc.pid,
             "pgid": demo_init._pgid,
             "name": demo_name,
+            "hardware": hardware_status,
         })
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
