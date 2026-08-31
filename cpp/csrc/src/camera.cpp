@@ -232,6 +232,20 @@ void Camera::capture_loop() {
         latest_.format = f.format;
         latest_.data = std::move(f.data);
         latest_.ts_ms = f.ts_ms;
+
+        // 2 秒一次的出帧率统计（debug 级）：确认摄像头实际帧率与瓶颈
+        static uint64_t s_frames = 0;
+        static auto s_t0 = std::chrono::steady_clock::now();
+        s_frames++;
+        auto now = std::chrono::steady_clock::now();
+        auto el = std::chrono::duration_cast<std::chrono::milliseconds>(now - s_t0).count();
+        if (el >= 2000) {
+            CAM_DEBUG("camera %d fps (%dx%d %s)",
+                      (int)(s_frames * 1000 / el), cam_w_, cam_h_,
+                      fmt_ == V4L2_PIX_FMT_MJPEG ? "MJPEG" : "YUYV");
+            s_frames = 0;
+            s_t0 = now;
+        }
     }
 }
 

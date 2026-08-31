@@ -542,10 +542,15 @@ void register_routes(Router& router, AppContext& ctx) {
         resp.set_json(j);
     });
 
-    // MJPEG 流（Python /api/camera/stream 契约）
-    router.add("GET", "/api/camera/stream", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn& conn, AppContext&) {
+    // MJPEG 流（Python /api/camera/stream 契约，支持 ?fps=N 覆盖，默认 15fps）
+    router.add("GET", "/api/camera/stream", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn& conn, AppContext&) {
         resp.stream = true;
         ensure_camera(ctx);
+        int fps = 15;
+        std::string fps_s = req.query_param("fps");
+        if (!fps_s.empty()) { fps = atoi(fps_s.c_str()); if (fps < 1) fps = 1; if (fps > 30) fps = 30; }
+        auto min_interval = std::chrono::milliseconds(1000 / fps);
+
         std::string head =
             "HTTP/1.1 200 OK\r\n"
             "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n"
@@ -561,23 +566,25 @@ void register_routes(Router& router, AppContext& ctx) {
         while (true) {
             csrc::Camera::Frame f;
             if (ctx.camera.read_latest(f) && !f.data.empty() && f.ts_ms != last_ts) {
-                // 限流 ~10fps，给 TCP 缓冲排空时间
                 auto now = std::chrono::steady_clock::now();
-                if (now - last_send >= std::chrono::milliseconds(100)) {
-                    std::vector<uint8_t> jpeg;
-                    if (current_jpeg(ctx, 40, jpeg) && !jpeg.empty()) {
+                if (now - last_send >= min_interval) {
+                    if (csrc::Camera::is_jpeg(f.data.data(), f.data.size())) {
+                        // MJPEG 直通：头 + jpeg + 尾拼成一个 buffer 一次 write（减少系统调用）
                         std::string part = "--frame\r\nContent-Type: image/jpeg\r\n"
-                                           "Content-Length: " + std::to_string(jpeg.size()) +
+                                           "Content-Length: " + std::to_string(f.data.size()) +
                                            "\r\n\r\n";
-                        if (!conn.write_all(part)) break;
-                        if (!conn.write_all(jpeg.data(), jpeg.size())) break;
-                        if (!conn.write_all("\r\n")) break;
+                        std::string out;
+                        out.reserve(part.size() + f.data.size() + 2);
+                        out += part;
+                        out.append((const char*)f.data.data(), f.data.size());
+                        out += "\r\n";
+                        if (!conn.write_all(out)) break;
                         last_ts = f.ts_ms;
                         last_send = now;
                     }
                 }
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         conn.close();
     });
