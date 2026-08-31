@@ -99,7 +99,8 @@ make clean                # 清理全部构建产物
 ├── VERSION                   # 版本文件（OTA 用）
 ├── demo/<demo>/init.sh       # demo 目录（含 init.sh 的才会打包）
 ├── init.sh                   # 启动（自愈循环）
-└── stop.sh                   # 停止
+├── stop.sh                   # 停止
+└── init_ap_web.sh            # AP 热点 + 开机自启配置（开机广播 AP，访问 192.168.4.1）
 ```
 
 传到板子二选一：
@@ -122,6 +123,27 @@ scp -r cpp/dist/AKA-00 root@<板子IP>:/root/AKA-00
 ```sh
 AKA_HOME=/root/AKA-00 /root/AKA-00/init.sh
 ```
+
+### AP 热点 + 开机自启（`init_ap_web.sh`）
+
+对应 Python 版 `init_ap_web.sh`。一次性运行后，板子**开机自动广播一个 AP 热点**
+（`wlan0`，SSID 形如 `chenlong-robot-<MAC后6位>`，开放，IP `192.168.4.1`），
+手机/控制器连上热点后浏览器访问 `http://192.168.4.1` 即可控制；`wlan1` 作为
+STA，由 capp 的 `/api/wifi/scan`、`/api/wifi/connect` 扫描并连接目标路由器。
+
+```sh
+# 装配置 + 开机脚本（S98apstart / S99webstart），不改动当前网络 → reboot 后生效
+/root/AKA-00/init_ap_web.sh install
+
+# 或立即切换：wlan0 从 STA 切成 AP（会断开当前 WiFi 连接）
+/root/AKA-00/init_ap_web.sh            # = install + 立即启动
+```
+
+> 适配点（与 Python 版的差异）：本板（SG2002 / HD05085A）无 `udhcpd`，改用
+> `dnsmasq` 做 DHCP；只 `terminate wlan0` 的 wpa_supplicant，不 `killall`，避免
+> 误杀 capp 在 `wlan1` 上自举的 wpa_supplicant；capp 在 `S99webstart` 里用
+> `init.sh &` 后台启动而非 `exec`，避免 rcS 卡在 sysinit 导致 getty 不启动。
+> 如需给热点加密码，取消 `/etc/hostapd.conf` 里 `wpa=2` 那 4 行的注释。
 
 停止：`/root/AKA-00/stop.sh`（SIGTERM 优雅退出并停电机）。
 

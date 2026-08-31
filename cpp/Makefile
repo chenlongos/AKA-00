@@ -84,7 +84,8 @@ package: $(CAPP_BIN) tools
 	fi; \
 	cp "$(CPP)/capp/scripts/init.sh" "$$DIST/init.sh"; \
 	cp "$(CPP)/capp/scripts/stop.sh" "$$DIST/stop.sh"; \
-	chmod 755 "$$DIST/init.sh" "$$DIST/stop.sh"; \
+	cp "$(CPP)/capp/scripts/init_ap_web.sh" "$$DIST/init_ap_web.sh"; \
+	chmod 755 "$$DIST/init.sh" "$$DIST/stop.sh" "$$DIST/init_ap_web.sh"; \
 	if [ -f "$(CPP)/csrc/build-cross/tt_pid_test" ]; then \
 	    mkdir -p "$$DIST/tools"; \
 	    cp "$(CPP)/csrc/build-cross/tt_pid_test" "$$DIST/tools/"; \
