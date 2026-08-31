@@ -75,7 +75,12 @@ package: $(CAPP_BIN) tools
 	    echo "  （无根 config.toml，已生成默认配置）"; \
 	fi; \
 	if [ -d "$(ROOT)/demo" ]; then \
-	    for d in "$(ROOT)"/demo/*/; do [ -f "$$d/init.sh" ] && cp -r "$$d" "$$DIST/demo/"; done; \
+	    for d in "$(ROOT)"/demo/*/; do [ -f "$$d/init.sh" ] && cp -r "$${d%/}" "$$DIST/demo/"; done; \
+	fi; \
+	if [ -d "$(ROOT)/libs" ] && [ -n "$$(ls "$(ROOT)"/libs/*.so* 2>/dev/null)" ]; then \
+	    mkdir -p "$$DIST/libs"; \
+	    cp "$(ROOT)"/libs/*.so* "$$DIST/libs/"; \
+	    echo "  ✓ libs/ 已打包（demo 运行时依赖）"; \
 	fi; \
 	cp "$(CPP)/capp/scripts/init.sh" "$$DIST/init.sh"; \
 	cp "$(CPP)/capp/scripts/stop.sh" "$$DIST/stop.sh"; \
