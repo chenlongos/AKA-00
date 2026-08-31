@@ -1,0 +1,49 @@
+# =============================================================================
+# csrc — 交叉编译 Makefile（SG2002 / riscv64 musl 静态库）
+#
+# 用法:
+#   make -f Makefile.cross                        # 用默认工具链
+#   make -f Makefile.cross CXX=/path/to/riscv64-unknown-linux-musl-g++
+#
+# JPEG_DIR 指向 libjpeg 安装前缀（含 include/ 与 lib/，由 scripts/build-libjpeg.sh 生成）
+# =============================================================================
+
+# 注意用 := 覆盖环境变量（orb 登录 shell 常导出 CXX=g++ 之类，会污染交叉编译）
+CXX      := /home/junbo_dai/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-g++
+AR       := /home/junbo_dai/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-ar
+JPEG_DIR ?= ../third_party/jpeg
+CXXFLAGS := -std=c++17 -O3 -Wall -Wextra -mcpu=c906fdv -MMD -MP -mabi=lp64d -Iinclude -I$(JPEG_DIR)/include
+ARFLAGS   = rcs
+
+SRCS := $(wildcard src/*.cpp)
+OBJS := $(SRCS:src/%.cpp=build-cross/%.o)
+LIB  := build-cross/libcsrc.a
+DEPS := $(OBJS:.o=.d)
+-include $(DEPS)
+
+.DEFAULT_GOAL := all
+.PHONY: all tools clean
+
+all: $(LIB)
+
+# 直测工具（板上排查硬件链路用）
+TOOLS := $(wildcard tools/*.cpp)
+TOOL_BINS := $(TOOLS:tools/%.cpp=build-cross/%)
+
+tools: $(TOOL_BINS)
+
+build-cross/%: tools/%.cpp $(LIB)
+	$(CXX) $(CXXFLAGS) -static -o $@ $< $(LIB) -lpthread
+
+build-cross:
+	mkdir -p build-cross
+
+build-cross/%.o: src/%.cpp | build-cross
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
+
+$(LIB): $(OBJS)
+	$(AR) $(ARFLAGS) $@ $(OBJS)
+	@echo "  ✓ libcsrc.a (riscv64) built"
+
+clean:
+	rm -rf build-cross

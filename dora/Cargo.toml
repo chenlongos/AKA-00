@@ -1,4 +1,0 @@
-[workspace]
-# screen-node 已由 C++ 版（screen-node-cpp/）替代，加入 workspace 的 Rust crate 移除。
-members = ["dora-config", "dora-c-ffi", "web-server", "motor-bridge", "state-node", "arm-bridge", "demo-node"]
-resolver = "2"

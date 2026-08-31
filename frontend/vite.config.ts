@@ -1,23 +1,11 @@
 import {defineConfig} from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
-import fs from 'fs'
 
 // https://vite.dev/config/
 export default defineConfig({
     plugins: [
         react(),
-        // 构建后同步到 ../static（给 Python Flask 使用）
-        {
-            name: 'copy-to-root-static',
-            closeBundle() {
-                const src = path.resolve(__dirname, '../dora/web-server/static')
-                const dst = path.resolve(__dirname, '../static')
-                if (fs.existsSync(dst)) fs.rmSync(dst, {recursive: true})
-                fs.cpSync(src, dst, {recursive: true})
-                console.log('  ✓ synced to ../static/')
-            },
-        },
     ],
     server: {
         proxy: {
@@ -33,7 +21,9 @@ export default defineConfig({
         },
     },
     build: {
-        outDir: path.resolve(__dirname, '../dora/web-server/static'),
+        // 构建产物直接输出到根 static/ —— capp（aka-capp）服务的就是这个目录
+        // （板子上放 $AKA_HOME/static/，AKA_HOME=/root/AKA-00）
+        outDir: path.resolve(__dirname, '../static'),
         emptyOutDir: true,
         rolldownOptions: {
             output: {

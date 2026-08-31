@@ -6,3 +6,12 @@ output/
 checkpoints/
 dist/
 .DS_Store
+
+# cpp build artifacts
+cpp/csrc/build/
+cpp/csrc/build-cross/
+cpp/capp/build/
+cpp/capp/build-cross/
+cpp/capp/bin/
+cpp/third_party/
+cpp/dist/
