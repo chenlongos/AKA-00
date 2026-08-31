@@ -280,6 +280,30 @@ bool pid_alive(pid_t pid) {
     return kill(pid, 0) == 0;
 }
 
+// wpa_supplicant 自举（移植自 app/routes/wifi.py 的 ensure_wpa_env）
+// 若 wlan1 的控制接口未就绪，则拉起网卡并后台启动 wpa_supplicant。
+// 与 Python 版的区别：不执行 killall，避免误杀 wlan0 上服务当前连接的 wpa_supplicant。
+bool ensure_wpa_env() {
+    const std::string ctrl  = "/var/run/wpa_supplicant";
+    const std::string iface = "wlan1";
+    const std::string sock  = ctrl + "/" + iface;
+
+    struct stat st{};
+    if (stat(sock.c_str(), &st) == 0) return true;        // 已就绪
+    if (stat(ctrl.c_str(), &st) != 0) mkdir(ctrl.c_str(), 0700);
+
+    csrc::exec_output("ip link set " + iface + " down 2>/dev/null");
+    csrc::exec_output("ip link set " + iface + " up 2>/dev/null");
+    usleep(500000);
+    csrc::exec_output("wpa_supplicant -D nl80211 -i " + iface + " -C " + ctrl +
+                      " -B >/dev/null 2>&1");
+    for (int i = 0; i < 10; i++) {                        // 最多等 5s
+        if (stat(sock.c_str(), &st) == 0) return true;
+        usleep(500000);
+    }
+    return false;
+}
+
 }  // namespace
 
 // ═══════════════════════ 路由注册 ═══════════════════════
@@ -1150,6 +1174,7 @@ void register_routes(Router& router, AppContext& ctx) {
 
     // ── /api/wifi ──
     router.add("GET", "/api/wifi/ip", [](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
+        ensure_wpa_env();
         std::string status = csrc::exec_output(
             "wpa_cli -p /var/run/wpa_supplicant -i wlan1 status 2>/dev/null");
         bool connected = status.find("wpa_state=COMPLETED") != std::string::npos;
@@ -1161,6 +1186,7 @@ void register_routes(Router& router, AppContext& ctx) {
     });
 
     router.add("GET", "/api/wifi/status", [](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
+        ensure_wpa_env();
         std::string status = csrc::exec_output(
             "wpa_cli -p /var/run/wpa_supplicant -i wlan1 status 2>/dev/null");
         std::string ssid;
@@ -1179,13 +1205,24 @@ void register_routes(Router& router, AppContext& ctx) {
 
     router.add("GET", "/api/wifi/scan", [](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
         // 扫描（与 Python get_wifi_list 对齐）
+        if (!ensure_wpa_env()) {
+            Json j;
+            j["list"] = Json(Json::Type::Array);  // 空数组，而非 null
+            j["error"] = "WPA_INIT_FAILED";
+            resp.set_json(j);
+            return;
+        }
         csrc::exec_output("wpa_cli -p /var/run/wpa_supplicant -i wlan1 scan > /dev/null 2>&1");
         std::string raw;
         for (int i = 0; i < 10; i++) {
             usleep(500000);
             raw = csrc::exec_output(
                 "wpa_cli -p /var/run/wpa_supplicant -i wlan1 scan_results 2>/dev/null");
-            if (!raw.empty() && raw.find('\n') != std::string::npos) break;
+            // 与 Python 一致：等到出现表头以外的至少 1 行结果才退出。
+            // 仅表头 "bssid / frequency / ... / ssid\n" 只有 1 个换行，需继续等。
+            int nl = 0;
+            for (char c : raw) if (c == '\n') ++nl;
+            if (nl >= 2) break;
         }
         std::string status = csrc::exec_output(
             "wpa_cli -p /var/run/wpa_supplicant -i wlan1 status 2>/dev/null");
@@ -1251,6 +1288,7 @@ void register_routes(Router& router, AppContext& ctx) {
             resp.set_error("ssid 不能为空", 400);
             return;
         }
+        ensure_wpa_env();  // 确保 wlan1 的 wpa_supplicant 已就绪
         // SSID 转 hex（与 Python do_connect 一致，wpa_supplicant 无引号 hex 当字节）
         std::string ssid_hex;
         {
