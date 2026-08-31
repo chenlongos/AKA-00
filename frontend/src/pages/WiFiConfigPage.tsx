@@ -32,7 +32,7 @@ const WiFiConfigPage = () => {
 
     const updateStatus = async () => {
         try {
-            const [sr, ir] = await Promise.all([fetch("/status"), fetch("/ip")]);
+            const [sr, ir] = await Promise.all([fetch("/api/wifi/status"), fetch("/api/wifi/ip")]);
             const [sd, id] = await Promise.all([sr.json(), ir.json()]);
             setConnectionStatus(sd.ssid
                 ? <span><span style={{color: "#34c759"}}>●</span> 已连接: <b>{sd.ssid}</b> | IP: <b style={{color: "#007aff"}}>{id.ip}</b></span>
@@ -44,7 +44,7 @@ const WiFiConfigPage = () => {
         if (scanning || connecting) return;
         setScanning(true);
         try {
-            const r = await fetch("/scan"); const d = await r.json();
+            const r = await fetch("/api/wifi/scan"); const d = await r.json();
             const list = d.list || [];
             setNetworks(list);
             await updateStatus();
@@ -64,7 +64,7 @@ const WiFiConfigPage = () => {
         setConnecting(true);
         setMessages(prev => ({...prev, [net.id]: "正在连接并获取地址..."}));
         try {
-            const r = await fetch("/connect", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ssid: net.ssid, password: pwd})});
+            const r = await fetch("/api/wifi/connect", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ssid: net.ssid, password: pwd})});
             const d = await r.json();
             if (r.ok) {
                 setMessages(prev => ({...prev, [net.id]: `连接成功! IP: ${d.ip}`}));

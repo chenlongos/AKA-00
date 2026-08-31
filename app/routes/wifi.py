@@ -11,7 +11,7 @@ from flask import Blueprint, request, jsonify
 WIFI_INTERFACE = os.getenv("WIFI_INTERFACE", "wlan1")
 WIFI_CTRL_PATH = "/var/run/wpa_supplicant"
 
-wifi_bp = Blueprint("wifi", __name__)
+wifi_bp = Blueprint("wifi", __name__, url_prefix="/api/wifi")
 
 
 def ensure_wpa_env():
