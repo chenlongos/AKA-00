@@ -1147,14 +1147,14 @@ void register_routes(Router& router, AppContext& ctx) {
     });
 
     // ── /api/system ──
-    router.add("GET", "/api/system/info", [](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
+    router.add("GET", "/api/system/info", [](const HttpRequest[](const HttpRequest&, HttpResponse& resp, ClientConn& conn, AppContext&), HttpResponse[](const HttpRequest&, HttpResponse& resp, ClientConn& conn, AppContext&) resp, ClientConn[](const HttpRequest&, HttpResponse& resp, ClientConn& conn, AppContext&), AppContext[](const HttpRequest&, HttpResponse& resp, ClientConn& conn, AppContext&)) {
         Json j;
         j["ip"] = csrc::detect_local_ip();
         j["mac"] = csrc::mac_address("wlan0");
         resp.set_json(j);
     });
 
-    router.add("GET", "/api/system/ip", [](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
+    router.add("GET", "/api/system/ip", [](const HttpRequest[](const HttpRequest&, HttpResponse& resp, ClientConn& conn, AppContext&), HttpResponse[](const HttpRequest&, HttpResponse& resp, ClientConn& conn, AppContext&) resp, ClientConn[](const HttpRequest&, HttpResponse& resp, ClientConn& conn, AppContext&), AppContext[](const HttpRequest&, HttpResponse& resp, ClientConn& conn, AppContext&)) {
         Json j;
         j["ip"] = csrc::detect_local_ip();
         resp.set_json(j);

@@ -67,7 +67,7 @@ const WiFiConfigPage = () => {
             const r = await fetch("/api/wifi/connect", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ssid: net.ssid, password: pwd})});
             const d = await r.json();
             if (r.ok) {
-                setMessages(prev => ({...prev, [net.id]: `连接成功! IP: ${d.ip}`}));
+                setMessages(prev => ({...prev, [net.id]: `连接成功!`}));
                 setTimeout(loadList, 2500);
             } else {
                 setMessages(prev => ({...prev, [net.id]: d.error || "连接失败"}));

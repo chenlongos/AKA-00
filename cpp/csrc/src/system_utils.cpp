@@ -43,23 +43,42 @@ std::string exec_output(const std::string& cmd) {
 
 std::string iface_ip(const std::string& ifname) {
     std::string out = exec_output("ip -4 -o addr show " + ifname + " 2>/dev/null");
-    // 行形如: "4: wlan0    inet 192.168.4.1/24 brd ..."
-    size_t pos = out.find("inet ");
-    if (pos == std::string::npos) return "";
-    pos += 5;
-    size_t end = out.find('/', pos);
-    if (end == std::string::npos) return "";
-    std::string ip = out.substr(pos, end - pos);
-    // 去空白
-    size_t b = ip.find_first_not_of(" \t");
-    if (b == std::string::npos) return "";
-    size_t e = ip.find_last_not_of(" \t");
-    ip = ip.substr(b, e - b + 1);
-    return ip.empty() ? "" : ip;
+    // 行形如:
+    //   4: wlan1    inet 172.16.203.94/24 brd ... scope global wlan1
+    //   4: wlan1    inet 172.16.203.195/24 brd ... scope global secondary dynamic wlan1
+    // 网卡可能同时有多个 IP：static primary（旧配置，可能已失效）+ DHCP 新地址。
+    // 优先级: dynamic（系统 DHCP 带标志）> 最后一个（最新添加；udhcpc 现场分配
+    // 的地址不带 dynamic 标志，但一定排在输出末尾）> 第一个。
+    std::string first_ip, dynamic_ip, last_ip;
+    std::istringstream iss(out);
+    std::string line;
+    while (std::getline(iss, line)) {
+        size_t pos = line.find("inet ");
+        if (pos == std::string::npos) continue;
+        pos += 5;
+        size_t end = line.find('/', pos);
+        if (end == std::string::npos) continue;
+        std::string ip = line.substr(pos, end - pos);
+        size_t b = ip.find_first_not_of(" \t");
+        if (b != std::string::npos) ip = ip.substr(b);
+        size_t e = ip.find_last_not_of(" \t");
+        if (e != std::string::npos) ip = ip.substr(0, e + 1);
+        if (ip.empty()) continue;
+        if (first_ip.empty()) first_ip = ip;
+        last_ip = ip;
+        if (line.find("dynamic") != std::string::npos) dynamic_ip = ip;
+    }
+    if (!dynamic_ip.empty()) return dynamic_ip;
+    if (!last_ip.empty()) return last_ip;
+    return first_ip;
 }
 
 std::string detect_local_ip() {
-    // 1. UDP 探测 8.8.8.8:80（拿到出口网卡 IP）
+    // 1. wlan1（DHCP dynamic > 最新 > 第一个；udhcpc 现场分配的地址无 dynamic 标志）
+    std::string dyn = iface_ip("wlan1");
+    if (!dyn.empty()) return dyn;
+
+    // 2. UDP 探测 8.8.8.8:80（wlan1 无 IP 时拿出口网卡地址）
     int fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd >= 0) {
         sockaddr_in sa;
@@ -80,10 +99,9 @@ std::string detect_local_ip() {
         }
         close(fd);
     }
-    // 2. wlan1 / wlan0 / 兜底
-    std::string ip = iface_ip("wlan1");
-    if (!ip.empty()) return ip;
-    ip = iface_ip("wlan0");
+
+    // 3. wlan0（AP 模式默认 192.168.4.1）/ 兜底
+    std::string ip = iface_ip("wlan0");
     if (!ip.empty()) return ip;
     return "127.0.0.1";
 }
