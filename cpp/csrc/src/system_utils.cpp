@@ -6,6 +6,7 @@
 #include <cstring>
 #include <fstream>
 #include <sstream>
+#include <vector>
 
 #include <sys/socket.h>
 #include <sys/statvfs.h>
@@ -73,12 +74,69 @@ std::string iface_ip(const std::string& ifname) {
     return first_ip;
 }
 
+/// 网卡上带 `dynamic` 标志的 IPv4（DHCP 分配），无则空。
+/// static primary（如残留的 .94）不算 —— DHCP 未完成时不能把它当可用地址。
+static std::string iface_dynamic_ip(const std::string& ifname) {
+    std::string out = exec_output("ip -4 -o addr show " + ifname + " 2>/dev/null");
+    std::istringstream iss(out);
+    std::string line;
+    while (std::getline(iss, line)) {
+        if (line.find("dynamic") == std::string::npos) continue;
+        size_t pos = line.find("inet ");
+        if (pos == std::string::npos) continue;
+        pos += 5;
+        size_t end = line.find('/', pos);
+        if (end == std::string::npos) continue;
+        std::string ip = line.substr(pos, end - pos);
+        size_t b = ip.find_first_not_of(" \t");
+        if (b != std::string::npos) ip = ip.substr(b);
+        size_t e = ip.find_last_not_of(" \t");
+        if (e != std::string::npos) ip = ip.substr(0, e + 1);
+        if (!ip.empty()) return ip;
+    }
+    return "";
+}
+
+/// 网卡全部 IPv4（按 `ip addr` 输出顺序）
+static std::vector<std::string> iface_ip_list(const std::string& ifname) {
+    std::vector<std::string> out;
+    std::string s = exec_output("ip -4 -o addr show " + ifname + " 2>/dev/null");
+    std::istringstream iss(s);
+    std::string line;
+    while (std::getline(iss, line)) {
+        size_t pos = line.find("inet ");
+        if (pos == std::string::npos) continue;
+        pos += 5;
+        size_t end = line.find('/', pos);
+        if (end == std::string::npos) continue;
+        std::string ip = line.substr(pos, end - pos);
+        size_t b = ip.find_first_not_of(" \t");
+        if (b != std::string::npos) ip = ip.substr(b);
+        size_t e = ip.find_last_not_of(" \t");
+        if (e != std::string::npos) ip = ip.substr(0, e + 1);
+        if (!ip.empty()) out.push_back(ip);
+    }
+    return out;
+}
+
 std::string detect_local_ip() {
-    // 1. wlan1（DHCP dynamic > 最新 > 第一个；udhcpc 现场分配的地址无 dynamic 标志）
-    std::string dyn = iface_ip("wlan1");
+    // 1. wlan1 的 DHCP dynamic 地址（STA 场景：DHCP 完成后的正确 IP，如 .195）
+    std::string dyn = iface_dynamic_ip("wlan1");
     if (!dyn.empty()) return dyn;
 
-    // 2. UDP 探测 8.8.8.8:80（wlan1 无 IP 时拿出口网卡地址）
+    // 2. wlan1 无 dynamic：
+    //    - 多个地址 → 取最后一个（udhcpc 现场分配的地址无 dynamic 标志但排在末尾）
+    //    - 只有一个地址（疑似过期的 static，如 .94）→ 返回空，前端保持"获取中..."
+    //      —— 用户宁可多等也不要错的 IP
+    auto addrs = iface_ip_list("wlan1");
+    if (addrs.size() > 1) return addrs.back();
+    if (addrs.size() == 1) return "";
+
+    // 3. wlan1 完全无地址：AP 模式优先 wlan0（192.168.4.1）
+    std::string w0 = iface_ip("wlan0");
+    if (!w0.empty()) return w0;
+
+    // 4. UDP 探测 8.8.8.8:80 / 兜底
     int fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd >= 0) {
         sockaddr_in sa;
@@ -99,10 +157,6 @@ std::string detect_local_ip() {
         }
         close(fd);
     }
-
-    // 3. wlan0（AP 模式默认 192.168.4.1）/ 兜底
-    std::string ip = iface_ip("wlan0");
-    if (!ip.empty()) return ip;
     return "127.0.0.1";
 }
 

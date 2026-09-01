@@ -46,6 +46,18 @@ fi
 # 关键：export AKA_HOME，否则 capp 的 static/config 路径退化为 cwd 相对路径，
 # 从别的目录启动就找不到 static/ 和 config.toml。
 export AKA_HOME="$APP_DIR"
+
+# WiFi 已连接时兜底删除 eth0 默认路由：
+# 有线 static 网关（如 /etc/network/interfaces 的 gateway 192.168.1.1）会让默认
+# 路由走 eth0，WiFi 客户端访问板子的回包走有线网关 → 不对称路由 → 连不上。
+# 正解是注释 /etc/network/interfaces 的 auto eth0（开机不再配）；这里是双保险，
+# 每次启动 capp 前检查并清掉。
+if ip -4 -o addr show wlan1 2>/dev/null | grep -q 'inet '; then
+    ip route show default dev eth0 2>/dev/null | while read -r line; do
+        ip route del $line 2>/dev/null && echo "[init] removed eth0 default route: $line"
+    done
+fi
+
 echo "[init] AKA-00 capp starting (AKA_HOME=$APP_DIR)"
 while true; do
     while [ -f "$LOCK_FILE" ]; do

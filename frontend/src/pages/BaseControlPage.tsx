@@ -46,13 +46,27 @@ const BaseControlPage = () => {
             },
             (msg) => {
                 if (msg.type === "ip") {
-                    setIp("IP: " + msg.ip);
-                    setStatus("准备就绪");
-                    setWsReady(true);
+                    // 只接受有效的本机 IP；空/0.0.0.0/127.0.0.1（DHCP 未完成、拿不到
+                    // 有效地址）一律保持"获取中..."，绝不显示过期的 static IP（如 .94）
+                    const ip = (msg.ip || "").trim();
+                    const valid = /^\d+\.\d+\.\d+\.\d+$/.test(ip)
+                        && ip !== "0.0.0.0" && ip !== "127.0.0.1";
+                    if (valid) {
+                        setIp("IP: " + ip);
+                        setStatus("准备就绪");
+                        setWsReady(true);
+                    }
                 }
             },
         );
         return () => { controlSocket.close(); };
+    }, []);
+
+    // 拿到有效 IP 前每 2 秒向服务端请求刷新一次 IP（后端 DHCP 就绪后返回正确地址）。
+    // 顺带效果：WiFi 切换 / DHCP 续租后页面自动跟上新 IP。
+    useEffect(() => {
+        const t = window.setInterval(() => { controlSocket.sendRequestIp(); }, 2000);
+        return () => window.clearInterval(t);
     }, []);
 
     // online 状态用 motor_status 活跃度判断（dora 推 0xBB 帧 200ms 一次）。
