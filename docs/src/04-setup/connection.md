@@ -26,7 +26,7 @@ ssh root@<robot> 'aka-server --init'
 ```
 
 `--init` 自动完成：
-- 解压项目文件到 `/root/AKA-00`
+- 解压项目文件到 `$HOME/AKA-00`
 - 配置 AP 热点（SSID: `chenlong-robot-xxxxx`，基于 MAC 地址唯一）
 - 配置 DHCP（192.168.4.100-200）
 - 写入 S98apstart / S99webstart 自启脚本
@@ -36,7 +36,7 @@ ssh root@<robot> 'aka-server --init'
 
 ```shell
 scp dist/aka-server root@<robot>:/usr/local/bin/
-ssh root@<robot> 'rm -rf /root/AKA-00 && aka-server'
+ssh root@<robot> 'rm -rf $HOME/AKA-00 && aka-server'
 ```
 
 ## HTTPS 证书生成命令

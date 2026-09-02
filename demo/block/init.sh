@@ -1,6 +1,6 @@
 #!/bin/sh
 # block demo 启动脚本（capp 用独立进程组 spawn 这个 init.sh，当前 cwd = demo/<name>/）。
-# 路径无关：从 init.sh 自身位置反推应用根，无论部署在 /root/AKA-00 还是别的目录。
+# 路径无关：从 init.sh 自身位置反推应用根。
 #   demo/<name>/init.sh -> dirname=`demo/<name>` -> ../..=应用根
 #
 # .so 加载路径在应用根下的 libs/ 子目录，由打包脚本一并部署（cpp/dist 的 libs/）。

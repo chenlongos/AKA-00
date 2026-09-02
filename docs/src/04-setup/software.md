@@ -64,13 +64,13 @@ ssh root@<robot> 'aka-server --init'
 
 ```bash
 scp dist/aka-server root@<robot>:
-ssh root@<robot> 'rm -rf /root/AKA-00 && aka-server'
+ssh root@<robot> 'rm -rf $HOME/AKA-00 && aka-server'
 ```
 
 ### 工作原理
 
 `aka-server` 是一个自解压程序：
-1. 首次运行时自动解压项目文件到 `${AKA_HOME:-/root/AKA-00}`
+1. 首次运行时自动解压项目文件到 `${AKA_HOME:-$HOME/AKA-00}`
 2. 执行 `uart_init.sh` 初始化串口（如果存在）
 3. 启动 `python3 run.py` 运行 Web 服务
 

@@ -66,10 +66,7 @@ echo "已启用wlan1 作为wifi连接网口"
 
 #!/bin/sh
 
-BASE_DIR="/root/"
 LOG_FILE="/tmp/wifi_web.log"
-
-mkdir -p $BASE_DIR
 
 echo "===== WiFi Web Setup Start =====" > $LOG_FILE
 
@@ -86,6 +83,7 @@ fi
 cat > /etc/init.d/S99webstart <<'EOF'
 #!/bin/sh
 # 等待 wifi phy 就绪（轮询，最多 30 秒，代替盲等 sleep 30）
+AKA_HOME="${AKA_HOME:-$HOME/AKA-00}"
 i=0
 while [ $i -lt 60 ]; do
     iw dev 2>/dev/null | grep -q "phy#0" && break
@@ -109,8 +107,8 @@ if grep -q '^acm:.*init\.sh' /etc/inittab 2>/dev/null; then
     kill -HUP 1 2>/dev/null || true
 fi
 
-chmod +x /root/AKA-00/init.sh
-exec /root/AKA-00/init.sh
+chmod +x "$AKA_HOME/init.sh"
+exec "$AKA_HOME/init.sh"
 EOF
 
 chmod 755 /etc/init.d/S99webstart

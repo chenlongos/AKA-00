@@ -26,7 +26,7 @@ NETMASK="${NETMASK:-255.255.255.0}"
 DHCP_START="${DHCP_START:-192.168.4.100}"
 DHCP_END="${DHCP_END:-192.168.4.200}"
 CHANNEL="${CHANNEL:-6}"
-APP_DIR="${AKA_HOME:-/root/AKA-00}"
+AKA_HOME="${AKA_HOME:-$HOME/AKA-00}"
 
 MODE="${1:-all}"   # all | install | start
 
@@ -114,8 +114,8 @@ ip link set ${STA_IFACE} up 2>/dev/null
 
 # 后台启动 capp（init.sh 自带自愈循环 + 防重复实例）。用 & 而非 exec，避免 rcS
 # 卡在 sysinit 导致 getty / start_app.sh 不启动。
-chmod +x ${APP_DIR}/init.sh
-( AKA_HOME=${APP_DIR} ${APP_DIR}/init.sh ) &
+chmod +x ${AKA_HOME}/init.sh
+( AKA_HOME=${AKA_HOME} ${AKA_HOME}/init.sh ) &
 exit 0
 EOF
 chmod 755 /etc/init.d/S99webstart

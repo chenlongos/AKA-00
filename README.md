@@ -69,7 +69,7 @@ ssh root@<robot> 'aka-server --init'
 ```
 
 `--init` 会自动完成：
-- 解压项目文件到 `/root/AKA-00`
+- 解压项目文件到 `$AKA_HOME`（默认 `$HOME/AKA-00`）
 - 配置 AP 热点（SSID 基于 MAC 地址唯一生成）
 - 配置 DHCP + 写入 S98apstart / S99webstart 自启脚本
 - 立即启动热点
@@ -79,7 +79,7 @@ ssh root@<robot> 'aka-server --init'
 ```bash
 # 重新构建并拷贝，然后清除旧数据重启
 scp dist/aka-server root@<robot>:/usr/local/bin/
-ssh root@<robot> 'rm -rf /root/AKA-00 && aka-server'
+ssh root@<robot> 'rm -rf $HOME/AKA-00 && aka-server'
 ```
 
 ### 热点信息
@@ -148,8 +148,8 @@ AKA-00/
 |--------|--------|------|
 | `APP_HTTP_PORT` | 80 (Linux) / 5000 (Windows) | HTTP 服务端口 |
 | `APP_HTTPS_PORT` | 443 (Linux) / 5443 (Windows) | HTTPS 服务端口 |
-| `APP_CERT_PATH` | /root/AKA-00/cert.pem | HTTPS 证书路径 |
-| `APP_KEY_PATH` | /root/AKA-00/key.pem | HTTPS 密钥路径 |
+| `APP_CERT_PATH` | ~/AKA-00/cert.pem | HTTPS 证书路径 |
+| `APP_KEY_PATH` | ~/AKA-00/key.pem | HTTPS 密钥路径 |
 
 ## API 接口
 

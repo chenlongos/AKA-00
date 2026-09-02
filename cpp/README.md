@@ -86,10 +86,10 @@ make clean                # 清理全部构建产物
 ## 部署（SG2002）
 
 `make package` 打包出 `cpp/dist/AKA-00/`（部署目录）+ `cpp/dist/aka-capp.tar.gz`
-（顶层 `AKA-00/` 目录，解压落到 `/root/AKA-00/`）。目标布局：
+（顶层 `AKA-00/` 目录，解压落到 `$AKA_HOME/`）。目标布局：
 
 ```
-/root/AKA-00/
+$AKA_HOME/
 ├── aka-capp                  # riscv64 静态二进制（3.5MB，无任何依赖）
 ├── config.toml               # 配置（见下）
 ├── static/                   # 前端构建产物（frontend → npm run build 产出）
@@ -106,12 +106,12 @@ make clean                # 清理全部构建产物
 传到板子二选一：
 
 ```sh
-# 方式 A：tar.gz（推荐，保留权限位，解压直接落到 /root/AKA-00/）
-scp cpp/dist/aka-capp.tar.gz root@<板子IP>:/root/
-ssh root@<板子IP> "cd /root && tar -xzf aka-capp.tar.gz"
+# 方式 A：tar.gz（推荐，保留权限位，解压直接落到 $AKA_HOME/）
+scp cpp/dist/aka-capp.tar.gz root@<板子IP>:~
+ssh root@<板子IP> "cd ~ && tar -xzf aka-capp.tar.gz"
 
 # 方式 B：整目录（scp -r 不保留可执行位，但 init.sh 有兜底 chmod）
-scp -r cpp/dist/AKA-00 root@<板子IP>:/root/AKA-00
+scp -r cpp/dist/AKA-00 root@<板子IP>:~/AKA-00
 ```
 
 > 注意：OpenSSH 的 `scp -r` 默认**不保留可执行位**，传完可能出现
@@ -121,7 +121,7 @@ scp -r cpp/dist/AKA-00 root@<板子IP>:/root/AKA-00
 启动（`init.sh`，进程崩溃自动重启；OTA 进行中自动等待）：
 
 ```sh
-AKA_HOME=/root/AKA-00 /root/AKA-00/init.sh
+AKA_HOME=$HOME/AKA-00 $HOME/AKA-00/init.sh
 ```
 
 ### AP 热点 + 开机自启（`init_ap_web.sh`）
@@ -133,10 +133,10 @@ STA，由 capp 的 `/api/wifi/scan`、`/api/wifi/connect` 扫描并连接目标�
 
 ```sh
 # 装配置 + 开机脚本（S98apstart / S99webstart），不改动当前网络 → reboot 后生效
-/root/AKA-00/init_ap_web.sh install
+$HOME/AKA-00/init_ap_web.sh install
 
 # 或立即切换：wlan0 从 STA 切成 AP（会断开当前 WiFi 连接）
-/root/AKA-00/init_ap_web.sh            # = install + 立即启动
+$HOME/AKA-00/init_ap_web.sh            # = install + 立即启动
 ```
 
 > 适配点（与 Python 版的差异）：本板（SG2002 / HD05085A）无 `udhcpd`，改用
@@ -145,7 +145,7 @@ STA，由 capp 的 `/api/wifi/scan`、`/api/wifi/connect` 扫描并连接目标�
 > `init.sh &` 后台启动而非 `exec`，避免 rcS 卡在 sysinit 导致 getty 不启动。
 > 如需给热点加密码，取消 `/etc/hostapd.conf` 里 `wpa=2` 那 4 行的注释。
 
-停止：`/root/AKA-00/stop.sh`（SIGTERM 优雅退出并停电机）。
+停止：`$AKA_HOME/stop.sh`（SIGTERM 优雅退出并停电机）。
 
 环境变量：
 

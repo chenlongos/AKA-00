@@ -35,7 +35,7 @@ ssh root@<robot> 'aka-server'
 
 更新部署时清除旧数据后重新运行：
 ```bash
-ssh root@<robot> 'rm -rf /root/AKA-00 && aka-server'
+ssh root@<robot> 'rm -rf $HOME/AKA-00 && aka-server'
 ```
 
 ## 4. 修改代码常用命令
@@ -48,7 +48,7 @@ ssh root@<机器人IP>
 ./build_release.sh && scp dist/aka-server root@<robot>:/usr/local/bin/
 
 # 在控制板上重启服务
-ssh root@<robot> 'rm -rf /root/AKA-00 && aka-server'
+ssh root@<robot> 'rm -rf $HOME/AKA-00 && aka-server'
 ```
 
 ## 5. 使用
