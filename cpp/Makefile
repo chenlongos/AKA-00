@@ -40,7 +40,8 @@ tools: $(CSRC_LIB)
 $(JPEG):
 	$(ORB_RUN) "cd $(CPP)/scripts && ./build-libjpeg.sh"
 
-$(CSRC_LIB): $(JPEG)
+# FORCE 同 capp：csrc 源/头文件改动时保证重编（内部增量，秒级）
+$(CSRC_LIB): $(JPEG) FORCE
 	$(ORB_RUN) "cd $(CPP)/csrc && make -f Makefile.cross"
 
 # FORCE: bin/aka-capp 可能被本机 make（host 版）覆盖成非 RISC-V 二进制，

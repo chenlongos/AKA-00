@@ -11,10 +11,11 @@
 
 namespace csrc {
 
-/// 本机 IP，优先级：UDP 探测 → wlan1 → wlan0 → 127.0.0.1
+/// 本机 IP，优先级：wlan1（DHCP 优先）→ UDP 探测 → wlan0 → 127.0.0.1
 std::string detect_local_ip();
 
-/// 指定网卡 IPv4（`ip -4 -o addr show` 解析），失败返回空串
+/// 指定网卡 IPv4（`ip -4 -o addr show` 解析）。
+/// 多 IP 时优先级：dynamic（DHCP）> 最后一个（最新）> 第一个。
 std::string iface_ip(const std::string& ifname);
 
 /// MAC 地址（/sys/class/net/<iface>/address），失败 "unknown"
