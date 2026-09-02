@@ -40,22 +40,22 @@ cat > "$OUTPUT" <<'HEADER'
 # AKA-00 Server
 set -e
 
-APP_DIR="${AKA_HOME:-/root/AKA-00}"
+AKA_HOME="${AKA_HOME:-$HOME/AKA-00}"
 
 extract_payload() {
-    echo "Installing AKA-00 to $APP_DIR ..."
-    mkdir -p "$APP_DIR"
+    echo "Installing AKA-00 to $AKA_HOME ..."
+    mkdir -p "$AKA_HOME"
     sed -n '/^#__PAYLOAD_BELOW__$/,$p' "$0" | tail -n +2 | python3 -c "
 import base64, sys, tarfile, tempfile, os
 tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.tar.gz')
 try:
     tmp.write(base64.b64decode(sys.stdin.buffer.read()))
     tmp.close()
-    tarfile.open(tmp.name, mode='r:gz').extractall(path='$APP_DIR')
+    tarfile.open(tmp.name, mode='r:gz').extractall(path='$AKA_HOME')
 finally:
     os.unlink(tmp.name)
 "
-    chmod +x "$APP_DIR"/*.sh 2>/dev/null || true
+    chmod +x "$AKA_HOME"/*.sh 2>/dev/null || true
     echo "Install done."
 }
 
@@ -63,7 +63,7 @@ finally:
 if [ "$1" = "--init" ]; then
     echo "=== AKA-00 First-Time Setup ==="
     extract_payload
-    "$APP_DIR/init_ap_web.sh"
+    "$AKA_HOME/init_ap_web.sh"
     echo ""
     echo "Setup complete."
     echo "  Service will auto-start on next boot."
@@ -80,15 +80,15 @@ if [ "$1" = "--update" ]; then
         sleep 0.5
     fi
     rm -f /tmp/aka-ota-lock /tmp/aka-ota-install.sh /tmp/aka-ota-update
-    cd "$APP_DIR"
+    cd "$AKA_HOME"
     exec ./init.sh
 fi
 
 # ── Normal run ─────────────────────────────────────────────────────────
-if [ ! -f "$APP_DIR/run.py" ]; then
+if [ ! -f "$AKA_HOME/run.py" ]; then
     extract_payload
 fi
-cd "$APP_DIR"
+cd "$AKA_HOME"
 exec ./init.sh
 #__PAYLOAD_BELOW__
 HEADER

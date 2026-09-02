@@ -5,11 +5,11 @@
 # 自愈循环：capp 崩溃自动重启。OTA 进行中（/tmp/aka-ota-lock 存在）时等待。
 #
 # 用法:
-#   AKA_HOME=/root/AKA-00 ./init.sh
+#   AKA_HOME=$HOME/AKA-00 ./init.sh
 # =============================================================================
 
-APP_DIR="${AKA_HOME:-/root/AKA-00}"
-BIN="$APP_DIR/aka-capp"
+AKA_HOME="${AKA_HOME:-$HOME/AKA-00}"
+BIN="$AKA_HOME/aka-capp"
 LOCK_FILE="/tmp/aka-ota-lock"
 PID_FILE="/var/run/aka-capp.pid"
 
@@ -32,8 +32,8 @@ if [ ! -x "$BIN" ]; then
 fi
 
 # 摄像头分辨率环境（可选，config.toml 也控制）
-CAM_WIDTH=$(grep -E '^\s*width\s*=' "$APP_DIR/config.toml" 2>/dev/null | grep -oE '[0-9]+' | head -1)
-CAM_HEIGHT=$(grep -E '^\s*height\s*=' "$APP_DIR/config.toml" 2>/dev/null | grep -oE '[0-9]+' | head -1)
+CAM_WIDTH=$(grep -E '^\s*width\s*=' "$AKA_HOME/config.toml" 2>/dev/null | grep -oE '[0-9]+' | head -1)
+CAM_HEIGHT=$(grep -E '^\s*height\s*=' "$AKA_HOME/config.toml" 2>/dev/null | grep -oE '[0-9]+' | head -1)
 [ -n "$CAM_WIDTH" ] && export CAMERA_WIDTH="$CAM_WIDTH"
 [ -n "$CAM_HEIGHT" ] && export CAMERA_HEIGHT="$CAM_HEIGHT"
 
@@ -45,8 +45,8 @@ fi
 
 # 关键：export AKA_HOME，否则 capp 的 static/config 路径退化为 cwd 相对路径，
 # 从别的目录启动就找不到 static/ 和 config.toml。
-export AKA_HOME="$APP_DIR"
-echo "[init] AKA-00 capp starting (AKA_HOME=$APP_DIR)"
+export AKA_HOME
+echo "[init] AKA-00 capp starting (AKA_HOME=$AKA_HOME)"
 while true; do
     while [ -f "$LOCK_FILE" ]; do
         sleep 0.5

@@ -22,7 +22,7 @@ export default defineConfig({
     },
     build: {
         // 构建产物直接输出到根 static/ —— capp（aka-capp）服务的就是这个目录
-        // （板子上放 $AKA_HOME/static/，AKA_HOME=/root/AKA-00）
+        // （板子上放 $AKA_HOME/static/，AKA_HOME=$HOME/AKA-00）
         outDir: path.resolve(__dirname, '../static'),
         emptyOutDir: true,
         rolldownOptions: {
