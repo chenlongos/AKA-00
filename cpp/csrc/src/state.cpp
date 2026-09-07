@@ -63,9 +63,11 @@ void StateCollector::loop() {
         if (motor_pair_) {
             int lr = 0, rr = 0;
             motor_pair_->get_speeds(lr, rr);
-            // wheel_rpm = motor_rpm / gear_ratio; m/s = wheel_rpm * π * D / 60
-            double wheel_rpm_l = (double)lr / gear_ratio_;
-            double wheel_rpm_r = (double)rr / gear_ratio_;
+            // ESP32 固件返回的 rpm 已是轮速（编码器 4680 脉冲/轮圈、PWM_RPM_MAX=150，
+            // 见 esp32_base_control/base_control.ino）——不要再除以齿轮比！
+            // m/s = wheel_rpm × π × D / 60
+            double wheel_rpm_l = (double)lr;
+            double wheel_rpm_r = (double)rr;
             left_speed = wheel_rpm_l * 3.1415926535 * (wheel_diameter_mm_ / 1000.0) / 60.0;
             right_speed = wheel_rpm_r * 3.1415926535 * (wheel_diameter_mm_ / 1000.0) / 60.0;
         }

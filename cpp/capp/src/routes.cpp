@@ -366,6 +366,7 @@ void register_routes(Router& router, AppContext& ctx) {
         j["right_target"] = csrc::Json((int64_t)s.right_target);
         j["gripper_status"] = s.gripper_status;
         j["gripper_target"] = csrc::Json((int64_t)s.gripper_target);
+        j["motor"] = motor_status_json(ctx);
         resp.set_json(j);
     });
 
@@ -637,6 +638,7 @@ void register_routes(Router& router, AppContext& ctx) {
         j["gripper_status"] = s.gripper_status;
         j["gripper_target"] = csrc::Json((int64_t)s.gripper_target);
         j["timestamp_ms"] = csrc::Json((int64_t)s.timestamp_ms);
+        j["motor"] = motor_status_json(ctx);
 
         std::vector<uint8_t> jpeg;
         if (current_jpeg(ctx, 25, jpeg) && !jpeg.empty()) {

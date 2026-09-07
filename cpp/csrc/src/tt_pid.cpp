@@ -200,6 +200,33 @@ void TtPidChassis::get_encoder(int& c1, int& c2) {
     }
 }
 
+bool TtPidChassis::ping() {
+    if (!ok_) return false;
+    std::lock_guard<std::mutex> lk(io_mu_);
+    ser_.clear_input();
+    uint8_t chk = CMD_GET_STATUS ^ 0;
+    uint8_t frame[5] = {FRAME_H1, FRAME_H2, CMD_GET_STATUS, 0, chk};
+    if (!ser_.write(frame, sizeof frame)) return false;
+
+    uint8_t payload[5];
+    size_t plen = sizeof payload;
+    uint8_t rsp = 0;
+    if (!recv_frame(&rsp, payload, &plen, 0.15) || rsp != RSP_STATUS || plen < 1) {
+        CAM_DEBUG("[tt_pid] ping failed (rsp=0x%02X len=%zu)", rsp, plen);
+        return false;
+    }
+    // 关键：仅"有应答"不够——ESP32 重启后处于 UNINIT(0)/IDLE(1) 也会应答 GET_STATUS，
+    // 但固件对速度命令要求 sysState >= READY(2)。状态未就绪视为掉线，交给自动重连
+    // 重新走 INIT/CONFIG（否则命令被固件 NACK、车不动，只能靠手动 reinitialize）。
+    // 稳态只有 READY(2)/RUNNING(3)；SYS_ERROR(4)/AUTO_TUNE(5) 也按未就绪处理。
+    uint8_t st = payload[0];
+    if (st != 2 && st != 3) {
+        CAM_DEBUG("[tt_pid] ping: state=%u not ready", st);
+        return false;
+    }
+    return true;
+}
+
 void TtPidChassis::move_distance(uint8_t dir, uint8_t speed, int32_t target) {
     // struct.pack(">BBi", d, speed, target) — dir(1) speed(1) target(4B 大端)
     uint8_t payload[6] = {

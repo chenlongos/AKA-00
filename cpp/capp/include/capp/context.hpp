@@ -34,6 +34,8 @@ namespace capp {
 struct AppContext {
     csrc::Config config;
     std::unique_ptr<csrc::MotorPair> motor_pair;
+    /// 若 motor_pair 是自动重连代理（backend=tt_pid），指向它（暴露连接状态/触发重连）
+    csrc::AutoReconnectMotorPair* motor_link = nullptr;
     std::unique_ptr<csrc::Gripper> gripper;
     csrc::StateCollector& collector = csrc::StateCollector::get_instance();
     csrc::Camera& camera = csrc::Camera::get_instance();
@@ -100,8 +102,10 @@ csrc::Json send_raw_command(AppContext& ctx, const std::string& cmd);
 csrc::Json update_arm_angles(AppContext& ctx, const std::string& driver, const csrc::Json& angles);
 /// 预览机械臂角度（立即执行）
 csrc::Json preview_arm_angle(AppContext& ctx, const std::string& driver, const std::string& key, int angle);
-/// 重新初始化底盘
+/// 重新初始化底盘（强制断开并立即重连真实底盘）
 csrc::Json reinitialize_motor_pair(AppContext& ctx);
+/// 底盘连接状态对象（backend/enabled/connected/state/attempts/error）
+csrc::Json motor_status_json(AppContext& ctx);
 
 // ── 摄像头服务（对应 app/services/camera_service.py）──
 

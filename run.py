@@ -113,11 +113,14 @@ class ControlWebSocket(tornado.websocket.WebSocketHandler):
         self._last_left = 0
         self._last_right = 0
         self._status_ticks = 0
+        self._last_motor_sig = ""
         self._status_timer = tornado.ioloop.PeriodicCallback(
             self._push_status, 200
         )
         self._status_timer.start()
         self._send_json({"type": "ip", "ip": get_wifi_ip()})
+        # 底盘连接状态：建连即推一次（此后 _push_status 仅在状态变化时推）
+        self._push_motor_status(force=True)
 
     async def on_message(self, message):
         if not isinstance(message, bytes) or len(message) < 2:
@@ -191,10 +194,25 @@ class ControlWebSocket(tornado.websocket.WebSocketHandler):
         except tornado.websocket.WebSocketClosedError:
             pass
 
+    def _push_motor_status(self, force: bool = False):
+        """底盘连接状态推送（仅 connected/state 变化时发，前端无需轮询）。"""
+        try:
+            from app.services import get_control_service
+            motor = get_control_service().motor_link_status()
+        except Exception:
+            return
+        sig = f"{motor.get('state', '')}|{motor.get('connected', False)}"
+        if not force and sig == self._last_motor_sig:
+            return
+        self._last_motor_sig = sig
+        self._send_json({"type": "motor_status", "motor": motor})
+
     def _push_status(self):
         collector = get_state_collector()
         left = int(collector._status.left_speed * 1000)
         right = int(collector._status.right_speed * 1000)
+        # 底盘状态推送放在 0xBB 节流之前：即使速度静止也要 200ms 内感知状态变化
+        self._push_motor_status()
         self._status_ticks += 1
         if (left == self._last_left and right == self._last_right
                 and self._status_ticks < 10):

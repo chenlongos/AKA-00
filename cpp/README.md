@@ -65,8 +65,9 @@ static/ (index.html + assets/)  --打包-->  板上 $AKA_HOME/static/
 ```sh
 cd cpp
 
-make                      # 全流程: libjpeg → csrc → capp(riscv64) → package
+make                      # 全流程: libjpeg → mbedtls → csrc → capp(riscv64) → package
 make libjpeg              # 交叉编译 libjpeg（首次自动下载源码）
+make mbedtls              # 交叉编译 mbedTLS（首次自动下载源码，HTTPS 用）
 make csrc                 # 交叉编译 csrc
 make capp                 # 交叉编译 capp → bin/aka-capp（riscv64 静态）
 make package              # 组装 dist/AKA-00/ + aka-capp.tar.gz
@@ -181,6 +182,9 @@ baudrate = 115200
 
 [web]
 port = 80
+https_port = 5443          # 0 = 关闭 HTTPS
+https_cert = "cert.pem"    # 相对 $AKA_HOME 或绝对路径
+https_key  = "key.pem"
 
 [ota]
 check_url = "https://api.chenlongrobot.com/api/user/robot-versions/featured"
@@ -194,6 +198,49 @@ level = "info"
 ```
 
 找不到 config.toml 时 motor/arm 全部走 mock（不控制硬件），Web 仍可启动，方便调试。
+
+### 底盘自动重连（motor backend=tt_pid）
+
+底盘 UART 不再作为服务启动的硬依赖（否则 ESP32 上电晚几百 ms 就会导致服务
+起不来 / 静默降级 mock 后永远连不上）：
+
+- 服务启动**不阻塞、不抛异常**：构造 `create_motor_pair` 即返回
+  `AutoReconnectMotorPair` 代理，后台线程按退避策略（0.5s→1s→…→30s 封顶）
+  持续尝试 INIT/CONFIG 握手，连上即自动切换为真实驱动；期间命令落到 mock。
+- 已连接后每 ~1.5s 一次 `GET_STATUS` 心跳探活，连续 2 次失败判定掉线 →
+  自动换回 mock 并重连（ESP32 意外重启/掉线可自愈）。
+  心跳**不仅看"有应答"，还校验固件状态 ≥ READY**：ESP32 重启后处于
+  UNINIT(0) 也会应答 GET_STATUS，但固件对速度命令要求 READY，未就绪照样
+  判定掉线并自动重连（否则车不动，只能靠手动 reinitialize 才能恢复）。
+- `reinitialize`（WS `{"type":"reinitialize"}`）：**已连上时原地重发
+  INIT/CONFIG**（清 PID/编码器，不掉线不打断运行）；未连上或原地重发失败
+  才断开并完整重连一次（自愈）。
+- 状态**主动推送，前端无需轮询/刷新**：WS 建连即推一次
+  `{"type":"motor_status","motor":{...}}`，此后仅在 connected/state 变化时推。
+  `motor` 对象：`{backend, enabled, connected,
+  state: "connected"|"reconnecting"|"disabled", attempts, error}`。
+  控制页在底盘未连接时显示红色"自动重连中"徽标，连上自动消失。
+  REST `/api/motor/status`、`/api/camera/all_status` 也带同名字段。
+- **速度单位**：ESP32 固件返回的 rpm 已是轮速（编码器 4680 脉冲/轮圈、
+  `PWM_RPM_MAX=150`，见 esp32_base_control/base_control.ino），线速度
+  `m/s = rpm × π × 轮径(62mm) / 60`，**不要**再除齿轮比（旧版除 90 导致
+  前端速度恒显示 0.0）。
+- Python 版（`run.py` + Flask，对应 `src/base_control/auto_reconnect.py`）行为一致。
+
+### HTTPS（`web.https_port`）
+
+capp 同时支持 HTTP 和 HTTPS：默认 `:80` 与 `:5443` 共存（与原 Python `run.py` 行为一致，
+前端开 `https://<板子IP>:5443` 自动升级 `wss://`）。TLS 终止走 mbedTLS（嵌入式库，
+~300KB；首次 `make` 自动经 `cpp/scripts/build-mbedtls.sh` 交叉编译到
+`third_party/mbedtls/`，链接进 `bin/aka-capp`）。
+
+- 证书：capp **不**自己生成。`capp/scripts/init.sh` 启动前会调用打包里的
+  `https_init.sh`（仓库根脚本），缺一即用 `openssl req -x509 -newkey rsa:4096 ...`
+  生成自签 `cert.pem`/`key.pem` 到 `$AKA_HOME/`（10 年有效期）。
+- 自签证书客户端会告警；AP 模式下手机连热点后浏览器点"高级 → 继续访问"即可。
+  正式运营把 `cert.pem`/`key.pem` 换成 CA 签发的即可，无需改代码。
+- `https_port = 0` 即关闭 HTTPS（HTTP 仍可用）；cert/key 缺失时 TLS 监听静默
+  关闭，warn 一行不影响 HTTP 启动。
 
 ## API 契约（与前端 frontend/src/api.ts 完全对齐）
 
@@ -218,8 +265,9 @@ level = "info"
    尺寸（Python 版会 letterbox 到 320x240）。
 2. **HTTP / WebSocket / JSON**：全部自研（POSIX socket + 线程），无第三方依赖，
    riscv64 musl 静态编译最简单。
-3. **https**：板上无 TLS 库，`https://` 请求（OTA 检查、状态上报）走 `curl -sS` 兜底；
-   板上需安装 curl。纯 `http://` 走内置 socket 客户端（demo 模型下载、OTA 固件下载）。
+3. **https**：服务端走 mbedTLS（HTTPS 监听 + TLS 终止，跨编译进 riscv64 musl 静态二进制）；
+   客户端（`https://` 出栈请求：OTA 检查、状态上报）走 `curl -sS` 兜底，板上需装 curl。
+   纯 `http://` 走内置 socket 客户端（demo 模型下载、OTA 固件下载）。
 4. **摇杆换算**：WS joystick 用差速转向公式（左 = y+x，右 = y-x，±100 限幅），
    与前端 ControlSocket 契约一致。
 5. **OTA 重启脚本**：进程名默认 `aka-capp`（`AKA_SERVER_NAME` 可覆盖），固件仍是

@@ -4,6 +4,7 @@ import time
 
 from src.state import get_state_collector
 from app.services.camera_service import CameraService
+from app.services import get_control_service
 from app.config import config
 
 camera_bp = Blueprint("camera", __name__, url_prefix="/api/camera")
@@ -147,6 +148,7 @@ def all_status():
         "gripper_status": status.gripper_status,
         "gripper_target": status.gripper_target,
         "timestamp_ms": status.timestamp_ms,
+        "motor": get_control_service().motor_link_status(),
         "image": image_data,
         "image_format": "jpeg",
     })

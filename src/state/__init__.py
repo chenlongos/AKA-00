@@ -2,7 +2,8 @@ from dataclasses import dataclass
 import threading
 import time
 
-_WHEEL_CIRCUMFERENCE = 3.1415926535 * 0.065  # 轮子周长 (m)
+# 轮径 62mm（与 ESP32 固件 WHEEL_DIAMETER_MM=62 一致；固件返回 rpm 已是轮速，不再除齿轮比）
+_WHEEL_CIRCUMFERENCE = 3.1415926535 * 0.062  # 轮子周长 (m)
 
 
 @dataclass

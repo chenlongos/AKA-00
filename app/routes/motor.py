@@ -16,6 +16,7 @@ def motor_status():
         "right_target": status.right_target,
         "gripper_status": status.gripper_status,
         "gripper_target": status.gripper_target,
+        "motor": get_control_service().motor_link_status(),
     })
 
 

@@ -122,9 +122,10 @@ std::string read_version(AppContext& ctx) {
 bool init_services(AppContext& ctx) {
     ctx.config = csrc::Config::load();
 
-    // 底盘（先建：tt_pid 初始化含 0.5s 枚举等待）
+    // 底盘（先建：tt_pid 为自动重连代理，构造不阻塞、失败自动后台重试）
     ctx.motor_pair = csrc::create_motor_pair(ctx.config.motor.port, ctx.config.motor.backend,
                                              ctx.config.motor.baudrate, ctx.config.motor.ppr);
+    ctx.motor_link = dynamic_cast<csrc::AutoReconnectMotorPair*>(ctx.motor_pair.get());
     ctx.collector.set_motor_pair(ctx.motor_pair.get());
 
     // 夹爪
@@ -133,7 +134,6 @@ bool init_services(AppContext& ctx) {
 
     // 状态采集
     ctx.collector.set_wheel_diameter_mm(ctx.config.chassis.wheel_diameter_mm);
-    ctx.collector.set_gear_ratio(ctx.config.chassis.gear_ratio);
     ctx.collector.set_gripper_status_provider([&ctx] {
         return std::string(csrc::gripper_status_str(ctx.gripper->get_status()));
     });
@@ -276,10 +276,39 @@ csrc::Json preview_arm_angle(AppContext& ctx, const std::string& driver, const s
 }
 
 csrc::Json reinitialize_motor_pair(AppContext& ctx) {
-    bool ok = ctx.motor_pair->reinitialize();
+    bool ok = false;
+    if (ctx.motor_link) {
+        ok = ctx.motor_link->reinitialize();  // 断开 + 立即完整重连（含 INIT/CONFIG）
+    } else {
+        ok = ctx.motor_pair->reinitialize();
+    }
     csrc::Json j;
     j["status"] = "success";
     j["reinitialize"] = ok;
+    j["motor"] = motor_status_json(ctx);
+    return j;
+}
+
+csrc::Json motor_status_json(AppContext& ctx) {
+    csrc::Json j;
+    j["backend"] = ctx.config.motor.backend;
+    bool enabled = ctx.config.motor.backend != "dev";
+    j["enabled"] = enabled;
+    bool connected = false;
+    std::string state = "disabled";
+    int attempts = 0;
+    std::string error;
+    if (ctx.motor_link) {
+        csrc::MotorLinkStatus st = ctx.motor_link->link_status();
+        connected = st.connected;
+        state = st.state;
+        attempts = st.attempts;
+        error = st.error;
+    }
+    j["connected"] = connected;
+    j["state"] = state;
+    j["attempts"] = csrc::Json((int64_t)attempts);
+    j["error"] = error;
     return j;
 }
 

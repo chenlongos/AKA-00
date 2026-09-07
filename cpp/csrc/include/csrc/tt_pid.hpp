@@ -54,6 +54,9 @@ public:
     void get_speeds(int& left_rpm, int& right_rpm);  // 实时 RPM
     void get_encoder(int& c1, int& c2);            // 编码器累计脉冲 (M1, M2)
 
+    /// 探活：GET_STATUS 一次往返成功即认为链路可用（自动重连线程用）
+    bool ping();
+
     /// 闭环距离/转向（ESP32 固件内部换算，直接发 mm / 0.1°）
     void move_distance(uint8_t dir, uint8_t speed, int32_t target);
 

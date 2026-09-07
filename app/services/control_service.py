@@ -117,12 +117,35 @@ class ControlService:
         return {"status": "success", "driver": driver, "key": key, "angle": angle}
 
     def reinitialize_motor_pair(self) -> dict[str, object]:
-        """重新初始化电机底盘（用于 tt_pid 等需要重置 ESP32 状态的场景）。"""
+        """重新初始化电机底盘。
+
+        自动重连代理下语义为：断开当前链路并立即完整重连（含 INIT/CONFIG 握手），
+        能自愈"启动时连不上/中途掉线"状态；返回结果并附带底盘连接状态。
+        """
         reinit = getattr(self._motor_pair, "reinitialize", None)
-        if reinit is not None:
-            result = reinit()
-            return {"status": "success", "reinitialize": result}
-        return {"status": "success", "reinitialize": "not_supported"}
+        result = bool(reinit()) if reinit is not None else False
+        return {
+            "status": "success",
+            "reinitialize": result,
+            "motor": self.motor_link_status(),
+        }
+
+    def motor_link_status(self) -> dict[str, object]:
+        """底盘连接状态（backend/enabled/connected/state/attempts/error）。"""
+        st = getattr(self._motor_pair, "status", None)
+        if callable(st):
+            return st()
+        # 兜底：旧实现直接持有 TtPidChassis / MockMotorPair（无 status()）
+        backend = self._config.base_driver
+        enabled = backend == "tt_pid"
+        return {
+            "backend": backend,
+            "enabled": enabled,
+            "connected": enabled,  # 旧 TtPidChassis 构造成功即已连接
+            "state": "connected" if enabled else "disabled",
+            "attempts": 0,
+            "error": "",
+        }
 
     def _cancel_pending_stop(self) -> None:
         with self._duration_timer_lock:

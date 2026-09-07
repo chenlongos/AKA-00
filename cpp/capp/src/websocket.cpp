@@ -218,6 +218,22 @@ void ws_control_loop(AppContext& ctx, ClientConn& conn) {
     welcome["ip"] = csrc::detect_local_ip();
     ws_send_json(conn, welcome);
 
+    // 底盘连接状态推送：建连即发一次，此后仅在 connected/state 变化时推送，
+    // 前端无需轮询/刷新即可感知"底盘已连接 / 未连接自动重连中"。
+    std::string last_motor_sig;
+    auto send_motor_status = [&](bool force) {
+        csrc::Json st = motor_status_json(ctx);
+        std::string sig = st.gets("state") + "|" +
+                          std::to_string((long long)st.geti("connected"));
+        if (!force && sig == last_motor_sig) return;
+        last_motor_sig = sig;
+        csrc::Json msg;
+        msg["type"] = "motor_status";
+        msg["motor"] = st;
+        ws_send_json(conn, msg);
+    };
+    send_motor_status(true);
+
     auto last_status = std::chrono::steady_clock::now();
     bool running = true;
 
@@ -275,6 +291,7 @@ void ws_control_loop(AppContext& ctx, ClientConn& conn) {
                 break;
             }
             last_status = now;
+            send_motor_status(false);  // 底盘连接状态变化才推（不刷屏）
         }
     }
 

@@ -4,6 +4,7 @@ import os
 import sys
 from typing import Protocol, runtime_checkable
 
+from src.base_control.auto_reconnect import AutoReconnectMotorPair
 from src.base_control.tt_pid import TtPidChassis
 
 
@@ -73,12 +74,16 @@ class MockMotorPair:
 def create_motor_pair(
     port: str = "/dev/ttyS1",
     backend: str = "tt_pid",
-) -> MockMotorPair | TtPidChassis:
-    """创建双轮底盘。backend: tt_pid（ESP32 编码器） 或 mock（开发用）。"""
+) -> MockMotorPair | TtPidChassis | AutoReconnectMotorPair:
+    """创建双轮底盘。backend: tt_pid（ESP32 编码器） 或 mock（开发用）。
+
+    tt_pid 返回自动重连代理：构造永不抛异常（服务必然能起），后台线程按退避
+    策略持续尝试连真底盘，连上即自动切换为真实驱动；期间命令落到 Mock。
+    """
     if os.name == "nt" or sys.platform == "darwin":
         return MockMotorPair()
 
     if backend == "tt_pid":
-        return TtPidChassis(port=port)
+        return AutoReconnectMotorPair(port=port)
 
     return MockMotorPair()

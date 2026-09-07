@@ -128,6 +128,25 @@ class TtPidChassis:
         rsp = self._send_cmd(CMD_INIT)
         return rsp is not None and rsp["cmd"] == RSP_ACK
 
+    def ping(self) -> bool:
+        """探活：GET_STATUS 一次往返，且固件状态 >= READY(2) 才算健康。
+
+        仅"有应答"不够——ESP32 重启后处于 UNINIT(0)/IDLE(1) 也会应答 GET_STATUS，
+        但固件对速度命令要求 READY(2)（见 esp32_base_control/base_control.ino）。
+        状态未就绪视为掉线，由自动重连重新 INIT/CONFIG，否则命令被固件 NACK。
+        """
+        try:
+            rsp = self._send_cmd(CMD_GET_STATUS)
+            if rsp is None or rsp["cmd"] != RSP_STATUS:
+                return False
+            payload = rsp.get("payload", b"")
+            if len(payload) < 1:
+                return False
+            # READY=2 / RUNNING=3 才健康
+            return payload[0] in (2, 3)
+        except serial.SerialException:
+            return False
+
     def reinitialize(self) -> bool:
         """重新初始化 ESP32，将 PWM 清零并重置 PID 状态。"""
         return self._send_cmd(CMD_INIT) is not None and self._send_cmd(CMD_CONFIG, struct.pack(">HH", self._ppr, self._pwm_freq)) is not None

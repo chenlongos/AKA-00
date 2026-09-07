@@ -1,9 +1,10 @@
 // csrc/state.hpp — 机器人状态采集（对应 src/state/__init__.py 的 StateCollector）
 //
 // 单例 + 独立线程，10Hz 轮询电机 RPM 并换算线速度 m/s。
-// 换算公式（wheel_diameter_mm / gear_ratio 来自 config.toml [chassis]）：
-//   wheel_rpm = motor_rpm / gear_ratio
-//   m/s       = wheel_rpm × π × (wheel_diameter_mm / 1000) / 60
+// 换算公式（wheel_diameter_mm 来自 config.toml [chassis]）：
+//   m/s = wheel_rpm × π × (wheel_diameter_mm / 1000) / 60
+// 注意：ESP32 固件返回的 rpm 已是轮速（编码器 4680 脉冲/轮圈、PWM_RPM_MAX=150，
+// 见 esp32_base_control/base_control.ino），不可再除以齿轮比。
 
 #pragma once
 
@@ -46,7 +47,6 @@ public:
     void stop();
 
     void set_wheel_diameter_mm(double mm) { wheel_diameter_mm_ = mm; }
-    void set_gear_ratio(int ratio) { gear_ratio_ = ratio; }
 
 private:
     StateCollector() = default;
@@ -61,7 +61,6 @@ private:
     std::function<std::string()> gripper_status_fn_;
 
     double wheel_diameter_mm_ = 62.0;
-    int gear_ratio_ = 90;
 };
 
 }  // namespace csrc
