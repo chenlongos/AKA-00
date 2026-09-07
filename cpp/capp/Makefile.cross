@@ -15,11 +15,12 @@
 CXX      := /home/junbo_dai/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-g++
 CSRC     := ../csrc
 JPEG_DIR ?= ../third_party/jpeg
+MBEDTLS_DIR ?= ../third_party/mbedtls
 TARGET   := bin/aka-capp
 
 CXXFLAGS := -std=c++17 -O3 -Wall -Wextra -mcpu=c906fdv -MMD -MP -mabi=lp64d \
-            -Iinclude -I$(CSRC)/include -I$(JPEG_DIR)/include
-LDFLAGS  := -static -L$(JPEG_DIR)/lib
+            -Iinclude -I$(CSRC)/include -I$(JPEG_DIR)/include -I$(MBEDTLS_DIR)/include
+LDFLAGS  := -static -L$(JPEG_DIR)/lib -L$(MBEDTLS_DIR)/lib
 
 SRCS := $(wildcard src/*.cpp)
 OBJS := $(SRCS:src/%.cpp=build-cross/%.o)
@@ -42,7 +43,7 @@ $(CSRC)/build-cross/libcsrc.a:
 
 $(TARGET): $(OBJS) $(CSRC)/build-cross/libcsrc.a | bin
 	$(CXX) $(CXXFLAGS) -o $@ $(OBJS) $(CSRC)/build-cross/libcsrc.a \
-	    $(LDFLAGS) -ljpeg -lpthread
+	    $(LDFLAGS) -ljpeg -lmbedtls -lmbedx509 -lmbedcrypto -lpthread
 	@echo "  ✓ aka-capp (riscv64 static) built"
 
 clean:

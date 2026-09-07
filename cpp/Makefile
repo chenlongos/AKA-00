@@ -25,13 +25,15 @@ endif
 CPP      := $(CURDIR)
 ROOT     := $(CPP)/..
 JPEG     := $(CPP)/third_party/jpeg/lib/libjpeg.a
+MBEDTLS  := $(CPP)/third_party/mbedtls/lib/libmbedtls.a
 CSRC_LIB := $(CPP)/csrc/build-cross/libcsrc.a
 CAPP_BIN := $(CPP)/capp/bin/aka-capp
 
-.PHONY: all libjpeg csrc capp tools package clean FORCE
+.PHONY: all libjpeg mbedtls csrc capp tools package clean FORCE
 all: package
 
 libjpeg: $(JPEG)
+mbedtls: $(MBEDTLS)
 csrc: $(CSRC_LIB)
 capp: $(CAPP_BIN)
 tools: $(CSRC_LIB)
@@ -40,6 +42,9 @@ tools: $(CSRC_LIB)
 $(JPEG):
 	$(ORB_RUN) "cd $(CPP)/scripts && ./build-libjpeg.sh"
 
+$(MBEDTLS):
+	$(ORB_RUN) "cd $(CPP)/scripts && ./build-mbedtls.sh"
+
 # FORCE 同 capp：csrc 源/头文件改动时保证重编（内部增量，秒级）
 $(CSRC_LIB): $(JPEG) FORCE
 	$(ORB_RUN) "cd $(CPP)/csrc && make -f Makefile.cross"
@@ -47,7 +52,7 @@ $(CSRC_LIB): $(JPEG) FORCE
 # FORCE: bin/aka-capp 可能被本机 make（host 版）覆盖成非 RISC-V 二进制，
 # make 只看 mtime 会误判为最新。每次都跑交叉编译（内部增量，秒级），
 # 确保部署产物永远是 riscv64 静态版。
-$(CAPP_BIN): $(CSRC_LIB) FORCE
+$(CAPP_BIN): $(CSRC_LIB) $(MBEDTLS) FORCE
 	$(ORB_RUN) "cd $(CPP)/capp && make -f Makefile.cross"
 
 # ── 打包：组装 dist/AKA-00/ + aka-capp.tar.gz ──
@@ -68,7 +73,7 @@ package: $(CAPP_BIN) tools
 	        '[camera]' 'width = 320' 'height = 240' 'fps = 24' 'jpeg_quality = 30' \
 	        '' '[motor]' 'backend = "tt_pid"' 'port = "/dev/ttyS1"' 'baudrate = 115200' 'ppr = 4680' \
 	        '' '[arm]' 'backend = "zp10s"' 'port = "/dev/ttyS2"' 'baudrate = 115200' \
-	        '' '[web]' 'port = 80' \
+	        '' '[web]' 'port = 80' 'https_port = 5443' 'https_cert = "cert.pem"' 'https_key = "key.pem"' \
 	        '' '[ota]' 'check_url = "https://api.chenlongrobot.com/api/user/robot-versions/featured"' \
 	        '' '[chassis]' 'wheel_diameter_mm = 62' 'gear_ratio = 90' \
 	        '' '[logging]' 'level = "info"' \
@@ -86,6 +91,10 @@ package: $(CAPP_BIN) tools
 	cp "$(CPP)/capp/scripts/init.sh" "$$DIST/init.sh"; \
 	cp "$(CPP)/capp/scripts/stop.sh" "$$DIST/stop.sh"; \
 	cp "$(CPP)/capp/scripts/init_ap_web.sh" "$$DIST/init_ap_web.sh"; \
+	if [ -f "$(ROOT)/https_init.sh" ]; then \
+	    cp "$(ROOT)/https_init.sh" "$$DIST/https_init.sh"; \
+	    chmod 755 "$$DIST/https_init.sh"; \
+	fi; \
 	chmod 755 "$$DIST/init.sh" "$$DIST/stop.sh" "$$DIST/init_ap_web.sh"; \
 	if [ -f "$(CPP)/csrc/build-cross/tt_pid_test" ]; then \
 	    mkdir -p "$$DIST/tools"; \

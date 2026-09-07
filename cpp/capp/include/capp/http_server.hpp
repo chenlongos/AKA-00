@@ -18,6 +18,8 @@
 #include <string>
 #include <vector>
 
+#include <mbedtls/ssl.h>
+
 #include "csrc/json.hpp"
 
 namespace capp {
@@ -26,6 +28,7 @@ struct AppContext;  // 定义见 context.hpp
 
 struct ClientConn {
     int fd = -1;
+    mbedtls_ssl_context* ssl = nullptr;  // 非空 = TLS 连接（HttpServer::listen_tls 触发）
 
     bool write_all(const void* data, size_t len);
     bool write_all(const std::string& s) { return write_all(s.data(), s.size()); }
@@ -101,18 +104,31 @@ public:
     explicit HttpServer(AppContext& ctx) : ctx_(ctx) {}
 
     bool listen(int port);
-    void run();   // 阻塞 accept 循环
+    /// 启动 TLS 监听（cert/key 已加载）。失败返回 false（HTTP 不受影响）。
+    bool listen_tls(int port, const std::string& cert_path, const std::string& key_path);
+    void run();   // 阻塞 accept 循环（同时轮询 HTTP + TLS listen socket）
 
     Router& router() { return router_; }
 
+    bool tls_active() const { return tls_ready_; }
+
 private:
-    void handle_connection(int fd);
-    bool read_request(int fd, HttpRequest& req);
-    void send_response(int fd, const HttpResponse& resp, const HttpRequest& req);
+    void handle_connection(int fd, bool is_tls);
+    bool read_request(ClientConn& conn, HttpRequest& req);
+    void send_response(ClientConn& conn, const HttpResponse& resp, const HttpRequest& req);
 
     AppContext& ctx_;
     Router router_;
     int listen_fd_ = -1;
+
+    // TLS state（仅在 listen_tls 成功时被填充）
+    int tls_listen_fd_ = -1;
+    void* tls_ssl_cfg_ = nullptr;    // mbedtls_ssl_config*
+    void* tls_cert_ = nullptr;       // mbedtls_x509_crt*
+    void* tls_key_ = nullptr;        // mbedtls_pk_context*
+    void* tls_entropy_ = nullptr;    // mbedtls_entropy_context*（ctr_drbg seed 用）
+    void* tls_drbg_ = nullptr;       // mbedtls_ctr_drbg_context*（ssl_conf_rng 持有）
+    bool tls_ready_ = false;
 };
 
 /// 工具函数（共享给路由实现）

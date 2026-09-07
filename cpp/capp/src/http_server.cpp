@@ -3,6 +3,7 @@
 #include "capp/http_server.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cctype>
 #include <cerrno>
 #include <cstring>
@@ -19,22 +20,113 @@
 #include "capp/context.hpp"
 #include "csrc/log.hpp"
 
+// mbedTLS —— TLS 终止（HttpServer::listen_tls）。轻量、可静态链接到 riscv64 musl。
+// 编译时通过 cpp/scripts/build-mbedtls.sh 生成 third_party/mbedtls/。
+#include <mbedtls/ctr_drbg.h>
+#include <mbedtls/entropy.h>
+#include <mbedtls/error.h>
+#include <mbedtls/net_sockets.h>
+#include <mbedtls/pk.h>
+#include <mbedtls/ssl.h>
+#include <mbedtls/x509_crt.h>
+
 namespace capp {
+
+// ═══════════════════════ TLS helpers ═══════════════════════
+//
+// 自定义 BIO 把 mbedtls_ssl_* 的 I/O 重定向到 ClientConn 的 fd，并把 EAGAIN
+// 翻译成 MBEDTLS_ERR_SSL_WANT_READ/WANT_WRITE，让上层 write_all / read_some
+// 里的 poll 循环处理背压。SIGPIPE 已在 main.cpp 用 SIG_IGN 屏蔽，可直接 send()。
+
+static int tsl_bio_send(void* ctx, const unsigned char* buf, size_t len) {
+    int fd = *(int*)ctx;
+    ssize_t n = ::send(fd, buf, len, 0);
+    if (n > 0) return (int)n;
+    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return MBEDTLS_ERR_SSL_WANT_WRITE;
+    return MBEDTLS_ERR_NET_SEND_FAILED;
+}
+
+static int tsl_bio_recv(void* ctx, unsigned char* buf, size_t len) {
+    int fd = *(int*)ctx;
+    ssize_t n = ::recv(fd, buf, len, 0);
+    if (n > 0) return (int)n;
+    if (n == 0) return MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) return MBEDTLS_ERR_SSL_WANT_READ;
+    return MBEDTLS_ERR_NET_RECV_FAILED;
+}
+
+// 把 mbedTLS 错误码转成可读字符串（调试用）
+static std::string tls_strerror(int code) {
+    char buf[256];
+    mbedtls_strerror(code, buf, sizeof buf);
+    return std::string(buf);
+}
 
 // ═══════════════════════ ClientConn ═══════════════════════
 
+// WANT_READ/WANT_WRITE 时的轮询辅助：成功返回 true，超时或硬错误返回 false。
+static bool poll_for(int fd, short events, int timeout_ms) {
+    struct pollfd pfd = {fd, events, 0};
+    int rc = ::poll(&pfd, 1, timeout_ms);
+    return rc > 0;
+}
+
 bool ClientConn::write_all(const void* data, size_t len) {
+    if (ssl) {
+        // TLS：mbedtls_ssl_write 把明文缓冲成 TLS record 后调用 BIO 写出。
+        // 短写/WANT_* 都必须重试，否则长连接（MJPEG）会在这里断。
+        const unsigned char* p = (const unsigned char*)data;
+        size_t sent = 0;
+        while (sent < len) {
+            int n = mbedtls_ssl_write(ssl, p + sent, len - sent);
+            if (n > 0) { sent += (size_t)n; continue; }
+            if (n == MBEDTLS_ERR_SSL_WANT_WRITE) {
+                if (!poll_for(fd, POLLOUT, 30000)) return false;
+                continue;
+            }
+            if (n == MBEDTLS_ERR_SSL_WANT_READ) {
+                // 罕见：handshake 期。读侧也准备好就继续写。
+                if (!poll_for(fd, POLLIN, 30000)) return false;
+                continue;
+            }
+            CAM_WARN("[tls] ssl_write failed: %s", tls_strerror(n).c_str());
+            return false;
+        }
+        return true;
+    }
     const char* p = (const char*)data;
     size_t sent = 0;
     while (sent < len) {
         ssize_t n = ::send(fd, p + sent, len - sent, MSG_NOSIGNAL);
-        if (n <= 0) return false;
+        if (n <= 0) {
+            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                if (!poll_for(fd, POLLOUT, 30000)) return false;
+                continue;
+            }
+            return false;
+        }
         sent += (size_t)n;
     }
     return true;
 }
 
 int ClientConn::read_some(void* buf, size_t len, int timeout_ms, size_t& got) {
+    if (ssl) {
+        // 先 poll 拿 POLLIN，避免在 mbedtls_ssl_read 上干等。剩余预算内循环 WANT_READ。
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+        for (;;) {
+            auto now = std::chrono::steady_clock::now();
+            if (now >= deadline) { got = 0; return 0; }
+            int remaining = (int)std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
+            if (!poll_for(fd, POLLIN, remaining)) { got = 0; return 0; }
+            int n = mbedtls_ssl_read(ssl, (unsigned char*)buf, len);
+            if (n > 0) { got = (size_t)n; return 1; }
+            if (n == 0) { got = 0; return -1; }  // close_notify
+            if (n == MBEDTLS_ERR_SSL_WANT_READ || n == MBEDTLS_ERR_SSL_WANT_WRITE) continue;
+            // 其他错误（含 peer close / 解密失败 / 超长 record）→ 关闭
+            got = 0; return -1;
+        }
+    }
     struct pollfd pfd = {fd, POLLIN, 0};
     int rc = ::poll(&pfd, 1, timeout_ms);
     if (rc < 0) { got = 0; return -1; }
@@ -46,6 +138,13 @@ int ClientConn::read_some(void* buf, size_t len, int timeout_ms, size_t& got) {
 }
 
 void ClientConn::close() {
+    if (ssl) {
+        // 优雅关闭：发 close_notify alert（忽略错误，对端可能已断）
+        mbedtls_ssl_close_notify(ssl);
+        mbedtls_ssl_free(ssl);
+        delete ssl;
+        ssl = nullptr;
+    }
     if (fd >= 0) {
         ::close(fd);
         fd = -1;
@@ -252,6 +351,8 @@ bool Router::serve_static(const HttpRequest& req, HttpResponse& resp) {
         resp.status = 200;
         resp.body = std::move(content);
         resp.headers["Content-Type"] = http_util::mime_type(file);
+        // assets 已带内容哈希（index-<hash>.js），可永久缓存；index.html 等 no-cache，
+        // 每次发版换哈希文件名 → 浏览器自动取新包，不再出现"改了看不到"。
         resp.headers["Cache-Control"] = rel.rfind("/assets/", 0) == 0 ? "public, max-age=86400" : "no-cache";
         resp.headers["Access-Control-Allow-Origin"] = "*";
         return true;
@@ -303,43 +404,198 @@ bool HttpServer::listen(int port) {
     return true;
 }
 
+bool HttpServer::listen_tls(int port, const std::string& cert_path, const std::string& key_path) {
+    if (port <= 0) return false;
+
+    // 一次性加载 cert / key / entropy+ctr_drbg（init 后只读，多线程共享安全）
+    auto* cfg = new mbedtls_ssl_config;
+    auto* cert = new mbedtls_x509_crt;
+    auto* key = new mbedtls_pk_context;
+    auto* entropy = new mbedtls_entropy_context;
+    auto* drbg = new mbedtls_ctr_drbg_context;
+    mbedtls_ssl_config_init(cfg);
+    mbedtls_x509_crt_init(cert);
+    mbedtls_pk_init(key);
+    mbedtls_entropy_init(entropy);
+    mbedtls_ctr_drbg_init(drbg);
+
+    // CTR-DRBG 比直接用 entropy_func 更可靠（避免某些平台的 NV seed 失败）。
+    // 用 mbedtls_entropy_func 给 drbg 做 seed。
+    int rc = mbedtls_ctr_drbg_seed(drbg, mbedtls_entropy_func, entropy, nullptr, 0);
+    if (rc != 0) {
+        CAM_ERROR("[tls] ctr_drbg_seed: %s", tls_strerror(rc).c_str());
+        mbedtls_ctr_drbg_free(drbg); delete drbg;
+        mbedtls_entropy_free(entropy); delete entropy;
+        mbedtls_x509_crt_free(cert); delete cert;
+        mbedtls_pk_free(key); delete key;
+        mbedtls_ssl_config_free(cfg); delete cfg;
+        return false;
+    }
+
+    rc = mbedtls_x509_crt_parse_file(cert, cert_path.c_str());
+    if (rc != 0) {
+        CAM_ERROR("[tls] parse cert %s failed: %s", cert_path.c_str(), tls_strerror(rc).c_str());
+        mbedtls_ctr_drbg_free(drbg); delete drbg;
+        mbedtls_entropy_free(entropy); delete entropy;
+        mbedtls_x509_crt_free(cert); delete cert;
+        mbedtls_pk_free(key); delete key;
+        mbedtls_ssl_config_free(cfg); delete cfg;
+        return false;
+    }
+    // key 未加密（openssl -nodes 生成），ctr_drbg_random 满足 f_rng 签名
+    rc = mbedtls_pk_parse_keyfile(key, key_path.c_str(), nullptr,
+                                  mbedtls_ctr_drbg_random, drbg);
+    if (rc != 0) {
+        CAM_ERROR("[tls] parse key %s failed: %s", key_path.c_str(), tls_strerror(rc).c_str());
+        mbedtls_ctr_drbg_free(drbg); delete drbg;
+        mbedtls_entropy_free(entropy); delete entropy;
+        mbedtls_x509_crt_free(cert); delete cert;
+        mbedtls_pk_free(key); delete key;
+        mbedtls_ssl_config_free(cfg); delete cfg;
+        return false;
+    }
+    rc = mbedtls_ssl_config_defaults(cfg, MBEDTLS_SSL_IS_SERVER, MBEDTLS_SSL_TRANSPORT_STREAM,
+                                     MBEDTLS_SSL_PRESET_DEFAULT);
+    if (rc != 0) {
+        CAM_ERROR("[tls] ssl_config_defaults: %s", tls_strerror(rc).c_str());
+        mbedtls_ctr_drbg_free(drbg); delete drbg;
+        mbedtls_entropy_free(entropy); delete entropy;
+        mbedtls_x509_crt_free(cert); delete cert;
+        mbedtls_pk_free(key); delete key;
+        mbedtls_ssl_config_free(cfg); delete cfg;
+        return false;
+    }
+    mbedtls_ssl_conf_authmode(cfg, MBEDTLS_SSL_VERIFY_NONE);  // 自签证书，客户端跳过校验
+    mbedtls_ssl_conf_rng(cfg, mbedtls_ctr_drbg_random, drbg);
+    rc = mbedtls_ssl_conf_own_cert(cfg, cert, key);
+    if (rc != 0) {
+        CAM_ERROR("[tls] conf_own_cert: %s", tls_strerror(rc).c_str());
+        mbedtls_ctr_drbg_free(drbg); delete drbg;
+        mbedtls_entropy_free(entropy); delete entropy;
+        mbedtls_x509_crt_free(cert); delete cert;
+        mbedtls_pk_free(key); delete key;
+        mbedtls_ssl_config_free(cfg); delete cfg;
+        return false;
+    }
+
+    // bind + listen（与 listen() 同模式）
+    tls_listen_fd_ = socket(AF_INET, SOCK_STREAM, 0);
+    if (tls_listen_fd_ < 0) {
+        CAM_ERROR("[tls] socket: %s", std::strerror(errno));
+        mbedtls_ctr_drbg_free(drbg); delete drbg;
+        mbedtls_entropy_free(entropy); delete entropy;
+        mbedtls_x509_crt_free(cert); delete cert;
+        mbedtls_pk_free(key); delete key;
+        mbedtls_ssl_config_free(cfg); delete cfg;
+        return false;
+    }
+    int yes = 1;
+    setsockopt(tls_listen_fd_, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof yes);
+    sockaddr_in addr;
+    std::memset(&addr, 0, sizeof addr);
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_port = htons((uint16_t)port);
+    if (::bind(tls_listen_fd_, (sockaddr*)&addr, sizeof addr) < 0) {
+        CAM_ERROR("[tls] bind :%d failed: %s", port, std::strerror(errno));
+        ::close(tls_listen_fd_); tls_listen_fd_ = -1;
+        mbedtls_ctr_drbg_free(drbg); delete drbg;
+        mbedtls_entropy_free(entropy); delete entropy;
+        mbedtls_x509_crt_free(cert); delete cert;
+        mbedtls_pk_free(key); delete key;
+        mbedtls_ssl_config_free(cfg); delete cfg;
+        return false;
+    }
+    if (::listen(tls_listen_fd_, 16) < 0) {
+        CAM_ERROR("[tls] listen: %s", std::strerror(errno));
+        ::close(tls_listen_fd_); tls_listen_fd_ = -1;
+        mbedtls_ctr_drbg_free(drbg); delete drbg;
+        mbedtls_entropy_free(entropy); delete entropy;
+        mbedtls_x509_crt_free(cert); delete cert;
+        mbedtls_pk_free(key); delete key;
+        mbedtls_ssl_config_free(cfg); delete cfg;
+        return false;
+    }
+
+    // 全部成功 → 把所有权交给 HttpServer 成员
+    tls_ssl_cfg_ = cfg;
+    tls_cert_    = cert;
+    tls_key_     = key;
+    tls_entropy_ = entropy;
+    tls_drbg_    = drbg;
+    tls_ready_   = true;
+
+    CAM_INFO("[tls] listening on 0.0.0.0:%d (cert=%s, key=%s)",
+             port, cert_path.c_str(), key_path.c_str());
+    return true;
+}
+
 void HttpServer::run() {
-    if (listen_fd_ < 0) return;
-    // 非阻塞 + poll 轮询：signal() 默认 SA_RESTART 会让 accept 永不返回，
-    // 必须周期性检查 ctx_.shutdown 才能优雅退出（OTA 重启依赖 SIGTERM）
-    int flags = fcntl(listen_fd_, F_GETFL, 0);
-    fcntl(listen_fd_, F_SETFL, flags | O_NONBLOCK);
+    if (listen_fd_ < 0 && !tls_ready_) return;
+    // 两个 listen socket 都设非阻塞，poll 一起等（signal 默认 SA_RESTART
+    // 会让 accept 永不返回，必须周期性检查 ctx_.shutdown）
+    if (listen_fd_ >= 0) {
+        int flags = fcntl(listen_fd_, F_GETFL, 0);
+        fcntl(listen_fd_, F_SETFL, flags | O_NONBLOCK);
+    }
+    if (tls_listen_fd_ >= 0) {
+        int flags = fcntl(tls_listen_fd_, F_GETFL, 0);
+        fcntl(tls_listen_fd_, F_SETFL, flags | O_NONBLOCK);
+    }
+
+    struct pollfd pfds[2];
+    int n_fds = 0;
+    if (listen_fd_ >= 0) pfds[n_fds++] = {listen_fd_, POLLIN, 0};
+    if (tls_listen_fd_ >= 0) pfds[n_fds++] = {tls_listen_fd_, POLLIN, 0};
 
     while (!ctx_.shutdown) {
-        struct pollfd pfd = {listen_fd_, POLLIN, 0};
-        int rc = ::poll(&pfd, 1, 200);
+        int rc = ::poll(pfds, n_fds, 200);
         if (rc <= 0) continue;
-        sockaddr_in client;
-        socklen_t len = sizeof client;
-        int fd = ::accept(listen_fd_, (sockaddr*)&client, &len);
-        if (fd < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
-            CAM_WARN("[http] accept: %s", std::strerror(errno));
-            continue;
+
+        for (int i = 0; i < n_fds; i++) {
+            if (!(pfds[i].revents & POLLIN)) continue;
+            sockaddr_in client;
+            socklen_t len = sizeof client;
+            int fd = ::accept(pfds[i].fd, (sockaddr*)&client, &len);
+            if (fd < 0) {
+                if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
+                CAM_WARN("[http] accept: %s", std::strerror(errno));
+                continue;
+            }
+            bool is_tls = (pfds[i].fd == tls_listen_fd_);
+            std::thread([this, fd, is_tls] { handle_connection(fd, is_tls); }).detach();
         }
-        std::thread([this, fd] { handle_connection(fd); }).detach();
     }
-    ::close(listen_fd_);
-    listen_fd_ = -1;
+    if (listen_fd_ >= 0) { ::close(listen_fd_); listen_fd_ = -1; }
+    if (tls_listen_fd_ >= 0) { ::close(tls_listen_fd_); tls_listen_fd_ = -1; }
+    // 释放 TLS 全局资源
+    if (tls_ready_) {
+        mbedtls_ssl_config_free((mbedtls_ssl_config*)tls_ssl_cfg_);
+        mbedtls_x509_crt_free((mbedtls_x509_crt*)tls_cert_);
+        mbedtls_pk_free((mbedtls_pk_context*)tls_key_);
+        mbedtls_ctr_drbg_free((mbedtls_ctr_drbg_context*)tls_drbg_);
+        mbedtls_entropy_free((mbedtls_entropy_context*)tls_entropy_);
+        delete (mbedtls_ssl_config*)tls_ssl_cfg_;
+        delete (mbedtls_x509_crt*)tls_cert_;
+        delete (mbedtls_pk_context*)tls_key_;
+        delete (mbedtls_ctr_drbg_context*)tls_drbg_;
+        delete (mbedtls_entropy_context*)tls_entropy_;
+        tls_ssl_cfg_ = nullptr; tls_cert_ = nullptr; tls_key_ = nullptr;
+        tls_drbg_ = nullptr; tls_entropy_ = nullptr;
+        tls_ready_ = false;
+    }
     CAM_INFO("[http] server stopped");
 }
 
-bool HttpServer::read_request(int fd, HttpRequest& req) {
-    // 读头（≤64KB）
+bool HttpServer::read_request(ClientConn& conn, HttpRequest& req) {
+    // 读头（≤64KB）。走 ClientConn::read_some → 自动适配 TLS。
     std::string buf;
     char tmp[4096];
     while (buf.find("\r\n\r\n") == std::string::npos) {
-        struct pollfd pfd = {fd, POLLIN, 0};
-        int rc = ::poll(&pfd, 1, 10000);
+        size_t got = 0;
+        int rc = conn.read_some(tmp, sizeof tmp, 10000, got);
         if (rc <= 0) return false;
-        ssize_t n = ::recv(fd, tmp, sizeof tmp, 0);
-        if (n <= 0) return false;
-        buf.append(tmp, (size_t)n);
+        buf.append(tmp, got);
         if (buf.size() > 1 << 16) return false;
     }
     size_t hdr_end = buf.find("\r\n\r\n");
@@ -386,16 +642,17 @@ bool HttpServer::read_request(int fd, HttpRequest& req) {
     if (cl > 0 && cl <= (1 << 20)) {
         req.body = buf.substr(hdr_end + 4);
         while ((long long)req.body.size() < cl) {
-            ssize_t n = ::recv(fd, tmp, sizeof tmp, 0);
-            if (n <= 0) break;
-            req.body.append(tmp, (size_t)n);
+            size_t got = 0;
+            int rc = conn.read_some(tmp, sizeof tmp, 10000, got);
+            if (rc <= 0) break;
+            req.body.append(tmp, got);
         }
         req.body.resize((size_t)cl);
     }
     return true;
 }
 
-void HttpServer::send_response(int fd, const HttpResponse& resp, const HttpRequest& req) {
+void HttpServer::send_response(ClientConn& conn, const HttpResponse& resp, const HttpRequest& req) {
     std::string status_text = resp.status_text;
     if (status_text.empty()) {
         switch (resp.status) {
@@ -422,20 +679,55 @@ void HttpServer::send_response(int fd, const HttpResponse& resp, const HttpReque
     out += "Connection: close\r\n\r\n";
     out += resp.body;
 
-    size_t sent = 0;
-    while (sent < out.size()) {
-        ssize_t n = ::send(fd, out.data() + sent, out.size() - sent, MSG_NOSIGNAL);
-        if (n <= 0) return;
-        sent += (size_t)n;
-    }
+    conn.write_all(out);  // 自动适配 TLS（重试 WANT_*）
 }
 
-void HttpServer::handle_connection(int fd) {
+void HttpServer::handle_connection(int fd, bool is_tls) {
+    // TLS 握手前 fd 设非阻塞，mbedtls_ssl_handshake 才能正确返回 WANT_*
+    int flags = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+
     ClientConn conn;
     conn.fd = fd;
 
+    if (is_tls) {
+        // 分配连接级 SSL 上下文（共享 cfg；每个连接独立 session）
+        auto* ssl = new mbedtls_ssl_context;
+        mbedtls_ssl_init(ssl);
+        int rc = mbedtls_ssl_setup(ssl, (mbedtls_ssl_config*)tls_ssl_cfg_);
+        if (rc != 0) {
+            CAM_WARN("[tls] ssl_setup: %s", tls_strerror(rc).c_str());
+            mbedtls_ssl_free(ssl);
+            delete ssl;
+            conn.close();
+            return;
+        }
+        // 自定义 BIO：读写都走 fd，EAGAIN → WANT_*，让上层 poll 处理
+        mbedtls_ssl_set_bio(ssl, &conn.fd, tsl_bio_send, tsl_bio_recv, nullptr);
+
+        // 握手：WANT_* 时 poll 对应方向再重试；15s 总超时
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+        for (;;) {
+            rc = mbedtls_ssl_handshake(ssl);
+            if (rc == 0) break;  // 成功
+            if (rc != MBEDTLS_ERR_SSL_WANT_READ && rc != MBEDTLS_ERR_SSL_WANT_WRITE) break;  // 协议错
+            if (std::chrono::steady_clock::now() >= deadline) { rc = -1; break; }
+            short ev = (rc == MBEDTLS_ERR_SSL_WANT_READ) ? POLLIN : POLLOUT;
+            if (!poll_for(fd, ev, 5000)) { rc = -1; break; }
+            // loop: 再调一次 handshake
+        }
+        if (rc != 0) {
+            CAM_WARN("[tls] handshake failed: %s", tls_strerror(rc).c_str());
+            mbedtls_ssl_free(ssl);
+            delete ssl;
+            conn.close();
+            return;
+        }
+        conn.ssl = ssl;
+    }
+
     HttpRequest req;
-    if (!read_request(fd, req)) {
+    if (!read_request(conn, req)) {
         conn.close();
         return;
     }
@@ -449,7 +741,7 @@ void HttpServer::handle_connection(int fd) {
         resp.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization";
         resp.headers["Access-Control-Max-Age"] = "86400";
         resp.headers["Content-Length"] = "0";
-        send_response(fd, resp, req);
+        send_response(conn, resp, req);
         conn.close();
         return;
     }
@@ -470,7 +762,7 @@ void HttpServer::handle_connection(int fd) {
         // handler 已接管（MJPEG / WebSocket），连接由 handler 自行关闭
         return;
     }
-    send_response(fd, resp, req);
+    send_response(conn, resp, req);
     conn.close();
 }
 

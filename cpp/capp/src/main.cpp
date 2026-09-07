@@ -56,6 +56,21 @@ int main() {
         return 1;
     }
 
+    // HTTPS：相对路径以 $AKA_HOME 为基准
+    auto resolve_path = [&](const std::string& p) -> std::string {
+        return (!p.empty() && p[0] == '/') ? p : ctx.app_dir + "/" + p;
+    };
+    if (ctx.config.web.https_port > 0) {
+        std::string cert_path = resolve_path(ctx.config.web.https_cert);
+        std::string key_path  = resolve_path(ctx.config.web.https_key);
+        if (!server.listen_tls(ctx.config.web.https_port, cert_path, key_path)) {
+            CAM_WARN("[app] TLS listener disabled (HTTP still serving on :%d)",
+                     ctx.config.web.port);
+        } else {
+            CAM_INFO("[app] https://0.0.0.0:%d (wss: /ws/control)", ctx.config.web.https_port);
+        }
+    }
+
     CAM_INFO("[app] static dir = %s", ctx.static_dir.c_str());
     CAM_INFO("[app] http://0.0.0.0:%d (ws: /ws/control)", ctx.config.web.port);
     server.run();  // 阻塞直到 SIGTERM/SIGINT（on_signal → ctx.shutdown）

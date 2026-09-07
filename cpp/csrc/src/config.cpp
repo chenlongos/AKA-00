@@ -150,6 +150,8 @@ Config Config::load() {
 
     cfg.web.port = toml.geti("web", "port", cfg.web.port);
     cfg.web.https_port = toml.geti("web", "https_port", cfg.web.https_port);
+    cfg.web.https_cert = toml.get("web", "https_cert", cfg.web.https_cert);
+    cfg.web.https_key  = toml.get("web", "https_key",  cfg.web.https_key);
 
     cfg.ota.check_url = toml.get("ota", "check_url", cfg.ota.check_url);
 

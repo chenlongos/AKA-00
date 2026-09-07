@@ -25,6 +25,14 @@ JPEG_DIR ?= ../third_party/jpeg
 JPEG_INC := $(if $(wildcard $(JPEG_DIR)/include/jpeglib.h),-I$(JPEG_DIR)/include,)
 CXXFLAGS += $(JPEG_INC)
 
+# mbedTLS（HTTPS 可选）：仅当 third_party/mbedtls 已交叉编译好才挂上 include/lib，
+# 本机 dev 可不装（HTTP-only 也跑得起来）。真上 mbedTLS 后 brew 装系统版即可。
+MBEDTLS_DIR ?= ../third_party/mbedtls
+MBEDTLS_INC := $(if $(wildcard $(MBEDTLS_DIR)/include/mbedtls/ssl.h),-I$(MBEDTLS_DIR)/include,)
+MBEDTLS_LIB := $(if $(wildcard $(MBEDTLS_DIR)/lib/libmbedtls.a),-L$(MBEDTLS_DIR)/lib,)
+MBEDTLS_LINK := $(if $(wildcard $(MBEDTLS_DIR)/lib/libmbedtls.a),-lmbedtls -lmbedx509 -lmbedcrypto,)
+CXXFLAGS += $(MBEDTLS_INC)
+
 SRCS := $(wildcard src/*.cpp)
 OBJS := $(SRCS:src/%.cpp=build/%.o)
 DEPS := $(OBJS:.o=.d)
@@ -45,7 +53,8 @@ $(CSRC)/build/libcsrc.a:
 	$(MAKE) -C $(CSRC)
 
 $(TARGET): $(OBJS) $(CSRC)/build/libcsrc.a | bin
-	$(CXX) $(CXXFLAGS) -o $@ $(OBJS) $(CSRC)/build/libcsrc.a $(LDFLAGS) -lpthread
+	$(CXX) $(CXXFLAGS) -o $@ $(OBJS) $(CSRC)/build/libcsrc.a \
+	    $(LDFLAGS) $(MBEDTLS_LIB) $(MBEDTLS_LINK) -lpthread
 	@echo "  ✓ aka-capp-dev built"
 
 clean:

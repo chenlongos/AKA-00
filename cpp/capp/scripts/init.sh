@@ -48,6 +48,11 @@ fi
 
 export AKA_HOME="$AKA_HOME"
 
+# HTTPS 自签名证书：capp 只读取 cert.pem/key.pem，缺一就重生成（一次性）。
+if [ -x "$APP_DIR/https_init.sh" ]; then
+    "$APP_DIR/https_init.sh" || echo "[init] https_init.sh failed (will retry next boot)"
+fi
+
 # WiFi 已连接时兜底删除 eth0 默认路由：
 # 有线 static 网关（如 /etc/network/interfaces 的 gateway 192.168.1.1）会让默认
 # 路由走 eth0，WiFi 客户端访问板子的回包走有线网关 → 不对称路由 → 连不上。
