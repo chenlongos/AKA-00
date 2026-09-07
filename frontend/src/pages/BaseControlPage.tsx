@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from "react";
-import {config, controlSocket} from "../api";
+import {config, controlSocket, type MotorLink} from "../api";
 import ControlButton from "../components/ControlButton.tsx";
 import CameraToggle from "../components/CameraToggle";
 import FullscreenButton from "../components/FullscreenButton";
@@ -19,6 +19,7 @@ const BaseControlPage = () => {
     const [alertMsg, setAlertMsg] = useState("");
     const [forwardSpeed, setForwardSpeed] = useState(50);
     const [turnSpeed, setTurnSpeed] = useState(50);
+    const [motor, setMotor] = useState<MotorLink | null>(null);
 
     useEffect(() => {
         config.speed().then(c => {
@@ -56,6 +57,9 @@ const BaseControlPage = () => {
                         setStatus("准备就绪");
                         setWsReady(true);
                     }
+                } else if (msg.type === "motor_status") {
+                    // 服务端推送底盘连接状态（未连接/重连中/已连接），无需刷新页面
+                    setMotor(msg.motor);
                 }
             },
         );
@@ -169,14 +173,33 @@ const BaseControlPage = () => {
         </div>
     );
 
+    // cm/s 整数显示（WS 推 m/s 浮点 → ×100；满速 ~49 cm/s，低速也能看出差别）
+    const toCms = (ms: number) => Math.round(ms * 100);
     const Speed = () => (
         <div style={{display: "flex", justifyContent: "center"}}>
             <div style={{display: "flex", gap: scalePx(20), padding: `${scalePx(6)} ${scalePx(16)}`, background: "var(--color-bg-card)", borderRadius: "var(--radius-full)", fontSize: scalePx(12)}}>
-                <span>左 <b style={S.success}>{leftSpeed.toFixed(1)}</b> m/s</span>
-                <span>右 <b style={S.success}>{rightSpeed.toFixed(1)}</b> m/s</span>
+                <span>左 <b style={S.success}>{toCms(leftSpeed)}</b> cm/s</span>
+                <span>右 <b style={S.success}>{toCms(rightSpeed)}</b> cm/s</span>
             </div>
         </div>
     );
+
+    // 底盘未连接提示（服务端 WS 推送 motor_status，自动消失，无需刷新）
+    const motorBadge = (motor && motor.enabled && !motor.connected) ? (
+        <div style={{display: "flex", justifyContent: "center"}}>
+            <div style={{
+                display: "flex", alignItems: "center", gap: scalePx(6),
+                padding: `${scalePx(4)} ${scalePx(12)}`,
+                background: "var(--color-bg-card)",
+                borderRadius: "var(--radius-full)",
+                fontSize: scalePx(11), color: "#f87171",
+                border: "1px solid rgba(239,68,68,0.5)",
+            }}>
+                <span style={S.dot(false)} />
+                底盘未连接，自动重连中…（已尝试 {motor.attempts} 次）
+            </div>
+        </div>
+    ) : null;
 
     const SideButtons = () => (
         <div style={{display: "flex", flexDirection: "column", gap: scalePx(8), width: "100%", flexShrink: 0}}>
@@ -228,6 +251,7 @@ const BaseControlPage = () => {
                             </div>
 
                             <div style={{width: "100%"}}><Speed /></div>
+                            {motorBadge}
                             <div style={{width: "100%", flex: 1}}><SideButtons /></div>
                         </div>
                     </div>
@@ -265,6 +289,7 @@ const BaseControlPage = () => {
 
             <div style={{marginTop: scalePx(12)}}><Dpad /></div>
             <div style={{marginTop: scalePx(10), width: "100%", maxWidth: contentW}}><Speed /></div>
+            <div style={{marginTop: scalePx(6)}}>{motorBadge}</div>
             <div style={{marginTop: scalePx(12), width: "100%", maxWidth: contentW}}><SideButtons /></div>
             <AlertDialog open={!!alertMsg} message={alertMsg} onClose={() => setAlertMsg("")} />
         </Page>

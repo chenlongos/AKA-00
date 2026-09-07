@@ -303,9 +303,9 @@ const RCDemoPage = () => {
                     padding: `${scalePx(6)} ${scalePx(12)}`, display: "flex",
                     justifyContent: "flex-end", alignItems: "center", gap: scalePx(8), pointerEvents: "auto"}}>
                     <FullscreenButton />
-                    <div style={{display: "flex", gap: scalePx(10), fontSize: scalePx(11), color: "#fff"}}>
-                        <span>左 <b style={{color: "#4ade80"}}>{leftSpeed >= 0 ? "+" : ""}{leftSpeed.toFixed(1)}</b></span>
-                        <span>右 <b style={{color: "#4ade80"}}>{rightSpeed >= 0 ? "+" : ""}{rightSpeed.toFixed(1)}</b></span>
+                    <div style={{display: "flex", gap: scalePx(10), fontSize: scalePx(11), color: "#fff", alignItems: "center"}}>
+                        <span>左 <b style={{color: "#4ade80"}}>{leftSpeed >= 0 ? "+" : ""}{Math.round(leftSpeed * 100)}</b><i style={{fontStyle: "normal", opacity: 0.7, fontSize: "0.8em"}}> cm/s</i></span>
+                        <span>右 <b style={{color: "#4ade80"}}>{rightSpeed >= 0 ? "+" : ""}{Math.round(rightSpeed * 100)}</b><i style={{fontStyle: "normal", opacity: 0.7, fontSize: "0.8em"}}> cm/s</i></span>
                         <span style={{width: 8, height: 8, borderRadius: "50%", background: wsConnected ? "#4ade80" : "#ef4444", alignSelf: "center"}} />
                     </div>
                 </div>
@@ -405,8 +405,8 @@ const RCDemoPage = () => {
                     <CameraBar scalePx={scalePx} cameraOn={cameraOn} fpsIndex={fpsIndex} frameReady={frameReady} onStatusChange={setCameraOn} onFpsChange={() => setFpsIndex(i => (i + 1) % 3)} syncKey={cameraSyncKey} />
                     <div style={{display: "flex", gap: scalePx(8), fontSize: scalePx(10), whiteSpace: "nowrap", alignItems: "center"}}>
                         <FullscreenButton />
-                        <span>左 <b style={S.success}>{leftSpeed >= 0 ? "+" : ""}{leftSpeed.toFixed(1)}</b></span>
-                        <span>右 <b style={S.success}>{rightSpeed >= 0 ? "+" : ""}{rightSpeed.toFixed(1)}</b></span>
+                        <span>左 <b style={S.success}>{leftSpeed >= 0 ? "+" : ""}{Math.round(leftSpeed * 100)}</b><i style={{fontStyle: "normal", opacity: 0.7, fontSize: "0.8em"}}> cm/s</i></span>
+                        <span>右 <b style={S.success}>{rightSpeed >= 0 ? "+" : ""}{Math.round(rightSpeed * 100)}</b><i style={{fontStyle: "normal", opacity: 0.7, fontSize: "0.8em"}}> cm/s</i></span>
                         <span style={S.dot(wsConnected)} />
                     </div>
                 </div>

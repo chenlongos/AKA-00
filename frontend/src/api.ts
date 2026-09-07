@@ -77,11 +77,22 @@ export const api = { system, motor, arm, camera, demo };
 
 export type MotorStatus = { left: number; right: number };
 
+// 底盘连接状态（服务端 WS "motor_status" 推送 / REST 响应的 motor 字段）
+export type MotorLink = {
+    backend: string;
+    enabled: boolean;
+    connected: boolean;
+    state: "connected" | "reconnecting" | "disabled";
+    attempts: number;
+    error: string;
+};
+
 export type JsonMsg =
     | { type: "ip"; ip: string }
     | { type: "action"; result: unknown }
     | { type: "raw_command"; result: unknown }
-    | { type: "reinitialize"; result: unknown };
+    | { type: "reinitialize"; result: unknown }
+    | { type: "motor_status"; motor: MotorLink };
 
 // WebSocket 实时控制通道
 export class ControlSocket {
