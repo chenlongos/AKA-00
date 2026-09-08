@@ -63,23 +63,14 @@ package: $(CAPP_BIN) tools
 	echo "── 组装部署目录 → $$DIST ──"; \
 	cp "$(CAPP_BIN)" "$$DIST/aka-capp"; chmod 755 "$$DIST/aka-capp"; \
 	if [ -f "$(ROOT)/static/index.html" ]; then cp -r "$(ROOT)/static" "$$DIST/static"; fi; \
-	[ -f "$(ROOT)/config.toml" ] && cp "$(ROOT)/config.toml" "$$DIST/config.toml"; \
+	[ -f "$(CPP)/config.toml" ] && cp "$(CPP)/config.toml" "$$DIST/config.toml"; \
 	[ -f "$(ROOT)/arm_angles.json" ] && cp "$(ROOT)/arm_angles.json" "$$DIST/"; \
 	[ -f "$(ROOT)/arm_angles_default.json" ] && cp "$(ROOT)/arm_angles_default.json" "$$DIST/"; \
 	[ -f "$(ROOT)/speed_config.json" ] && cp "$(ROOT)/speed_config.json" "$$DIST/"; \
 	[ -f "$(ROOT)/VERSION" ] && cp "$(ROOT)/VERSION" "$$DIST/"; \
 	if [ ! -f "$$DIST/config.toml" ]; then \
-	    printf '%s\n' \
-	        '[camera]' 'width = 640' 'height = 360' 'fps = 15' 'jpeg_quality = 30' \
-	        'stream_width = 320' 'stream_height = 180' 'stream_quality = 60' \
-	        '' '[motor]' 'backend = "tt_pid"' 'port = "/dev/ttyS1"' 'baudrate = 115200' 'ppr = 4680' \
-	        '' '[arm]' 'backend = "zp10s"' 'port = "/dev/ttyS2"' 'baudrate = 115200' \
-	        '' '[web]' 'port = 80' 'https_port = 5443' 'https_cert = "cert.pem"' 'https_key = "key.pem"' \
-	        '' '[ota]' 'check_url = "https://api.chenlongrobot.com/api/user/robot-versions/featured"' \
-	        '' '[chassis]' 'wheel_diameter_mm = 62' 'gear_ratio = 90' \
-	        '' '[logging]' 'level = "info"' \
-	        > "$$DIST/config.toml"; \
-	    echo "  （无根 config.toml，已生成默认配置：640x360 采集 + 320x180 缩流）"; \
+	    echo "ERROR: 缺少配置源 $(CPP)/config.toml —— config.toml 必须由 cpp/ 提供（打包不再内置生成）" >&2; \
+	    exit 1; \
 	fi; \
 	if [ -d "$(ROOT)/demo" ]; then \
 	    for d in "$(ROOT)"/demo/*/; do [ -f "$$d/init.sh" ] && cp -r "$${d%/}" "$$DIST/demo/"; done; \

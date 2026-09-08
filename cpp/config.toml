@@ -1,5 +1,5 @@
-# AKA-00 机器人部署配置（仓库根 = 配置源）
-# `make -C cpp package` 会把它拷贝进部署目录 dist/AKA-00/config.toml。
+# AKA-00 机器人部署配置（cpp/ = 配置源）
+# `make -C cpp package` 会把它拷贝进部署目录 cpp/dist/AKA-00/config.toml。
 # 板上运行时实际读取的是 /root/AKA-00/config.toml。
 
 [camera]

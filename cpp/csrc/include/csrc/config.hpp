@@ -13,15 +13,15 @@
 namespace csrc {
 
 struct CameraConfig {
-    int width = 320;    // 摄像头请求宽度（需为摄像头原生支持的档位，如 640/1280）
-    int height = 240;
-    int fps = 24;
+    int width = 640;    // 摄像头采集宽度：须为原生可出流档（Hy-UXGA B5M2 实测 640x360；320x240 是假档勿用）
+    int height = 360;
+    int fps = 15;
     int jpeg_quality = 30;
     // ── 流式下发缩放（省 WiFi 带宽）──
     // stream_width/stream_height > 0 时，/api/camera/stream 会把采集帧
-    // 服务端缩放到该尺寸并重编码后下发；= 0 时直通原帧（默认，行为不变）。
-    int stream_width = 0;
-    int stream_height = 0;
+    // 服务端缩放到该尺寸并重编码后下发；= 0 时直通原帧。
+    int stream_width = 320;
+    int stream_height = 180;
     int stream_quality = 60;
 };
 
