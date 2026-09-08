@@ -28,6 +28,7 @@ public:
         chassis_->send_cmd_noresp(cmd, payload, len);
     }
     bool ping() override { return chassis_->ping(); }
+    int move_state() const override { return chassis_->move_state(); }
 
 private:
     std::unique_ptr<TtPidChassis> chassis_;

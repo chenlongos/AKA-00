@@ -306,22 +306,62 @@ csrc::Json move_distance(AppContext& ctx, const std::string& direction, double v
     }
 
     bump_motion_seq(ctx);  // 取代任何进行中的定时运动
-    ctx.motor_pair->move_distance((uint8_t)d, (uint8_t)sp, target);
+    auto* mp = ctx.motor_pair.get();
+    int base = mp->move_state();  // 发送前状态（可能是上次闭环残留的 done=2）
+    mp->move_distance((uint8_t)d, (uint8_t)sp, target);
 
-    // 同步：等 ESP32 闭环跑完（转速持续为 0）再返回确认 ACK。
+    // 同步：等 ESP32 闭环精确回报。ESP32 把"运行中/结果"随 10Hz STATUS 回包附带
+    // （主机 get_speeds 顺带解析成 move_state），这里只读内存标志，零新增串口流量。
     // 距离/转角大时该请求会挂几秒~几十秒，属预期（客户端勿设短超时）。
     auto t0 = std::chrono::steady_clock::now();
-    bool ever_moved = false;
-    bool stopped = wait_stationary(ctx, 30.0, 0.35, ever_moved);
-    double elapsed_ms = std::chrono::duration<double, std::milli>(
-                            std::chrono::steady_clock::now() - t0).count();
+    const double kTimeoutS = 30.0;
+    const double kFastGraceS = 0.8;  // 错过 running 帧时允许的宽限
+    bool saw_running = false;
+    int outcome = 0;  // 2=完成 3=中止 0=超时 -1=退出; <0 兜底见下
+    double elapsed_ms = 0;
+    for (;;) {
+        auto now = std::chrono::steady_clock::now();
+        elapsed_ms = std::chrono::duration<double, std::milli>(now - t0).count();
+        if (ctx.shutdown) { outcome = -1; break; }
+
+        int st = mp->move_state();
+        if (st < 0) {
+            // mock 或无状态源（含等待中链路掉线切回 mock）：无法精确判定，
+            // 退化为短等停稳直接返回（设备侧结果以 ESP32 自检为准）
+            bool moved = false;
+            if (base < 0) {
+                wait_stationary(ctx, 2.0, 0.4, moved);
+                outcome = 2;
+            } else {
+                outcome = 3;  // 曾经是真链路，中途失去状态源 → 按中止处理
+            }
+            break;
+        }
+        if (st == 1) saw_running = true;
+        if (st == 2 || st == 3) {
+            // 确认是"本次"的结果：观测到运行中、状态相对发送前有变化、或宽限已过
+            if (saw_running || st != base || elapsed_ms >= kFastGraceS * 1000.0) {
+                outcome = st;
+                break;
+            }
+        }
+        if (elapsed_ms >= kTimeoutS * 1000.0) { outcome = 0; break; }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
 
     csrc::Json ok;
-    ok["status"] = stopped ? "completed" : "timeout";
+    if (outcome == 2 || outcome == -1) {
+        ok["status"] = "completed";
+    } else if (outcome == 3) {
+        ok["status"] = "aborted";
+    } else {
+        ok["status"] = "timeout";
+    }
     ok["mode"] = "esp32";
     ok["target"] = value;
     ok["unit"] = unit;
-    ok["moved"] = ever_moved;
+    ok["moved"] = saw_running;
+    ok["state"] = csrc::Json((int64_t)outcome);
     ok["elapsed_ms"] = csrc::Json((int64_t)elapsed_ms);
     return ok;
 }

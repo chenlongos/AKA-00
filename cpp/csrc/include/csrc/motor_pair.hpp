@@ -35,6 +35,9 @@ public:
     }
     /// 探活：链路往返成功返回 true（mock 恒 true；自动重连线程使用）
     virtual bool ping() { return true; }
+    /// 闭环距离/转向状态（tt_pid 真实底盘支持；mock/未知返回 -1）:
+    ///   0=空闲 1=运行中 2=完成(到达目标) 3=中止(失联/重置)
+    virtual int move_state() const { return -1; }
 };
 
 /// Mock 底盘（开发机，无真实硬件）：打印命令

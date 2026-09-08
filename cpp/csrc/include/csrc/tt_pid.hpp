@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -57,6 +58,10 @@ public:
     /// 探活：GET_STATUS 一次往返成功即认为链路可用（自动重连线程用）
     bool ping();
 
+    /// 闭环距离/转向状态（随 10Hz GET_STATUS 回包附带更新，读内存无串口开销）。
+    /// 返回: 0=空闲/无闭环, 1=运行中, 2=完成(到达目标), 3=中止(linkLoss/重置)
+    int move_state() const { return move_state_; }
+
     /// 闭环距离/转向（ESP32 固件内部换算，直接发 mm / 0.1°）
     void move_distance(uint8_t dir, uint8_t speed, int32_t target);
 
@@ -81,6 +86,8 @@ private:
     /// （set_speed/brake/move_distance）并发读写同一串口，必须保证
     /// clear+write(+read) 整体原子，否则帧字节交错被 ESP32 丢弃。
     std::mutex io_mu_;
+    /// 闭环状态缓存（见 move_state()），由 get_speeds() 解析 STATUS 回包更新
+    std::atomic<int> move_state_{0};
 };
 
 }  // namespace csrc

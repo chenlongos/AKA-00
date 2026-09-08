@@ -168,13 +168,14 @@ void TtPidChassis::get_speeds(int& left_rpm, int& right_rpm) {
     left_rpm = right_rpm = 0;
     if (!ok_) return;
     std::lock_guard<std::mutex> lk(io_mu_);
-    // ESP32 固件 GET_STATUS(0x21) 响应: [status, m1_hi, m1_lo, m2_hi, m2_lo]
+    // ESP32 固件 GET_STATUS(0x21) 响应:
+    //   [state, m1_hi, m1_lo, m2_hi, m2_lo, distActive, distResult]
     ser_.clear_input();
     uint8_t chk = CMD_GET_STATUS ^ 0;
     uint8_t frame[5] = {FRAME_H1, FRAME_H2, CMD_GET_STATUS, 0, chk};
     if (!ser_.write(frame, sizeof frame)) return;
 
-    uint8_t payload[5];
+    uint8_t payload[7];
     size_t plen = sizeof payload;
     uint8_t rsp = 0;
     if (!recv_frame(&rsp, payload, &plen, 0.1) || rsp != RSP_STATUS || plen < 5) {
@@ -183,6 +184,13 @@ void TtPidChassis::get_speeds(int& left_rpm, int& right_rpm) {
     }
     left_rpm = (int)(int16_t)(((uint16_t)payload[1] << 8) | payload[2]);
     right_rpm = (int)(int16_t)(((uint16_t)payload[3] << 8) | payload[4]);
+
+    // 闭环状态缓存（新固件 7B 回包；旧固件 5B 时保持 0=未知）
+    if (plen >= 7) {
+        int active = payload[5] != 0;
+        int result = payload[6];  // 0 无/运行中, 1 done, 2 aborted
+        move_state_ = active ? 1 : (result == 1 ? 2 : (result == 2 ? 3 : 0));
+    }
 }
 
 void TtPidChassis::get_encoder(int& c1, int& c2) {
@@ -208,7 +216,7 @@ bool TtPidChassis::ping() {
     uint8_t frame[5] = {FRAME_H1, FRAME_H2, CMD_GET_STATUS, 0, chk};
     if (!ser_.write(frame, sizeof frame)) return false;
 
-    uint8_t payload[5];
+    uint8_t payload[7];
     size_t plen = sizeof payload;
     uint8_t rsp = 0;
     if (!recv_frame(&rsp, payload, &plen, 0.15) || rsp != RSP_STATUS || plen < 1) {
