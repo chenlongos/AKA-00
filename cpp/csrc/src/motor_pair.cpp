@@ -67,41 +67,41 @@ std::shared_ptr<MotorPair> AutoReconnectMotorPair::active() const {
     return active_;
 }
 
+// ── 转发方法：active() 永不为空（无真实驱动时为 mock），无需判空 ──
+
 void AutoReconnectMotorPair::set_speed(int left, int right) {
     auto p = active();
-    if (p) p->set_speed(left, right);
+    p->set_speed(left, right);
 }
 
 void AutoReconnectMotorPair::get_speeds(int& l, int& r) {
-    l = r = 0;
     auto p = active();
-    if (p) p->get_speeds(l, r);
+    p->get_speeds(l, r);
 }
 
 void AutoReconnectMotorPair::brake() {
     auto p = active();
-    if (p) p->brake();
+    p->brake();
 }
 
 void AutoReconnectMotorPair::sleep() {
     auto p = active();
-    if (p) p->sleep();
+    p->sleep();
 }
 
 void AutoReconnectMotorPair::get_encoder(int& c1, int& c2) {
-    c1 = c2 = 0;
     auto p = active();
-    if (p) p->get_encoder(c1, c2);
+    p->get_encoder(c1, c2);
 }
 
 void AutoReconnectMotorPair::move_distance(uint8_t dir, uint8_t speed, int32_t target) {
     auto p = active();
-    if (p) p->move_distance(dir, speed, target);
+    p->move_distance(dir, speed, target);
 }
 
 void AutoReconnectMotorPair::send_cmd_noresp(uint8_t cmd, const uint8_t* payload, size_t len) {
     auto p = active();
-    if (p) p->send_cmd_noresp(cmd, payload, len);
+    p->send_cmd_noresp(cmd, payload, len);
 }
 
 MotorLinkStatus AutoReconnectMotorPair::link_status() const {
@@ -116,32 +116,19 @@ MotorLinkStatus AutoReconnectMotorPair::link_status() const {
     return st;
 }
 
-/// 关闭当前真实驱动并换回 mock（mu_ 内调用；连接状态清零）。
-void AutoReconnectMotorPair::drop_current() {
+/// 断开当前真实驱动并换回 mock（连接状态清零）。
+/// expected=nullptr 无条件断；非空时仅当 active_ 仍是 expected 才断（防误杀新链）。
+bool AutoReconnectMotorPair::drop(const std::shared_ptr<MotorPair>& expected) {
     std::shared_ptr<MotorPair> old;
     {
         std::lock_guard<std::mutex> lk(mu_);
+        if (expected && active_ != expected) return false;  // 已被他人重连/替换
         old = std::move(active_);
         active_ = mock_;
         connected_ = false;
     }
     if (old && old != mock_) {
         CAM_INFO("[motor] link dropped");
-        old->close();
-    }
-}
-
-bool AutoReconnectMotorPair::drop_if_current(const std::shared_ptr<MotorPair>& expected) {
-    std::shared_ptr<MotorPair> old;
-    {
-        std::lock_guard<std::mutex> lk(mu_);
-        if (active_ != expected) return false;  // 已被他人重连/替换，不误杀
-        old = std::move(active_);
-        active_ = mock_;
-        connected_ = false;
-    }
-    if (old && old != mock_) {
-        CAM_INFO("[motor] link dropped (heartbeat lost)");
         old->close();
     }
     return true;
@@ -151,7 +138,7 @@ bool AutoReconnectMotorPair::drop_if_current(const std::shared_ptr<MotorPair>& e
 void AutoReconnectMotorPair::request_reconnect() {
     {
         std::lock_guard<std::mutex> attempt_lk(attempt_mu_);
-        drop_current();
+        drop(nullptr);
         std::lock_guard<std::mutex> lk(mu_);
         wake_ = true;
     }
@@ -171,7 +158,7 @@ bool AutoReconnectMotorPair::reinitialize() {
     if (cur && cur != mock_ && cur->reinitialize()) {
         return true;  // 链路健康：原地 INIT/CONFIG 成功
     }
-    drop_if_current(cur);  // 仅当还是同一条链才断（防误杀并发重连的新链）
+    drop(cur);  // 仅当还是同一条链才断（防误杀并发重连的新链）
     bool ok = try_connect();
     {
         std::lock_guard<std::mutex> lk(mu_);
@@ -189,7 +176,7 @@ void AutoReconnectMotorPair::close() {
     }
     cv_.notify_all();
     if (worker_.joinable()) worker_.join();
-    drop_current();
+    drop(nullptr);
 }
 
 /// 同步尝试建连一次（attempt_mu_ 持有时调用）。
@@ -282,7 +269,7 @@ void AutoReconnectMotorPair::worker_loop() {
                 if (++fails >= kPingFailsBeforeDrop) {
                     CAM_WARN("[motor] heartbeat lost %d times → reconnecting", fails);
                     std::lock_guard<std::mutex> attempt_lk(attempt_mu_);
-                    drop_if_current(p);  // 只断自己探测的这条链路
+                    drop(p);  // 只断自己探测的这条链路
                     break;
                 }
             } else {

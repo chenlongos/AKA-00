@@ -94,17 +94,17 @@ public:
     /// 线程安全读取当前连接状态
     MotorLinkStatus link_status() const;
 
-    /// 打断退避等待并立刻重试连接（异步；drop_current + 唤醒 worker）
+    /// 打断退避等待并立刻重试连接（异步；drop + 唤醒 worker）
     void request_reconnect();
 
 private:
     void worker_loop();
     /// 同步尝试连接一次（必须在 attempt_mu_ 持有时调用）；成功则切换 active_。
     bool try_connect();
-    /// 关闭当前真实驱动并换回 mock（连接状态清零）。
-    void drop_current();
-    /// 仅当当前驱动仍是 expected 时才断开（worker 心跳掉线用，防误杀新链接）。
-    bool drop_if_current(const std::shared_ptr<MotorPair>& expected);
+    /// 断开当前真实驱动并换回 mock（连接状态清零）。
+    /// expected=nullptr 无条件断开；非空时仅当 active_ 仍是 expected 才断开
+    /// （防误杀并发重连出的新链路）。返回是否真的断开了。
+    bool drop(const std::shared_ptr<MotorPair>& expected);
     std::shared_ptr<MotorPair> active() const;  // 拷贝当前驱动（线程安全）
     /// 分段等待可被 close()/request_reconnect() 打断
     void wait_cancelable(int64_t ms);
