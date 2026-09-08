@@ -18,8 +18,9 @@ struct CameraConfig {
     int fps = 15;
     int jpeg_quality = 30;
     // ── 流式下发缩放（省 WiFi 带宽）──
-    // stream_width/stream_height > 0 时，/api/camera/stream 会把采集帧
-    // 服务端缩放到该尺寸并重编码后下发；= 0 时直通原帧。
+    // stream_scale=true 且 stream_width/height>0 时，/api/camera/stream 会把采集帧
+    // 服务端缩放到该尺寸并重编码后下发；stream_scale=false 时直通原帧。
+    bool stream_scale = true;
     int stream_width = 320;
     int stream_height = 180;
     int stream_quality = 60;

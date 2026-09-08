@@ -138,6 +138,10 @@ Config Config::load() {
     cfg.camera.height = toml.geti("camera", "height", cfg.camera.height);
     cfg.camera.fps = toml.geti("camera", "fps", cfg.camera.fps);
     cfg.camera.jpeg_quality = toml.geti("camera", "jpeg_quality", cfg.camera.jpeg_quality);
+    {
+        std::string sv = toml.get("camera", "stream_scale", "");
+        if (!sv.empty()) cfg.camera.stream_scale = (sv == "true" || sv == "1" || sv == "yes");
+    }
     cfg.camera.stream_width = toml.geti("camera", "stream_width", cfg.camera.stream_width);
     cfg.camera.stream_height = toml.geti("camera", "stream_height", cfg.camera.stream_height);
     cfg.camera.stream_quality = toml.geti("camera", "stream_quality", cfg.camera.stream_quality);

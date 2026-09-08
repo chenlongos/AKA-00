@@ -588,8 +588,10 @@ void register_routes(Router& router, AppContext& ctx) {
 
         uint64_t last_ts = 0;
         auto last_send = std::chrono::steady_clock::now();
-        // config stream_width/height>0 → 服务端缩放重编码后下发（省 WiFi 带宽）
-        const bool downscale = ctx.config.camera.stream_width > 0 &&
+        // stream_scale 配置开关 + 尺寸>0 → 服务端缩放重编码后下发（省 WiFi 带宽）；
+        // 关闭或尺寸无效 → 直通原帧。
+        const bool downscale = ctx.config.camera.stream_scale &&
+                               ctx.config.camera.stream_width > 0 &&
                                ctx.config.camera.stream_height > 0;
         while (true) {
             csrc::Camera::Frame f;
