@@ -62,77 +62,141 @@ bool ws_send_binary(ClientConn& conn, const void* data, size_t len) {
 ///    0  超时（无数据，连接仍可用）
 ///   -1  连接关闭 / 协议错误（应断开）
 ///   -2  ping/pong（已处理，忽略）
-int ws_read_frame(ClientConn& conn, uint8_t* out, size_t cap, size_t& out_len, int timeout_ms) {
-    out_len = 0;
-    uint8_t hdr[2];
-    // 帧头必须循环读满 2 字节：TCP 分片时（WiFi 常见）单次 recv 可能只到 1 字节，
-    // 之前误判为协议错误直接断开 → 前端摇杆命令丢失、连接反复重连。
-    size_t got = 0;
-    while (got < 2) {
-        size_t g = 0;
-        int r = conn.read_some(hdr + got, 2 - got, timeout_ms, g);
-        if (r == -1) return -1;              // 关闭/错误
-        if (r == 0) return got == 0 ? 0 : -1;  // 无数据：正常节拍；读到一半超时 = 坏帧
-        if (g == 0) return -1;
-        got += g;
-    }
+// ── 帧级超时：同一帧从首字节起超过该时长视为坏帧/死链 ──
+constexpr int64_t kFrameTimeoutMs = 5000;
 
-    bool fin = (hdr[0] & 0x80) != 0;
-    uint8_t opcode = hdr[0] & 0x0F;
-    bool masked = (hdr[1] & 0x80) != 0;
-    uint64_t len = hdr[1] & 0x7F;
-
-    auto read_exact_short = [&](uint8_t* b, size_t n, int timeout) -> bool {
-        size_t total = 0;
-        while (total < n) {
-            size_t g = 0;
-            int r = conn.read_some(b + total, n - total, timeout, g);
-            if (r <= 0 || g == 0) return false;
-            total += g;
-        }
-        return true;
-    };
-
-    if (len == 126) {
-        uint8_t b[2];
-        if (!read_exact_short(b, 2, timeout_ms * 5)) return -1;
-        len = ((uint64_t)b[0] << 8) | b[1];
-    } else if (len == 127) {
-        uint8_t b[8];
-        if (!read_exact_short(b, 8, timeout_ms * 5)) return -1;
-        len = 0;
-        for (int i = 0; i < 8; i++) len = (len << 8) | b[i];
-    }
-    if (len > cap || len > (1 << 20)) return -1;  // 帧过大
-
+namespace {
+struct WsFrame {
+    bool fin = true;
+    int opcode = 0;
+    bool masked = false;
     uint8_t mask[4] = {0, 0, 0, 0};
-    if (masked) {
-        if (!read_exact_short(mask, 4, timeout_ms * 5)) return -1;
+    size_t payload_off = 0;
+    size_t payload_len = 0;
+};
+enum class Parse { NeedMore, Ok, Error };
+/// 从 peer.buf 头部解析一个完整帧（字节不够返回 NeedMore，不视为错误）
+Parse ws_parse_frame(const std::vector<uint8_t>& buf, WsFrame& f) {
+    if (buf.size() < 2) return Parse::NeedMore;
+    f.fin = (buf[0] & 0x80) != 0;
+    f.opcode = buf[0] & 0x0F;
+    f.masked = (buf[1] & 0x80) != 0;
+    uint64_t len7 = buf[1] & 0x7F;
+    size_t off = 2;
+    uint64_t plen;
+    if (len7 == 126) {
+        if (buf.size() < off + 2) return Parse::NeedMore;
+        plen = ((uint64_t)buf[off] << 8) | buf[off + 1];
+        off += 2;
+    } else if (len7 == 127) {
+        if (buf.size() < off + 8) return Parse::NeedMore;
+        plen = 0;
+        for (int i = 0; i < 8; i++) plen = (plen << 8) | buf[off + i];
+        off += 8;
+    } else {
+        plen = len7;
     }
+    if (plen > (1u << 20)) return Parse::Error;  // 长度字段超限
+    if (f.masked) {
+        if (buf.size() < off + 4) return Parse::NeedMore;
+        std::memcpy(f.mask, buf.data() + off, 4);
+        off += 4;
+    }
+    if (buf.size() < off + plen) return Parse::NeedMore;
+    f.payload_off = off;
+    f.payload_len = (size_t)plen;
+    return Parse::Ok;
+}
+const char* ws_reason_str(WsCloseReason r) {
+    switch (r) {
+        case WsCloseReason::ClientClose:  return "client-close";
+        case WsCloseReason::ReadError:    return "read-error";
+        case WsCloseReason::Oversize:     return "oversize";
+        case WsCloseReason::Fragmented:   return "fragmented";
+        case WsCloseReason::FrameTimeout: return "frame-timeout";
+        case WsCloseReason::PingTimeout:  return "ping-timeout";
+        case WsCloseReason::WriteFail:    return "write-fail";
+        default:                          return "none";
+    }
+}
+}  // namespace
 
-    // 读 payload（分块；帧内超时放宽，防 WiFi 弱时 TCP 分片被误判断开）
-    const int frame_timeout = timeout_ms * 5;
-    size_t read_total = 0;
-    while (read_total < len) {
-        size_t chunk = (size_t)len - read_total;
+/// 有状态读帧：字节跨节拍缓存在 peer.buf 里累积，任何"半帧恰好超时"都不会断开；
+/// 只有整帧超过 kFrameTimeoutMs / 协议错误 / 底层读错误才返回 -1（reason 说明）。
+int ws_rx_frame(ClientConn& conn, WsPeer& peer, uint8_t* out, size_t cap,
+                size_t& out_len, int timeout_ms, WsCloseReason& reason,
+                bool& got_any_byte) {
+    out_len = 0;
+    reason = WsCloseReason::None;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+
+    while (true) {
+        // 1) 先尽量从缓冲区解析出完整帧（可能含多个帧：ping/pong/数据连发）
+        WsFrame f;
+        Parse p = ws_parse_frame(peer.buf, f);
+        if (p == Parse::Ok) {
+            size_t consumed = f.payload_off + f.payload_len;
+            if (f.opcode == 0x8) {  // close
+                reason = WsCloseReason::ClientClose;
+                return -1;
+            }
+            if (!f.fin) {  // 分片（本项目不支持）
+                reason = WsCloseReason::Fragmented;
+                return -1;
+            }
+            if (f.payload_len > cap) {  // 超出接收缓冲
+                reason = WsCloseReason::Oversize;
+                return -1;
+            }
+            if (f.payload_len) {
+                const uint8_t* src = peer.buf.data() + f.payload_off;
+                if (f.masked) {
+                    for (size_t i = 0; i < f.payload_len; i++)
+                        out[i] = src[i] ^ f.mask[i % 4];
+                } else {
+                    std::memcpy(out, src, f.payload_len);
+                }
+            }
+            peer.buf.erase(peer.buf.begin(), peer.buf.begin() + (long)consumed);
+            got_any_byte = true;
+            if (f.opcode == 0x9) {  // ping → 回 pong，继续处理
+                ws_send_frame(conn, 0xA, out, f.payload_len);
+                continue;
+            }
+            if (f.opcode == 0xA) continue;  // pong：活跃信号已由 got_any_byte 记录
+            out_len = f.payload_len;
+            return f.opcode;  // 0x1 / 0x2 数据帧
+        }
+        if (p == Parse::Error) {
+            reason = WsCloseReason::Oversize;
+            return -1;
+        }
+        // NeedMore：继续收字节
+        auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) break;  // 本拍无完整帧 → 返回 0（正常节拍）
+        uint8_t tmp[256];
         size_t g = 0;
-        int r = conn.read_some(out + read_total, chunk > 4096 ? 4096 : chunk, frame_timeout, g);
-        if (r <= 0 || g == 0) return -1;
-        read_total += g;
+        int remain = (int)std::chrono::duration_cast<std::chrono::milliseconds>(
+                         deadline - now).count();
+        if (remain < 1) remain = 1;
+        int r = conn.read_some(tmp, sizeof tmp, remain, g);
+        if (r == -1) { reason = WsCloseReason::ReadError; return -1; }
+        if (r == 0 || g == 0) continue;
+        got_any_byte = true;
+        peer.buf.insert(peer.buf.end(), tmp, tmp + g);
+        if (!peer.frame_started) {
+            peer.frame_started = true;
+            peer.frame_t0 = std::chrono::steady_clock::now();
+        }
+        // 帧级超时：同一帧首字节之后超过 5s 没拼完整 → 坏帧断开（防半帧死等）
+        int64_t age = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::steady_clock::now() - peer.frame_t0).count();
+        if (age >= kFrameTimeoutMs) {
+            reason = WsCloseReason::FrameTimeout;
+            return -1;
+        }
     }
-    if (masked) {
-        for (uint64_t i = 0; i < len; i++) out[i] ^= mask[i % 4];
-    }
-    out_len = (size_t)len;
-
-    if (opcode == 0x8) return -1;  // close
-    if (opcode == 0x9) {           // ping → pong
-        ws_send_frame(conn, 0xA, out, out_len);
-        return -2;
-    }
-    if (opcode == 0xA) return -2;  // pong
-    if (!fin) return -1;           // 不支持分片
-    return opcode;
+    return 0;
 }
 
 // ═══════════════════════ /ws/control ═══════════════════════
@@ -235,21 +299,26 @@ void ws_control_loop(AppContext& ctx, ClientConn& conn) {
     send_motor_status(true);
 
     auto last_status = std::chrono::steady_clock::now();
+    auto last_rx_any = std::chrono::steady_clock::now();  // 最近收到任何字节/pong
+    auto last_ping = std::chrono::steady_clock::now();    // 服务端心跳节拍
+    WsPeer peer;
+    WsCloseReason reason = WsCloseReason::None;
     bool running = true;
 
     while (running) {
-        // 200ms 节拍：读帧（超时继续）或推状态
+        // 有状态读帧：半帧跨节拍累积，超时只是空闲节拍，不再误断开；
+        // 只有 close / 协议错误 / 帧超时 / 底层错误才返回 -1（reason 说明原因）
         uint8_t payload[4096];
         size_t len = 0;
-        int opcode = ws_read_frame(conn, payload, sizeof payload, len, 200);
-
-        if (opcode == -1) {   // 关闭 / 协议错误
-            CAM_DEBUG("[ws] connection closed (peer close or protocol error)");
+        bool got_any = false;
+        int rc = ws_rx_frame(conn, peer, payload, sizeof payload, len, 200, reason, got_any);
+        if (got_any) last_rx_any = std::chrono::steady_clock::now();
+        if (rc == -1) {
             running = false;
             break;
         }
-        if (opcode == 0) {    // 超时：不处理，下面照常推状态
-        } else if (opcode == 0x2 && len >= 2) {  // binary
+
+        if (rc == 0x2 && len >= 2) {  // binary
             if (payload[0] == 0xAA && len >= 3) {
                 int x = (int8_t)payload[1];
                 int y = (int8_t)payload[2];
@@ -267,15 +336,32 @@ void ws_control_loop(AppContext& ctx, ClientConn& conn) {
                 csrc::Json cmd = csrc::Json::parse_or(json_str);
                 if (cmd.is_object()) ws_handle_json(ctx, conn, cmd);
             }
-        } else if (opcode == 0x1 && len > 0) {  // text（宽松兼容）
+        } else if (rc == 0x1 && len > 0) {  // text（宽松兼容）
             std::string json_str((const char*)payload, len);
             csrc::Json cmd = csrc::Json::parse_or(json_str);
             if (cmd.is_object()) ws_handle_json(ctx, conn, cmd);
         }
-        // -2 (ping/pong) 忽略
+        // rc == 0：空闲节拍（ping/pong/close 已在 ws_rx_frame 内处理）
+
+        auto now = std::chrono::steady_clock::now();
+
+        // 服务端心跳：4s 一 ping（浏览器自动回 pong，刷活 NAT/中间盒并探活）；
+        // 12s 内没收到任何字节（含 pong）→ 判定死链，主动断开避免悬挂
+        if (now - last_ping >= std::chrono::milliseconds(4000)) {
+            if (!ws_send_frame(conn, 0x9, nullptr, 0)) {
+                reason = WsCloseReason::WriteFail;
+                running = false;
+                break;
+            }
+            last_ping = now;
+        }
+        if (now - last_rx_any >= std::chrono::milliseconds(12000)) {
+            reason = WsCloseReason::PingTimeout;
+            running = false;
+            break;
+        }
 
         // 每 200ms 推电机状态 0xBB left right (m/s × 1000, int16 LE)
-        auto now = std::chrono::steady_clock::now();
         if (now - last_status >= std::chrono::milliseconds(200)) {
             csrc::RobotStatus s = ctx.collector.get_status();
             int16_t left_mmps = (int16_t)(s.left_speed * 1000.0 + 0.5);
@@ -287,6 +373,7 @@ void ws_control_loop(AppContext& ctx, ClientConn& conn) {
             buf[3] = (uint8_t)(right_mmps & 0xFF);
             buf[4] = (uint8_t)((right_mmps >> 8) & 0xFF);
             if (!ws_send_binary(conn, buf, 5)) {
+                reason = WsCloseReason::WriteFail;
                 running = false;
                 break;
             }
@@ -298,7 +385,7 @@ void ws_control_loop(AppContext& ctx, ClientConn& conn) {
     // 断开自动停电机（摇杆松手不跑车）
     run_motor(ctx, 0, 0, 0);
     conn.close();
-    CAM_INFO("[ws] client disconnected");
+    CAM_WARN("[ws] client disconnected (reason=%s)", ws_reason_str(reason));
 }
 
 }  // namespace capp
