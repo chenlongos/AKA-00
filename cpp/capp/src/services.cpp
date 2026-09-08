@@ -56,6 +56,54 @@ void schedule_stop(AppContext& ctx, double duration_sec) {
     });
 }
 
+// ── 同步"执行完再 ACK"辅助 ──
+
+int64_t motion_seq_now(AppContext& ctx) {
+    std::lock_guard<std::mutex> lk(ctx.timer_mu);
+    return ctx.motion_seq;
+}
+int64_t bump_motion_seq(AppContext& ctx) {
+    std::lock_guard<std::mutex> lk(ctx.timer_mu);
+    return ++ctx.motion_seq;
+}
+/// 等待 duration 秒后自动停车（同步阻塞）。返回:
+///   0 = 正常：到点已 sleep() 停车
+///   1 = 期间被后续指令取代（seq 变化，不自动停车，交由新指令接管）
+///   2 = 应用退出
+int wait_timed_done(AppContext& ctx, int64_t seq, double duration_sec) {
+    auto until = std::chrono::steady_clock::now() +
+                 std::chrono::milliseconds((int64_t)(duration_sec * 1000.0));
+    while (std::chrono::steady_clock::now() < until) {
+        if (ctx.shutdown) return 2;
+        if (motion_seq_now(ctx) != seq) return 1;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    ctx.motor_pair->sleep();  // 到点滑行停车（与旧 schedule_stop 动作一致）
+    return 0;
+}
+
+/// 等待底盘停稳（判定：曾经在动，且连续 stall_s 秒速度≈0）。
+/// 返回 true=已停稳；false=超时。ever_moved 区分"走完停了"与"根本没动"。
+bool wait_stationary(AppContext& ctx, double timeout_s, double stall_s, bool& ever_moved) {
+    ever_moved = false;
+    auto t0 = std::chrono::steady_clock::now();
+    auto last_moving = std::chrono::steady_clock::now();
+    while (true) {
+        csrc::RobotStatus s = ctx.collector.get_status();
+        bool moving = std::abs(s.left_speed) > 0.03 || std::abs(s.right_speed) > 0.03;
+        auto now = std::chrono::steady_clock::now();
+        if (moving) { ever_moved = true; last_moving = now; }
+        double stopped_for = std::chrono::duration<double>(now - last_moving).count();
+        double elapsed = std::chrono::duration<double>(now - t0).count();
+        if (ever_moved && stopped_for >= stall_s) return true;
+        // 从未观测到运动：为避免把"静止→即将起步"误判为完成，先观察 0.8s
+        if (!ever_moved && elapsed >= 0.8) return true;
+        if (elapsed >= timeout_s) return false;
+        if (ctx.shutdown) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    }
+}
+
 bool apply_base_action(AppContext& ctx, const std::string& action, int speed) {
     if (action == "up") {
         ctx.motor_pair->set_speed(speed, speed);
@@ -148,8 +196,10 @@ bool init_services(AppContext& ctx) {
 
 // ═══════════════════════ 控制服务 ═══════════════════════
 
-csrc::Json execute_action(AppContext& ctx, const std::string& action, int speed, double milliseconds) {
+csrc::Json execute_action(AppContext& ctx, const std::string& action, int speed,
+                          double milliseconds, bool wait_done) {
     cancel_pending_stop(ctx);
+    int64_t seq = bump_motion_seq(ctx);
 
     bool handled = apply_base_action(ctx, action, speed) || apply_arm_action(ctx, action);
     if (!handled) {
@@ -159,8 +209,22 @@ csrc::Json execute_action(AppContext& ctx, const std::string& action, int speed,
         return err;
     }
 
-    if (milliseconds > 0 &&
-        (action == "up" || action == "down" || action == "left" || action == "right")) {
+    bool timed_move = milliseconds > 0 &&
+        (action == "up" || action == "down" || action == "left" || action == "right");
+    if (timed_move && wait_done) {
+        // 同步：阻塞到时长结束、自动停车后才返回确认 ACK
+        int rc = wait_timed_done(ctx, seq, milliseconds / 1000.0);
+        csrc::Json ok;
+        ok["status"] = "success";
+        ok["action"] = action;
+        ok["completed"] = rc == 0;
+        ok["duration_ms"] = csrc::Json((int64_t)milliseconds);
+        ok["message"] = rc == 1 ? "superseded by newer command (no auto-stop)"
+                                : action + " completed";
+        return ok;
+    }
+
+    if (timed_move) {
         schedule_stop(ctx, milliseconds / 1000.0);
         csrc::Json ok;
         ok["status"] = "success";
@@ -174,10 +238,23 @@ csrc::Json execute_action(AppContext& ctx, const std::string& action, int speed,
     return ok;
 }
 
-csrc::Json run_motor(AppContext& ctx, int left, int right, double duration) {
+csrc::Json run_motor(AppContext& ctx, int left, int right, double duration, bool wait_done) {
     cancel_pending_stop(ctx);
+    int64_t seq = bump_motion_seq(ctx);
     ctx.motor_pair->set_speed(left, right);
     ctx.collector.set_target_speed(left, right);
+    if (duration > 0 && wait_done) {
+        // 同步：阻塞到时长结束、自动停车后才返回确认 ACK
+        int rc = wait_timed_done(ctx, seq, duration);
+        csrc::Json ok;
+        ok["status"] = "success";
+        ok["left"] = csrc::Json((int64_t)left);
+        ok["right"] = csrc::Json((int64_t)right);
+        ok["duration"] = duration;
+        ok["completed"] = rc == 0;
+        ok["mode"] = "completed";
+        return ok;
+    }
     if (duration > 0) {
         schedule_stop(ctx, duration);
         csrc::Json ok;
@@ -228,13 +305,24 @@ csrc::Json move_distance(AppContext& ctx, const std::string& direction, double v
         return err;
     }
 
+    bump_motion_seq(ctx);  // 取代任何进行中的定时运动
     ctx.motor_pair->move_distance((uint8_t)d, (uint8_t)sp, target);
 
+    // 同步：等 ESP32 闭环跑完（转速持续为 0）再返回确认 ACK。
+    // 距离/转角大时该请求会挂几秒~几十秒，属预期（客户端勿设短超时）。
+    auto t0 = std::chrono::steady_clock::now();
+    bool ever_moved = false;
+    bool stopped = wait_stationary(ctx, 30.0, 0.35, ever_moved);
+    double elapsed_ms = std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - t0).count();
+
     csrc::Json ok;
-    ok["status"] = "started";
+    ok["status"] = stopped ? "completed" : "timeout";
     ok["mode"] = "esp32";
     ok["target"] = value;
     ok["unit"] = unit;
+    ok["moved"] = ever_moved;
+    ok["elapsed_ms"] = csrc::Json((int64_t)elapsed_ms);
     return ok;
 }
 

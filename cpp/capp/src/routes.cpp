@@ -347,7 +347,8 @@ void register_routes(Router& router, AppContext& ctx) {
             result = move_distance(ctx, action, angle, motor_speed);
         } else {
             double ms = atof(req.query_param("time", "0").c_str());
-            result = execute_action(ctx, action, motor_speed, ms);
+            // 带时长(time>0)：同步执行完(自动停车)才回 ACK
+            result = execute_action(ctx, action, motor_speed, ms, ms > 0);
             if (result.gets("status") == "error") {
                 resp.set_json(result, 400);
                 return;
@@ -375,7 +376,8 @@ void register_routes(Router& router, AppContext& ctx) {
         int right = (int)atof(req.query_param("right", "0").c_str());
         double duration = atof(req.query_param("duration", "0").c_str());
         try {
-            Json result = run_motor(ctx, left, right, duration);
+            // 带时长(duration>0)：同步执行完(自动停车)才回 ACK
+            Json result = run_motor(ctx, left, right, duration, duration > 0);
             csrc::RobotStatus s = ctx.collector.get_status();
             result["left_speed"] = s.left_speed;
             result["right_speed"] = s.right_speed;

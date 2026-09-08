@@ -49,6 +49,9 @@ struct AppContext {
     std::mutex timer_mu;
     std::thread* timer_thread = nullptr;
     std::atomic<bool> timer_cancel{false};
+    /// 控制指令代际号（timer_mu 保护）：每条新指令推进；同步等待方据此判断
+    /// "自己发起的运动是否已被后续指令取代"（被取代则不再自动停车）
+    int motion_seq = 0;
     std::mutex arm_mu;   // grab/release 串行
 
     // demo 状态
@@ -91,9 +94,12 @@ struct AppContext {
 bool init_services(AppContext& ctx);
 
 /// 动作控制: action = up/down/left/right/stop/grab/release
-csrc::Json execute_action(AppContext& ctx, const std::string& action, int speed, double milliseconds);
-/// 直接设置电机速度（可选持续时间秒）
-csrc::Json run_motor(AppContext& ctx, int left, int right, double duration);
+/// wait_done=true 且带时长时：阻塞到运动执行完（自动停车）后才返回确认 ACK。
+csrc::Json execute_action(AppContext& ctx, const std::string& action, int speed,
+                          double milliseconds, bool wait_done = false);
+/// 直接设置电机速度（可选持续时间秒）。wait_done=true 时阻塞到时长结束停车后才返回。
+csrc::Json run_motor(AppContext& ctx, int left, int right, double duration,
+                     bool wait_done = false);
 /// 闭环距离/转向（ESP32 固件内部执行）
 csrc::Json move_distance(AppContext& ctx, const std::string& direction, double value, int speed);
 /// 发送原始命令到夹爪串口
