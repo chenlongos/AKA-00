@@ -588,20 +588,31 @@ void register_routes(Router& router, AppContext& ctx) {
 
         uint64_t last_ts = 0;
         auto last_send = std::chrono::steady_clock::now();
+        // config stream_width/height>0 → 服务端缩放重编码后下发（省 WiFi 带宽）
+        const bool downscale = ctx.config.camera.stream_width > 0 &&
+                               ctx.config.camera.stream_height > 0;
         while (true) {
             csrc::Camera::Frame f;
             if (ctx.camera.read_latest(f) && !f.data.empty() && f.ts_ms != last_ts) {
                 auto now = std::chrono::steady_clock::now();
                 if (now - last_send >= min_interval) {
-                    if (csrc::Camera::is_jpeg(f.data.data(), f.data.size())) {
-                        // MJPEG 直通：头 + jpeg + 尾拼成一个 buffer 一次 write（减少系统调用）
+                    std::vector<uint8_t> jpeg;
+                    bool ok = false;
+                    if (downscale) {
+                        ok = build_stream_jpeg(ctx, f, jpeg);
+                    } else if (csrc::Camera::is_jpeg(f.data.data(), f.data.size())) {
+                        jpeg = std::move(f.data);
+                        ok = true;
+                    }
+                    if (ok && !jpeg.empty()) {
+                        // MJPEG 直通/重编码帧：头 + jpeg + 尾拼成一个 buffer 一次 write（减少系统调用）
                         std::string part = "--frame\r\nContent-Type: image/jpeg\r\n"
-                                           "Content-Length: " + std::to_string(f.data.size()) +
+                                           "Content-Length: " + std::to_string(jpeg.size()) +
                                            "\r\n\r\n";
                         std::string out;
-                        out.reserve(part.size() + f.data.size() + 2);
+                        out.reserve(part.size() + jpeg.size() + 2);
                         out += part;
-                        out.append((const char*)f.data.data(), f.data.size());
+                        out.append((const char*)jpeg.data(), jpeg.size());
                         out += "\r\n";
                         if (!conn.write_all(out)) break;
                         last_ts = f.ts_ms;

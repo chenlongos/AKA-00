@@ -138,6 +138,9 @@ Config Config::load() {
     cfg.camera.height = toml.geti("camera", "height", cfg.camera.height);
     cfg.camera.fps = toml.geti("camera", "fps", cfg.camera.fps);
     cfg.camera.jpeg_quality = toml.geti("camera", "jpeg_quality", cfg.camera.jpeg_quality);
+    cfg.camera.stream_width = toml.geti("camera", "stream_width", cfg.camera.stream_width);
+    cfg.camera.stream_height = toml.geti("camera", "stream_height", cfg.camera.stream_height);
+    cfg.camera.stream_quality = toml.geti("camera", "stream_quality", cfg.camera.stream_quality);
 
     cfg.motor.backend = toml.get("motor", "backend", cfg.motor.backend);
     cfg.motor.port = toml.get("motor", "port", cfg.motor.port);

@@ -341,6 +341,41 @@ bool current_jpeg(AppContext& ctx, int quality, std::vector<uint8_t>& out) {
     return csrc::Camera::rgb_to_jpeg(rgb.data(), f.w, f.h, quality, out);
 }
 
+// 解码 → 等比缩放（黑边补齐到 stream_* 尺寸）→ 重编码 JPEG。
+// 返回 false 表示该帧无法转出 JPEG（坏帧/未知格式），调用方应跳过而不是断开。
+bool build_stream_jpeg(AppContext& ctx, const csrc::Camera::Frame& f,
+                       std::vector<uint8_t>& out) {
+    const int ow = ctx.config.camera.stream_width;
+    const int oh = ctx.config.camera.stream_height;
+    const int q = ctx.config.camera.stream_quality;
+    if (ow <= 0 || oh <= 0 || q <= 0 || f.data.empty()) return false;
+
+    std::vector<uint8_t> rgb;
+    int w = 0, h = 0;
+    if (csrc::Camera::is_jpeg(f.data.data(), f.data.size())) {
+        // libjpeg 缩放解码：输出宽 ≤ ow（保持宽高比，1/1..1/8 整数降采样）
+        if (!csrc::Camera::jpeg_to_rgb(f.data.data(), f.data.size(), w, h, rgb, ow))
+            return false;
+    } else if (f.w > 0 && f.h > 0) {
+        // YUYV 兜底：先转 RGB，再缩放
+        w = f.w;
+        h = f.h;
+        rgb.resize((size_t)w * h * 3);
+        csrc::Camera::yuyv_to_rgb(f.data.data(), w, h, rgb.data());
+    } else {
+        return false;
+    }
+    if (w <= 0 || h <= 0) return false;
+
+    if (w == ow && h == oh) {
+        return csrc::Camera::rgb_to_jpeg(rgb.data(), w, h, q, out);
+    }
+    std::vector<uint8_t> box((size_t)ow * oh * 3);
+    if (!csrc::Camera::letterbox_rgb(rgb.data(), w, h, box.data(), ow, oh))
+        return false;
+    return csrc::Camera::rgb_to_jpeg(box.data(), ow, oh, q, out);
+}
+
 // ═══════════════════════ 状态上报 ═══════════════════════
 
 void report_status(AppContext& ctx, const std::string& action) {

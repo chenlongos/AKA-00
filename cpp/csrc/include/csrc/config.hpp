@@ -13,10 +13,16 @@
 namespace csrc {
 
 struct CameraConfig {
-    int width = 320;
+    int width = 320;    // 摄像头请求宽度（需为摄像头原生支持的档位，如 640/1280）
     int height = 240;
     int fps = 24;
     int jpeg_quality = 30;
+    // ── 流式下发缩放（省 WiFi 带宽）──
+    // stream_width/stream_height > 0 时，/api/camera/stream 会把采集帧
+    // 服务端缩放到该尺寸并重编码后下发；= 0 时直通原帧（默认，行为不变）。
+    int stream_width = 0;
+    int stream_height = 0;
+    int stream_quality = 60;
 };
 
 struct MotorConfig {

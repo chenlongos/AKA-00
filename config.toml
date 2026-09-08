@@ -1,0 +1,45 @@
+# AKA-00 机器人部署配置（仓库根 = 配置源）
+# `make -C cpp package` 会把它拷贝进部署目录 dist/AKA-00/config.toml。
+# 板上运行时实际读取的是 /root/AKA-00/config.toml。
+
+[camera]
+# 采集分辨率：必须用摄像头原生能出帧的档位。
+# 实测本摄像头（Hy-UXGA/B5M2）：320x240 会"假协商不出帧"（勿用！），640x360 可稳定出流。
+# 枚举到的全部档位：1920x1080 1280x960 1280x720 640x360（320x240 为假档）
+width = 640
+height = 360
+fps = 15
+jpeg_quality = 30
+# 流式下发缩放（省 WiFi 带宽）：
+# stream_width/stream_height > 0 时，/api/camera/stream 把采集帧缩到该尺寸重编码后下发；
+# = 0 则直通原帧（旧行为）。前端看到的就是 320x180。
+stream_width = 320
+stream_height = 180
+stream_quality = 60
+
+[motor]
+backend = "tt_pid"
+port = "/dev/ttyS1"
+baudrate = 115200
+ppr = 4680
+
+[arm]
+backend = "zp10s"
+port = "/dev/ttyS2"
+baudrate = 115200
+
+[web]
+port = 80
+https_port = 5443
+https_cert = "cert.pem"
+https_key = "key.pem"
+
+[ota]
+check_url = "https://api.chenlongrobot.com/api/user/robot-versions/featured"
+
+[chassis]
+wheel_diameter_mm = 62
+gear_ratio = 90
+
+[logging]
+level = "info"

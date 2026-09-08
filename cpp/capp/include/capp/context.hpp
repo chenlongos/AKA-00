@@ -115,6 +115,9 @@ bool ensure_camera(AppContext& ctx);
 void close_camera(AppContext& ctx);
 /// 当前帧 → JPEG 字节（原生 MJPEG 直通；YUYV 先转 RGB 再编码）
 bool current_jpeg(AppContext& ctx, int quality, std::vector<uint8_t>& out);
+/// 流帧 → JPEG 字节：按 config.camera.stream_* 缩放重编码（=0 时等价直通）。
+/// 返回 false = 帧不可用。
+bool build_stream_jpeg(AppContext& ctx, const csrc::Camera::Frame& f, std::vector<uint8_t>& out);
 
 // ── 状态上报（对应 app/services/status_reporter.py）──
 

@@ -68,6 +68,33 @@ bool Camera::open_device(int width, int height, int fps) {
     std::memcpy(crd, cap.card, 32);
     CAM_INFO("V4L2 driver=%s card=%s", drv, crd);
 
+    // 枚举设备真实支持的格式/分辨率（排查"假协商不出帧"用，mjpg 时代调试手法）。
+    // 注意：某些廉价 UVC 固件会在列表里塞入不会真正出流的尺寸。
+    for (unsigned idx = 0;; idx++) {
+        v4l2_fmtdesc fd;
+        std::memset(&fd, 0, sizeof fd);
+        fd.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;   // ENUM_FMT 必须指定 buffer type
+        fd.index = idx;
+        if (::ioctl(fd_, VIDIOC_ENUM_FMT, &fd) < 0) break;
+        char fourcc[5] = {(char)(fd.pixelformat & 0xff),
+                          (char)((fd.pixelformat >> 8) & 0xff),
+                          (char)((fd.pixelformat >> 16) & 0xff),
+                          (char)((fd.pixelformat >> 24) & 0xff), 0};
+        std::string sizes;
+        v4l2_frmsizeenum fs;
+        std::memset(&fs, 0, sizeof fs);
+        fs.pixel_format = fd.pixelformat;
+        while (::ioctl(fd_, VIDIOC_ENUM_FRAMESIZES, &fs) == 0) {
+            if (fs.type == V4L2_FRMSIZE_TYPE_DISCRETE) {
+                if (!sizes.empty()) sizes += " ";
+                sizes += std::to_string(fs.discrete.width) + "x" + std::to_string(fs.discrete.height);
+            }
+            fs.index++;
+        }
+        CAM_INFO("V4L2 fmt %s (%s) supports: %s", fourcc, fd.description,
+                 sizes.empty() ? "?" : sizes.c_str());
+    }
+
     // 协商格式：MJPEG 优先，YUYV 回退
     auto try_fmt = [&](uint32_t fmt, int& w, int& h) {
         v4l2_format f;
@@ -191,15 +218,30 @@ bool Camera::open(int width, int height, int fps) {
     available_ = true;
     running_ = true;
     thread_ = new std::thread([this] { capture_loop(); });
-    CAM_INFO("camera capture thread started (%dx%d)", width, height);
+    CAM_INFO("camera capture thread started (%dx%d)", cam_w_, cam_h_);
     return true;
 }
 
 void Camera::capture_loop() {
+    auto last_good = std::chrono::steady_clock::now();
+    bool stall_warned = false;
     while (running_) {
         if (fd_ < 0) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             continue;
+        }
+        // 无帧看门狗：协商"成功"但 4 秒一帧不出 → 极可能是该尺寸的"假档"
+        // （廉价 UVC 常见：列表里有、S_FMT 也接受、但固件根本不出流）。
+        auto idle_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           std::chrono::steady_clock::now() - last_good)
+                           .count();
+        if (idle_ms >= 4000 && !stall_warned) {
+            stall_warned = true;
+            CAM_ERROR("V4L2 stream on but NO frame for %lld ms: negotiated %dx%d %s "
+                      "may be a bogus mode (S_FMT ok, no frames). Use a size from the "
+                      "'V4L2 fmt ... supports:' list above",
+                      (long long)idle_ms, cam_w_, cam_h_,
+                      fmt_ == V4L2_PIX_FMT_MJPEG ? "MJPEG" : "YUYV");
         }
         pollfd pfd = {fd_, POLLIN, 0};
         int rc = ::poll(&pfd, 1, 1000);
@@ -232,6 +274,7 @@ void Camera::capture_loop() {
         latest_.format = f.format;
         latest_.data = std::move(f.data);
         latest_.ts_ms = f.ts_ms;
+        last_good = std::chrono::steady_clock::now();
 
         // 2 秒一次的出帧率统计（debug 级）：确认摄像头实际帧率与瓶颈
         static uint64_t s_frames = 0;

@@ -70,7 +70,8 @@ package: $(CAPP_BIN) tools
 	[ -f "$(ROOT)/VERSION" ] && cp "$(ROOT)/VERSION" "$$DIST/"; \
 	if [ ! -f "$$DIST/config.toml" ]; then \
 	    printf '%s\n' \
-	        '[camera]' 'width = 320' 'height = 240' 'fps = 24' 'jpeg_quality = 30' \
+	        '[camera]' 'width = 640' 'height = 360' 'fps = 15' 'jpeg_quality = 30' \
+	        'stream_width = 320' 'stream_height = 180' 'stream_quality = 60' \
 	        '' '[motor]' 'backend = "tt_pid"' 'port = "/dev/ttyS1"' 'baudrate = 115200' 'ppr = 4680' \
 	        '' '[arm]' 'backend = "zp10s"' 'port = "/dev/ttyS2"' 'baudrate = 115200' \
 	        '' '[web]' 'port = 80' 'https_port = 5443' 'https_cert = "cert.pem"' 'https_key = "key.pem"' \
@@ -78,7 +79,7 @@ package: $(CAPP_BIN) tools
 	        '' '[chassis]' 'wheel_diameter_mm = 62' 'gear_ratio = 90' \
 	        '' '[logging]' 'level = "info"' \
 	        > "$$DIST/config.toml"; \
-	    echo "  （无根 config.toml，已生成默认配置）"; \
+	    echo "  （无根 config.toml，已生成默认配置：640x360 采集 + 320x180 缩流）"; \
 	fi; \
 	if [ -d "$(ROOT)/demo" ]; then \
 	    for d in "$(ROOT)"/demo/*/; do [ -f "$$d/init.sh" ] && cp -r "$${d%/}" "$$DIST/demo/"; done; \
@@ -101,6 +102,10 @@ package: $(CAPP_BIN) tools
 	    cp "$(CPP)/csrc/build-cross/tt_pid_test" "$$DIST/tools/"; \
 	    chmod 755 "$$DIST/tools/tt_pid_test"; \
 	    cp "$(CPP)/csrc/tools/ws_joystick_test.py" "$$DIST/tools/"; \
+	    if [ -f "$(CPP)/csrc/build-cross/cam_probe" ]; then \
+	        cp "$(CPP)/csrc/build-cross/cam_probe" "$$DIST/tools/"; \
+	        chmod 755 "$$DIST/tools/cam_probe"; \
+	    fi; \
 	fi; \
 	echo ""; echo "  ✓ 部署目录: $$DIST"; du -sh "$$DIST" 2>/dev/null || true; \
 	echo ""; echo "  板子上: scp dist/aka-capp.tar.gz root@<板子IP>:/root/"; \
