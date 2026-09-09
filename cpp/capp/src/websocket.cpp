@@ -354,9 +354,8 @@ void ws_control_loop(AppContext& ctx, ClientConn& conn) {
             CAM_DEBUG("[ws] rx tick (data opcode=%d len=%zu)", rc, len);
         }
 
-        // 服务端心跳：4s 一 ping（浏览器自动回 pong，刷活 NAT/中间盒并探活）；
-        // 25s 内没收到任何字节（含 pong）→ 判定死链，主动断开避免悬挂
-        // （正常：4s ping 一次；25s 余量足够吞下下行拥塞造成的上行延迟）
+        // 服务端心跳：4s 一 ping（浏览器自动回 pong，探活并维持 NAT 映射）；
+        // 90s 无任何字节才判死——判死只用于回收僵尸连接，不再承担安全停车职责
         if (now - last_ping >= std::chrono::milliseconds(4000)) {
             if (!ws_send_frame(conn, 0x9, nullptr, 0)) {
                 reason = WsCloseReason::WriteFail;
@@ -367,12 +366,13 @@ void ws_control_loop(AppContext& ctx, ClientConn& conn) {
             last_ping = now;
         }
         // 诊断：长时间没收到客户端任何字节时的分级告警（正常浏览器会回 pong）。
-        // 阈值放宽到 12s 才告警 / 25s 才判死：容忍摄像头下行挤压上行导致的拥塞窗口
-        if (!no_rx_warned && rx_idle_s >= 12.0) {
-            CAM_WARN("[ws] no client bytes for %.0fs (will close at 25s) — 下行拥塞(pong 延迟)或真断链", rx_idle_s);
+        // 判死阈值 90s：手机 WiFi 省电(PSM)/上行停摆可能持续数十秒，秒级判死只会
+        // 造成反复断开-重连；断连已不停车，90s 内自愈即可，真死由新连接接管
+        if (!no_rx_warned && rx_idle_s >= 30.0) {
+            CAM_WARN("[ws] no client bytes for %.0fs (will close at 90s) — 上行停摆或真断链", rx_idle_s);
             no_rx_warned = true;
         }
-        if (rx_idle_s >= 25.0) {
+        if (rx_idle_s >= 90.0) {
             reason = WsCloseReason::PingTimeout;
             running = false;
             break;
