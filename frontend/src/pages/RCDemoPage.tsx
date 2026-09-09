@@ -86,11 +86,12 @@ const RCDemoPage = () => {
     }, [cameraOn]);
 
     const sendCommand = useCallback(() => {
-        const t = Math.abs(throttleRef.current) < 3 ? 0 : throttleRef.current;
-        const r = Math.abs(rotationRef.current) < 3 ? 0 : rotationRef.current;
-        if (lastCmdRef.current && Math.abs(lastCmdRef.current.x - r) < 5 && Math.abs(lastCmdRef.current.y - t) < 5) return;
+        const t = Math.abs(throttleRef.current) < 2 ? 0 : throttleRef.current;
+        const r = Math.abs(rotationRef.current) < 1 ? 0 : rotationRef.current;
+        if (lastCmdRef.current && Math.abs(lastCmdRef.current.x - r) < 2 && Math.abs(lastCmdRef.current.y - t) < 2) return;
         lastCmdRef.current = {x: r, y: t};
-        controlSocket.sendJoystick(Math.round(r * 0.5), t);
+        const x = Math.round(Math.sign(r) * Math.pow(Math.abs(r) / 100, 1.1) * 90);
+        controlSocket.sendJoystick(x, t);
     }, []);
 
     const startMotor = useCallback(() => {
@@ -154,6 +155,8 @@ const RCDemoPage = () => {
 
     // 横屏摇杆参数
     const joyW = Math.round(vw * 0.22);
+    // 转向条比抓取按钮行更宽：拉长行程，避免可控范围被压到两端
+    const rotW = Math.round(vw * 0.36);
     const joySide = Math.round(vw * 0.04);
 
     // ---- 摇杆移动（用 ref 避免 useCallback 重建） ----
@@ -161,7 +164,7 @@ const RCDemoPage = () => {
     const handleSliderMove = useCallback((
         clientPos: number, vertical: boolean, el: HTMLDivElement | null,
         setter: (v: number) => void, valRef: React.MutableRefObject<number>,
-        activeRef: React.MutableRefObject<boolean>,
+        activeRef: React.MutableRefObject<boolean>, deadzone: number = 2,
     ) => {
         if (!el) return;
         const rect = el.getBoundingClientRect();
@@ -171,17 +174,17 @@ const RCDemoPage = () => {
         sliderMax.current = {throttle: maxDist, rot: maxDist};
         const dist = Math.max(-maxDist, Math.min(maxDist, clientPos - mid));
         const v = Math.round((vertical ? -dist : dist) / maxDist * 100);
-        if (Math.abs(v) < 3) { valRef.current = 0; setter(0); return; }
+        if (Math.abs(v) < deadzone) { valRef.current = 0; setter(0); return; }
         valRef.current = v; setter(v);
         if (!activeRef.current) { activeRef.current = true; startMotor(); }
     }, [stickR, startMotor]);
 
     const handleThrottleMove = useCallback((_x: number, clientY: number) => {
-        handleSliderMove(clientY, true, thrEl.current, setThrottle, throttleRef, thrActive);
+        handleSliderMove(clientY, true, thrEl.current, setThrottle, throttleRef, thrActive, 2);
     }, [handleSliderMove]);
     const handleThrottleEnd = useCallback(() => { throttleRef.current = 0; thrActive.current = false; setThrottle(0); }, []);
     const handleRotationMove = useCallback((clientX: number, _y: number) => {
-        handleSliderMove(clientX, false, rotEl.current, setRotation, rotationRef, rotActive);
+        handleSliderMove(clientX, false, rotEl.current, setRotation, rotationRef, rotActive, 1);  // 转向死区更小
     }, [handleSliderMove]);
     const handleRotationEnd = useCallback(() => { rotationRef.current = 0; rotActive.current = false; setRotation(0); }, []);
 
@@ -199,8 +202,8 @@ const RCDemoPage = () => {
         const scale = dist > 0 ? clampDist / dist : 0;
         const rx = Math.round((dx * scale) / maxR * 100);
         const ry = Math.round(-(dy * scale) / maxR * 100);  // 上=正
-        rotationRef.current = Math.abs(rx) < 5 ? 0 : rx;
-        throttleRef.current = Math.abs(ry) < 5 ? 0 : ry;
+        rotationRef.current = Math.abs(rx) < 2 ? 0 : rx;
+        throttleRef.current = Math.abs(ry) < 2 ? 0 : ry;
         setRotation(rotationRef.current);
         setThrottle(throttleRef.current);
         if (!padActiveRef.current) { padActiveRef.current = true; startMotor(); }
@@ -366,7 +369,7 @@ const RCDemoPage = () => {
                             boxShadow: "0 2px 8px rgba(59,130,246,0.3)",
                         }}>🤚 释放</button>
                     </div>
-                    {renderJoystick(rotEl, false, joyW, rotH, rotation, "var(--color-primary)", handleRotationMove, handleRotationEnd)}
+                    {renderJoystick(rotEl, false, rotW, rotH, rotation, "var(--color-primary)", handleRotationMove, handleRotationEnd)}
                     <span style={{fontSize: scalePx(10), fontWeight: 600, color: Math.abs(rotation) > 5 ? "var(--color-primary)" : "rgba(255,255,255,0.5)"}}>
                         {rotation > 5 ? "→" : rotation < -5 ? "←" : "·"} {Math.abs(rotation)}%
                     </span>
