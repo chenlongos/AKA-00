@@ -63,7 +63,9 @@ bool ws_send_binary(ClientConn& conn, const void* data, size_t len) {
 ///   -1  连接关闭 / 协议错误（应断开）
 ///   -2  ping/pong（已处理，忽略）
 // ── 帧级超时：同一帧从首字节起超过该时长视为坏帧/死链 ──
-constexpr int64_t kFrameTimeoutMs = 5000;
+// 10s 而非更短：手机在接收摄像头 MJPEG 流时（下行大、WiFi 半双工），
+// 上行 pong/摇杆可能被挤到几秒才到——太紧会把"下行拥塞"误判成断线。
+constexpr int64_t kFrameTimeoutMs = 10000;
 
 namespace {
 struct WsFrame {
@@ -353,7 +355,8 @@ void ws_control_loop(AppContext& ctx, ClientConn& conn) {
         }
 
         // 服务端心跳：4s 一 ping（浏览器自动回 pong，刷活 NAT/中间盒并探活）；
-        // 12s 内没收到任何字节（含 pong）→ 判定死链，主动断开避免悬挂
+        // 25s 内没收到任何字节（含 pong）→ 判定死链，主动断开避免悬挂
+        // （正常：4s ping 一次；25s 余量足够吞下下行拥塞造成的上行延迟）
         if (now - last_ping >= std::chrono::milliseconds(4000)) {
             if (!ws_send_frame(conn, 0x9, nullptr, 0)) {
                 reason = WsCloseReason::WriteFail;
@@ -363,12 +366,13 @@ void ws_control_loop(AppContext& ctx, ClientConn& conn) {
             CAM_DEBUG("[ws] ping sent (tx idle %.1fs)", rx_idle_s);
             last_ping = now;
         }
-        // 诊断：长时间没收到客户端任何字节时的分级告警（正常浏览器会回 pong）
-        if (!no_rx_warned && rx_idle_s >= 6.0) {
-            CAM_WARN("[ws] no client bytes for %.0fs (will close at 12s) — 若在摇杆按住状态出现说明 pong 没回来", rx_idle_s);
+        // 诊断：长时间没收到客户端任何字节时的分级告警（正常浏览器会回 pong）。
+        // 阈值放宽到 12s 才告警 / 25s 才判死：容忍摄像头下行挤压上行导致的拥塞窗口
+        if (!no_rx_warned && rx_idle_s >= 12.0) {
+            CAM_WARN("[ws] no client bytes for %.0fs (will close at 25s) — 下行拥塞(pong 延迟)或真断链", rx_idle_s);
             no_rx_warned = true;
         }
-        if (rx_idle_s >= 12.0) {
+        if (rx_idle_s >= 25.0) {
             reason = WsCloseReason::PingTimeout;
             running = false;
             break;
