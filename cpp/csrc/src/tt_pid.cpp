@@ -214,13 +214,18 @@ bool TtPidChassis::ping() {
     ser_.clear_input();
     uint8_t chk = CMD_GET_STATUS ^ 0;
     uint8_t frame[5] = {FRAME_H1, FRAME_H2, CMD_GET_STATUS, 0, chk};
-    if (!ser_.write(frame, sizeof frame)) return false;
+    if (!ser_.write(frame, sizeof frame)) {
+        CAM_WARN("[tt_pid] ping: tx write failed");
+        return false;
+    }
 
     uint8_t payload[7];
     size_t plen = sizeof payload;
     uint8_t rsp = 0;
-    if (!recv_frame(&rsp, payload, &plen, 0.15) || rsp != RSP_STATUS || plen < 1) {
-        CAM_DEBUG("[tt_pid] ping failed (rsp=0x%02X len=%zu)", rsp, plen);
+    // 超时放宽到 0.5s：单核忙时 0.15s 太容易假失败（真失联由 ESP32 看门狗兜底）
+    if (!recv_frame(&rsp, payload, &plen, 0.5) || rsp != RSP_STATUS || plen < 1) {
+        CAM_WARN("[tt_pid] ping: no reply within 0.5s (rsp=0x%02X len=%zu) — 串口瞬时没回包",
+                 rsp, plen);
         return false;
     }
     // 关键：仅"有应答"不够——ESP32 重启后处于 UNINIT(0)/IDLE(1) 也会应答 GET_STATUS，
@@ -229,7 +234,8 @@ bool TtPidChassis::ping() {
     // 稳态只有 READY(2)/RUNNING(3)；SYS_ERROR(4)/AUTO_TUNE(5) 也按未就绪处理。
     uint8_t st = payload[0];
     if (st != 2 && st != 3) {
-        CAM_DEBUG("[tt_pid] ping: state=%u not ready", st);
+        CAM_WARN("[tt_pid] ping: ESP32 state=%u not READY/RUNNING — 已被看门狗停(IDLE)或异常，需 INIT/CONFIG",
+                 st);
         return false;
     }
     return true;
