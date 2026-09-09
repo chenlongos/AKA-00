@@ -257,23 +257,21 @@ void Camera::capture_loop() {
             ::ioctl(fd_, VIDIOC_QBUF, &b);
             continue;
         }
-        Frame f;
-        f.data.assign((const uint8_t*)bufs[b.index].ptr, (const uint8_t*)bufs[b.index].ptr + b.bytesused);
-        f.w = cam_w_;
-        f.h = cam_h_;
-        f.format = fmt_;
-        f.ts_ms = (uint64_t)(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                 std::chrono::steady_clock::now().time_since_epoch())
-                                 .count());
+        uint64_t ts_ms = (uint64_t)(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                        std::chrono::steady_clock::now().time_since_epoch())
+                                        .count());
+        // 直接写 latest_（锁内 assign 复用其容量），避免每帧新建临时 vector——
+        // 长时间运行每帧一次 malloc 会累积碎片并加剧卡顿
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            latest_.data.assign((const uint8_t*)bufs[b.index].ptr,
+                                (const uint8_t*)bufs[b.index].ptr + b.bytesused);
+            latest_.w = cam_w_;
+            latest_.h = cam_h_;
+            latest_.format = fmt_;
+            latest_.ts_ms = ts_ms;
+        }
         ::ioctl(fd_, VIDIOC_QBUF, &b);
-
-        std::lock_guard<std::mutex> lk(mu_);
-        // 保留协商尺寸
-        latest_.w = f.w;
-        latest_.h = f.h;
-        latest_.format = f.format;
-        latest_.data = std::move(f.data);
-        latest_.ts_ms = f.ts_ms;
         last_good = std::chrono::steady_clock::now();
 
         // 2 秒一次的出帧率统计（debug 级）：确认摄像头实际帧率与瓶颈

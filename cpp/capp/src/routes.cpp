@@ -595,18 +595,28 @@ void register_routes(Router& router, AppContext& ctx) {
         const bool downscale = ctx.config.camera.stream_scale &&
                                ctx.config.camera.stream_width > 0 &&
                                ctx.config.camera.stream_height > 0;
+        // 编码输出缓冲跨帧复用，避免每帧 malloc（长时间运行更稳）
+        std::vector<uint8_t> jpeg;
         while (true) {
             csrc::Camera::Frame f;
             if (ctx.camera.read_latest(f) && !f.data.empty() && f.ts_ms != last_ts) {
                 auto now = std::chrono::steady_clock::now();
                 if (now - last_send >= min_interval) {
-                    std::vector<uint8_t> jpeg;
                     bool ok = false;
+                    auto t0 = std::chrono::steady_clock::now();
                     if (downscale) {
+                        jpeg.clear();
                         ok = build_stream_jpeg(ctx, f, jpeg);
                     } else if (csrc::Camera::is_jpeg(f.data.data(), f.data.size())) {
                         jpeg = std::move(f.data);
                         ok = true;
+                    }
+                    double enc_ms = std::chrono::duration<double, std::milli>(
+                                        std::chrono::steady_clock::now() - t0).count();
+                    // 诊断：单帧耗时 >120ms 即肉眼可见卡顿，记录一次(每帧, debug 级)
+                    if (enc_ms > 120.0) {
+                        CAM_DEBUG("camera stream frame encode %.0fms (cpu busy? size=%zu)",
+                                  enc_ms, jpeg.size());
                     }
                     if (ok && !jpeg.empty()) {
                         // MJPEG 直通/重编码帧：头 + jpeg + 尾拼成一个 buffer 一次 write（减少系统调用）
