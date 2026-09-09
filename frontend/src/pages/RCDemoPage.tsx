@@ -110,6 +110,18 @@ const RCDemoPage = () => {
         return () => { stopMotor(); controlSocket.close(); };
     }, []);
 
+    // WS 重连成功后补发当前状态：按住则续推（断连不再触发停车，
+    // 靠这里把“断开时仍在跑”的语义接回）；没按住则显式 0 收尾。
+    useEffect(() => {
+        if (!wsConnected) return;
+        const lc = lastCmdRef.current;
+        if (lc && (Math.abs(lc.x) >= 3 || Math.abs(lc.y) >= 3)) {
+            controlSocket.sendJoystick(Math.round(lc.x * 0.5), lc.y);
+        } else {
+            controlSocket.sendJoystick(0, 0);
+        }
+    }, [wsConnected]);
+
     // 横屏默认隐藏 tab bar，竖屏显示
     useEffect(() => {
         if (isLandscape) {

@@ -399,10 +399,11 @@ void ws_control_loop(AppContext& ctx, ClientConn& conn) {
         }
     }
 
-    // 断开自动停电机（摇杆松手不跑车）
-    run_motor(ctx, 0, 0, 0);
+    // WS 是上层(手机)通讯链路，断开不视为控制失效——停车只由显式指令
+    // (摇杆 0 / action stop) 与 ESP32 心跳看门狗(主机失联)负责。
+    // 前端会在重连成功后补发当前状态(按住续推 / 否则发 0)。
     conn.close();
-    CAM_WARN("[ws] client disconnected (reason=%s)", ws_reason_str(reason));
+    CAM_WARN("[ws] client disconnected (reason=%s) — 不触发停车", ws_reason_str(reason));
 }
 
 }  // namespace capp
