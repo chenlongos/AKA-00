@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -111,6 +112,8 @@ private:
     std::shared_ptr<MotorPair> active() const;  // 拷贝当前驱动（线程安全）
     /// 分段等待可被 close()/request_reconnect() 打断
     void wait_cancelable(int64_t ms);
+    /// 驱动指令落到 mock（底盘断开）时告警，节流 ≤1 条/秒
+    void warn_if_mock_drive(const char* what);
 
     const std::string backend_;
     const std::string port_;
@@ -136,6 +139,7 @@ private:
     bool connected_ = false;
     int attempts_ = 0;
     std::string error_;
+    std::chrono::steady_clock::time_point mock_warn_at_{};  // mock 告警节流
 };
 
 /// 创建底盘。backend: "tt_pid"（ESP32 编码器，自动重连）或 "dev"（开发用 mock）。

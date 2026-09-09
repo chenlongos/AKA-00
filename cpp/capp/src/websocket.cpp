@@ -237,6 +237,7 @@ static void ws_handle_json(AppContext& ctx, ClientConn& conn, const csrc::Json& 
         std::string action = cmd.gets("action", "stop");
         int speed = (int)cmd.geti("speed", 50);
         double ms = (double)cmd.geti("time", 0);
+        CAM_INFO("[ws] action=%s speed=%d time=%.0fms", action.c_str(), speed, ms);
         csrc::Json result = execute_action(ctx, action, speed, ms);
         csrc::Json resp;
         resp["type"] = "action";
@@ -301,6 +302,7 @@ void ws_control_loop(AppContext& ctx, ClientConn& conn) {
     auto last_status = std::chrono::steady_clock::now();
     auto last_rx_any = std::chrono::steady_clock::now();  // 最近收到任何字节/pong
     auto last_ping = std::chrono::steady_clock::now();    // 服务端心跳节拍
+    bool no_rx_warned = false;                            // 静默告警已打（防刷屏）
     WsPeer peer;
     WsCloseReason reason = WsCloseReason::None;
     bool running = true;
@@ -344,6 +346,11 @@ void ws_control_loop(AppContext& ctx, ClientConn& conn) {
         // rc == 0：空闲节拍（ping/pong/close 已在 ws_rx_frame 内处理）
 
         auto now = std::chrono::steady_clock::now();
+        double rx_idle_s = std::chrono::duration<double>(now - last_rx_any).count();
+        if (got_any) {
+            no_rx_warned = false;  // 收到任何字节(pong/数据)即复位告警
+            CAM_DEBUG("[ws] rx tick (data opcode=%d len=%zu)", rc, len);
+        }
 
         // 服务端心跳：4s 一 ping（浏览器自动回 pong，刷活 NAT/中间盒并探活）；
         // 12s 内没收到任何字节（含 pong）→ 判定死链，主动断开避免悬挂
@@ -353,9 +360,15 @@ void ws_control_loop(AppContext& ctx, ClientConn& conn) {
                 running = false;
                 break;
             }
+            CAM_DEBUG("[ws] ping sent (tx idle %.1fs)", rx_idle_s);
             last_ping = now;
         }
-        if (now - last_rx_any >= std::chrono::milliseconds(12000)) {
+        // 诊断：长时间没收到客户端任何字节时的分级告警（正常浏览器会回 pong）
+        if (!no_rx_warned && rx_idle_s >= 6.0) {
+            CAM_WARN("[ws] no client bytes for %.0fs (will close at 12s) — 若在摇杆按住状态出现说明 pong 没回来", rx_idle_s);
+            no_rx_warned = true;
+        }
+        if (rx_idle_s >= 12.0) {
             reason = WsCloseReason::PingTimeout;
             running = false;
             break;

@@ -70,8 +70,24 @@ std::shared_ptr<MotorPair> AutoReconnectMotorPair::active() const {
 
 // ── 转发方法：active() 永不为空（无真实驱动时为 mock），无需判空 ──
 
+void AutoReconnectMotorPair::warn_if_mock_drive(const char* what) {
+    bool should_log = false;
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        auto now = std::chrono::steady_clock::now();
+        if (now - mock_warn_at_ >= std::chrono::seconds(1)) {
+            mock_warn_at_ = now;
+            should_log = true;
+        }
+    }
+    if (should_log)
+        CAM_WARN("[motor] %s while chassis DISCONNECTED (active=mock) — 指令被丢弃，车不动",
+                 what);
+}
+
 void AutoReconnectMotorPair::set_speed(int left, int right) {
     auto p = active();
+    if (p == mock_ && (left != 0 || right != 0)) warn_if_mock_drive("set_speed");
     p->set_speed(left, right);
 }
 
@@ -97,6 +113,7 @@ void AutoReconnectMotorPair::get_encoder(int& c1, int& c2) {
 
 void AutoReconnectMotorPair::move_distance(uint8_t dir, uint8_t speed, int32_t target) {
     auto p = active();
+    if (p == mock_) warn_if_mock_drive("move_distance");
     p->move_distance(dir, speed, target);
 }
 

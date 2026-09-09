@@ -200,6 +200,8 @@ csrc::Json execute_action(AppContext& ctx, const std::string& action, int speed,
                           double milliseconds, bool wait_done) {
     cancel_pending_stop(ctx);
     int64_t seq = bump_motion_seq(ctx);
+    CAM_INFO("[control] action=%s speed=%d ms=%.0f wait=%d", action.c_str(), speed,
+             milliseconds, (int)wait_done);
 
     bool handled = apply_base_action(ctx, action, speed) || apply_arm_action(ctx, action);
     if (!handled) {
@@ -243,6 +245,10 @@ csrc::Json run_motor(AppContext& ctx, int left, int right, double duration, bool
     int64_t seq = bump_motion_seq(ctx);
     ctx.motor_pair->set_speed(left, right);
     ctx.collector.set_target_speed(left, right);
+    if (left == 0 && right == 0)
+        CAM_INFO("[motor] stop cmd (L=R=0)");
+    else
+        CAM_DEBUG("[motor] run L=%d R=%d dur=%.2fs wait=%d", left, right, duration, (int)wait_done);
     if (duration > 0 && wait_done) {
         // 同步：阻塞到时长结束、自动停车后才返回确认 ACK
         int rc = wait_timed_done(ctx, seq, duration);
@@ -308,6 +314,8 @@ csrc::Json move_distance(AppContext& ctx, const std::string& direction, double v
     bump_motion_seq(ctx);  // 取代任何进行中的定时运动
     auto* mp = ctx.motor_pair.get();
     int base = mp->move_state();  // 发送前状态（可能是上次闭环残留的 done=2）
+    CAM_INFO("[control] move_distance dir=%s value=%.0f(%s) speed=%d target=%d base_state=%d",
+             direction.c_str(), value, unit.c_str(), sp, (int)target, base);
     mp->move_distance((uint8_t)d, (uint8_t)sp, target);
 
     // 同步：等 ESP32 闭环精确回报。ESP32 把"运行中/结果"随 10Hz STATUS 回包附带
