@@ -24,24 +24,22 @@ bool ws_handshake(const HttpRequest& req, ClientConn& conn);
 bool ws_send_frame(ClientConn& conn, uint8_t opcode, const void* data, size_t len);
 bool ws_send_binary(ClientConn& conn, const void* data, size_t len);
 
-/// 断开原因（诊断"WS 易断"用：每次断开打日志说明原因）
+/// 断开原因（诊断用：每次断开打日志说明原因）
 enum class WsCloseReason {
     None = 0,
     ClientClose,   // 客户端发 close 帧 / 正常关闭
     ReadError,     // 底层读错误（TCP RST / TLS 错误）
     Oversize,      // 帧超过缓冲区上限
     Fragmented,    // FIN=0 分片（不支持）
-    FrameTimeout,  // 一帧超过 kFrameTimeoutMs 没收完整
-    PingTimeout,   // 长时间没有任何字节（含 pong）→ 判定死链
+    PingTimeout,   // 90s 无任何完整帧(含 pong) → 判定死链
     WriteFail,     // 服务端下发失败（对端关闭）
 };
 
-/// 有状态 WS 接收器：跨节拍缓冲字节，绝不因"半帧恰好超时"断开；
-/// 只有整帧超过帧级超时或协议错误才断开。
+/// 有状态 WS 接收器：字节跨节拍缓冲。
+/// 半帧卡住(上行停摆)绝不断开、绝不清理——TCP 保序，恢复后自然拼完，
+/// 后续排队指令不丢；"活跃"只按完整帧计，供外层判死回收僵尸连接。
 struct WsPeer {
     std::vector<uint8_t> buf;           // 未解析完的字节（可含多个帧）
-    bool frame_started = false;         // 当前帧已收到首字节
-    std::chrono::steady_clock::time_point frame_t0;
 };
 
 /// 推进 WS 接收。每次最多等 timeout_ms 收数据并尝试解析一个完整帧。

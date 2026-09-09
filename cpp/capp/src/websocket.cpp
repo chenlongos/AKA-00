@@ -62,11 +62,6 @@ bool ws_send_binary(ClientConn& conn, const void* data, size_t len) {
 ///    0  超时（无数据，连接仍可用）
 ///   -1  连接关闭 / 协议错误（应断开）
 ///   -2  ping/pong（已处理，忽略）
-// ── 帧级超时：同一帧从首字节起超过该时长视为坏帧/死链 ──
-// 10s 而非更短：手机在接收摄像头 MJPEG 流时（下行大、WiFi 半双工），
-// 上行 pong/摇杆可能被挤到几秒才到——太紧会把"下行拥塞"误判成断线。
-constexpr int64_t kFrameTimeoutMs = 10000;
-
 namespace {
 struct WsFrame {
     bool fin = true;
@@ -115,7 +110,6 @@ const char* ws_reason_str(WsCloseReason r) {
         case WsCloseReason::ReadError:    return "read-error";
         case WsCloseReason::Oversize:     return "oversize";
         case WsCloseReason::Fragmented:   return "fragmented";
-        case WsCloseReason::FrameTimeout: return "frame-timeout";
         case WsCloseReason::PingTimeout:  return "ping-timeout";
         case WsCloseReason::WriteFail:    return "write-fail";
         default:                          return "none";
@@ -123,8 +117,9 @@ const char* ws_reason_str(WsCloseReason r) {
 }
 }  // namespace
 
-/// 有状态读帧：字节跨节拍缓存在 peer.buf 里累积，任何"半帧恰好超时"都不会断开；
-/// 只有整帧超过 kFrameTimeoutMs / 协议错误 / 底层读错误才返回 -1（reason 说明）。
+/// 有状态读帧：字节跨节拍缓存在 peer.buf 里累积，任何"半帧卡住"都不断开——
+/// 半帧等上行恢复自然拼完(TCP 保序，不丢后续指令)；只有协议错误 / close /
+/// 底层读错误才返回 -1（reason 说明）。"活跃"只按完整帧/pong 计，供外层判死。
 int ws_rx_frame(ClientConn& conn, WsPeer& peer, uint8_t* out, size_t cap,
                 size_t& out_len, int timeout_ms, WsCloseReason& reason,
                 bool& got_any_byte) {
@@ -184,19 +179,11 @@ int ws_rx_frame(ClientConn& conn, WsPeer& peer, uint8_t* out, size_t cap,
         int r = conn.read_some(tmp, sizeof tmp, remain, g);
         if (r == -1) { reason = WsCloseReason::ReadError; return -1; }
         if (r == 0 || g == 0) continue;
-        got_any_byte = true;
+        // 注意：收到半帧字节不视为"活跃"——活跃按完整帧/pong 计(见 parse Ok 处)。
+        // 帧卡住(上行停摆)时绝不清理也绝不断开：TCP 保序，恢复后半帧会拼完、
+        // 排队的后续指令照常解析，不会丢指令；真死(半帧挂住再无下文)由外层
+        // 90s 无完整帧的判死回收连接。
         peer.buf.insert(peer.buf.end(), tmp, tmp + g);
-        if (!peer.frame_started) {
-            peer.frame_started = true;
-            peer.frame_t0 = std::chrono::steady_clock::now();
-        }
-        // 帧级超时：同一帧首字节之后超过 5s 没拼完整 → 坏帧断开（防半帧死等）
-        int64_t age = std::chrono::duration_cast<std::chrono::milliseconds>(
-                          std::chrono::steady_clock::now() - peer.frame_t0).count();
-        if (age >= kFrameTimeoutMs) {
-            reason = WsCloseReason::FrameTimeout;
-            return -1;
-        }
     }
     return 0;
 }
