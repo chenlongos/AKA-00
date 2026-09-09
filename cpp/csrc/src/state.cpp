@@ -5,6 +5,7 @@
 #include <chrono>
 
 #include "csrc/log.hpp"
+#include "csrc/system_utils.hpp"
 
 namespace csrc {
 
@@ -82,6 +83,13 @@ void StateCollector::loop() {
 
         auto elapsed = std::chrono::duration<double>(
             std::chrono::steady_clock::now() - t0).count();
+        // 诊断：本应 100ms 一跳的状态循环若被拖 >400ms，说明单核被饿死——
+        // WS 读不动(frame-timeout) / ESP32 心跳断(heartbeat lost)多由此而来
+        if (elapsed > 0.4) {
+            CAM_WARN("[state] loop lagged %.0fms (>400ms 应 100ms 一跳) cpu=%d%% — "
+                     "单核被抢占，WS/串口轮询被饿死",
+                     elapsed * 1000.0, csrc::cpu_usage());
+        }
         double sleep = kInterval - elapsed;
         if (sleep > 0) {
             std::this_thread::sleep_for(std::chrono::duration<double>(sleep));
