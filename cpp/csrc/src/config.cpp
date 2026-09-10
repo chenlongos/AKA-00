@@ -183,6 +183,7 @@ Config Config::load() {
     cfg.display.scale = toml.geti("display", "scale", cfg.display.scale);
     cfg.display.orient = toml.geti("display", "orient", cfg.display.orient);
     cfg.display.fps = toml.geti("display", "fps", cfg.display.fps);
+    cfg.display.fps_streaming = toml.geti("display", "fps_streaming", cfg.display.fps_streaming);
     cfg.display.noise = toml.geti("display", "noise", cfg.display.noise);
     cfg.display.decode_max_w = toml.geti("display", "decode_max_w", cfg.display.decode_max_w);
 

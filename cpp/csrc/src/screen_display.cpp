@@ -252,8 +252,13 @@ void ScreenDisplay::blit_dirty(int& dirty_rows) {
 
 void ScreenDisplay::loop() {
     Camera& cam = Camera::get_instance();
-    const auto interval = std::chrono::milliseconds(1000 / cfg_.fps);
-    auto last_push = std::chrono::steady_clock::now() - interval;
+    // 帧率随"浏览器是否在看流"切换：有人看流时降帧（单核 SoC 上显示+取流会饱和）
+    auto cur_interval = [&]() -> std::chrono::milliseconds {
+        int f = streaming_ ? cfg_.fps_streaming : cfg_.fps;
+        if (f <= 0) return std::chrono::milliseconds(0);   // 0 = 暂停显示
+        return std::chrono::milliseconds(1000 / f);
+    };
+    auto last_push = std::chrono::steady_clock::now() - std::chrono::seconds(1);
     uint64_t last_ts = 0;
 
     // 1Hz 统计窗口
@@ -262,11 +267,23 @@ void ScreenDisplay::loop() {
     long long win_dec = 0, win_conv = 0, win_blit = 0;
 
     while (running_) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        const auto interval = cur_interval();
+        if (interval.count() == 0) {          // 暂停（浏览器在看流且配了 fps_streaming=0）
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            last_push = std::chrono::steady_clock::now();
+            continue;
+        }
 
-        // 帧率上限：到点才处理（避免抢占 Web 服务/浏览器流的 CPU）
+        // 帧率上限：到点才处理（避免抢占 Web 服务/浏览器流的 CPU）。
+        // 睡眠按"距下次该处理还有多久"来定（上限 20ms），而不是死板 2ms ——
+        // 低帧率时不再每秒 500 次空唤醒。
         auto now = std::chrono::steady_clock::now();
-        if (now - last_push < interval) continue;
+        auto wait = interval - (now - last_push);
+        if (wait > std::chrono::milliseconds(0)) {
+            auto nap = wait > std::chrono::milliseconds(20) ? std::chrono::milliseconds(20) : wait;
+            std::this_thread::sleep_for(nap);
+            continue;
+        }
 
         // 先做轻量时间戳判断：没有新帧就完全不拷贝、不解码（否则每 2ms 白拷一次帧）
         uint64_t ts = cam.latest_ts();
@@ -310,8 +327,9 @@ void ScreenDisplay::loop() {
         auto el = std::chrono::duration_cast<std::chrono::milliseconds>(t3 - win_t0).count();
         if (el >= 1000) {
             int n = win_frames > 0 ? win_frames : 1;
-            CAM_DEBUG("[display] %d fps | dec %lldms | conv %lldms | blit %lldms (%d/%d rows)",
-                      win_frames, win_dec / n / 1000, win_conv / n / 1000,
+            CAM_DEBUG("[display] %d fps%s | dec %lldms | conv %lldms | blit %lldms (%d/%d rows)",
+                      win_frames, streaming_ ? "[浏览器在看流→降帧]" : "",
+                      win_dec / n / 1000, win_conv / n / 1000,
                       win_blit / n / 1000, win_rows / n, out_h_);
             std::lock_guard<std::mutex> lk(st_mu_);
             st_.fps = win_frames;

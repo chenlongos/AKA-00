@@ -599,6 +599,9 @@ void register_routes(Router& router, AppContext& ctx) {
                                ctx.config.camera.stream_height > 0;
         // 编码输出缓冲跨帧复用，避免每帧 malloc（长时间运行更稳）
         std::vector<uint8_t> jpeg;
+        // 有浏览器在看流 → 屏显示降帧（[display] fps_streaming，0=暂停）：
+        // 单核 SoC 上"显示 + 取流"会 CPU 饱和，拖慢网页看摄像头的帧率/延迟。
+        ctx.display.set_streaming(true);
         while (true) {
             auto now = std::chrono::steady_clock::now();
             if (now - last_send >= min_interval) {
@@ -650,6 +653,7 @@ void register_routes(Router& router, AppContext& ctx) {
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
+        ctx.display.set_streaming(false);   // 没人看流了 → 屏恢复 fps
         conn.close();
     });
 

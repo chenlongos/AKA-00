@@ -80,6 +80,11 @@ struct DisplayConfig {
     int scale = 2;           // 显示区域 = 屏幕 1/scale（2 → 160x240 居中）；1 = 全屏
     int orient = 3;          // 0无 1水平翻 2垂直翻 3=180°（本板实测 3 为正）
     int fps = 15;            // 显示帧率上限（建议与 camera.fps 一致）
+    /// 浏览器有人在看 MJPEG 时的显示帧率（默认 5；0 = 暂停显示）。
+    /// 单核 SoC 上"显示 + 浏览器流"会 CPU 饱和：显示每帧的 RGB565 转换 + SPI
+    /// 写屏约 20ms（15fps 下 ≈30% 单核），会显著拉低浏览器取流的帧率/延迟。
+    /// 有人看流时把屏幕降到该帧率，浏览器优先；没人看时恢复 fps。
+    int fps_streaming = 5;
     int noise = 1;           // 脏行容差：忽略每通道 N 个 LSB（0=精确，越大越宽容）
     int decode_max_w = 320;  // 解码降采样上限宽（与 camera.stream_width 一致可命中共享缓存）
 };

@@ -344,6 +344,13 @@ screen_test camera [scale]  # 摄像头实时预览（默认 scale=2 半屏）
 | `POST /api/display?enabled=1` 手动开屏 | 摄像头未开时顺带打开它（要画面就得有摄像头） |
 | `[display] follow_camera = false` | 退化为开机常显（旧行为，会顺带打开摄像头） |
 
+**浏览器优先（CPU 竞争）**：单核 SoC 上"屏显示 + 浏览器取流"同时跑会 CPU 饱和
+（显示每帧 RGB565 转换 + SPI 写屏约 20ms，15fps ≈ 30% 单核；驱动推屏还有内核侧开销），
+会明显拖慢网页看摄像头的帧率与延迟。因此 `/api/camera/stream` 有客户端连接时会把
+显示线程降到 `[display] fps_streaming`（默认 5；**设为 0 = 有人看流时完全暂停屏显示**），
+断开后自动恢复 `[display] fps`。仍嫌不够时用 `[display] scale` 缩小显示区域
+（scale=3 → 写屏字节约 1/2，转换像素约 1/2）。
+
 ## 与原 Python 版本的差异（有意为之）
 
 1. **摄像头采集**：V4L2 + libjpeg（参考 `tests/demo_camera.c` 思路），不依赖

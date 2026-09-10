@@ -49,6 +49,11 @@ public:
     /// 停止显示线程并释放 framebuffer（会先清屏，屏变黑）。
     void stop();
     bool running() const { return running_; }
+
+    /// 浏览器是否有人在看 MJPEG 流（由 capp 的 /api/camera/stream 设置）。
+    /// 为真时显示线程降到 config.fps_streaming（0 = 暂停），让出 CPU 给浏览器。
+    void set_streaming(bool on) { streaming_ = on; }
+    bool streaming() const { return streaming_; }
     /// 清屏（把 framebuffer 填黑）。stop() 内部会自动调用。
     void clear();
     /// 不启动显示线程、只清一次屏：开机时摄像头未开 → 屏保持黑，
@@ -87,6 +92,7 @@ private:
 
     DisplayConfig cfg_;
     std::atomic<bool> running_{false};
+    std::atomic<bool> streaming_{false};   // 浏览器正在看流 → 降帧（浏览器优先）
 
     // 帧缓冲与查表（buf_/prev_/sy_map_/sx_map_ 在 stub 下也要存在，供 convert/blit 空实现）
     std::vector<uint16_t> buf_;    // 当前帧 RGB565（显示区）
