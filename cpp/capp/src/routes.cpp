@@ -530,28 +530,25 @@ void register_routes(Router& router, AppContext& ctx) {
     });
 
     // ── /api/camera ──
-    // 注：屏显示跟随摄像头开关（[display] follow_camera=true）——
-    //     open 后屏自动出图、close 后屏清屏熄灭，故响应里带上 display_running。
+    // 注：屏显示跟随摄像头开关（[display] follow_camera=true），但对前端透明 ——
+    //     open 后台自动出图、close 后台自动清屏，接口不暴露屏状态。
     router.add("GET", "/api/camera/status", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
         Json j;
         j["camera_on"] = ctx.camera_on && ctx.camera.is_available();
-        j["display_running"] = ctx.display.running();
         resp.set_json(j);
     });
 
     router.add("POST", "/api/camera/open", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
-        bool ok = ensure_camera(ctx);   // 摄像头打开 → 屏随之开始显示
+        bool ok = ensure_camera(ctx);   // 摄像头打开 → 屏随之开始显示（对前端透明）
         Json j;
         j["camera_on"] = ok && ctx.camera.is_available();
-        j["display_running"] = ctx.display.running();
         resp.set_json(j, ok ? 200 : 500);
     });
 
     router.add("POST", "/api/camera/close", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
-        close_camera(ctx);              // 摄像头关闭 → 屏清屏熄灭
+        close_camera(ctx);              // 摄像头关闭 → 屏清屏熄灭（对前端透明）
         Json j;
         j["camera_on"] = false;
-        j["display_running"] = ctx.display.running();
         resp.set_json(j);
     });
 
@@ -657,6 +654,7 @@ void register_routes(Router& router, AppContext& ctx) {
     });
 
     // ── /api/display （板载 SPI 屏显示：摄像头画面 → /dev/fb0）──
+    // 运维/调试用接口，前端不涉及（屏状态对前端透明）。
     router.add("GET", "/api/display/status", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
         resp.set_json(display_status_json(ctx));
     });
