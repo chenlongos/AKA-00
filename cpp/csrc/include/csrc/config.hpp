@@ -17,10 +17,12 @@ struct CameraConfig {
     int height = 360;
     int fps = 15;
     int jpeg_quality = 30;
-    // ── 流式下发缩放（省 WiFi 带宽）──
-    // stream_scale=true 且 stream_width/height>0 时，/api/camera/stream 会把采集帧
-    // 服务端缩放到该尺寸并重编码后下发；stream_scale=false 时直通原帧。
-    bool stream_scale = true;
+    // ── 浏览器取流方式（CPU ↔ 带宽）──
+    // false（默认）：直通摄像头原帧 —— 服务端零解码零编码，单核 SoC 上
+    //   "网页看摄像头不卡"的关键；代价是带宽大（可用 jpeg_quality 调小）。
+    // true：服务端缩放到 stream_width/height 并重编码下发 —— 省带宽但每帧多
+    //   ~15ms 编码 CPU（单核上会拖慢取流）。
+    bool stream_scale = false;
     int stream_width = 320;
     int stream_height = 180;
     int stream_quality = 60;

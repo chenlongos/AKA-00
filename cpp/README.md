@@ -344,6 +344,15 @@ screen_test camera [scale]  # 摄像头实时预览（默认 scale=2 半屏）
 | `POST /api/display?enabled=1` 手动开屏 | 摄像头未开时顺带打开它（要画面就得有摄像头） |
 | `[display] follow_camera = false` | 退化为开机常显（旧行为，会顺带打开摄像头） |
 
+**网页看摄像头不卡的推荐组合**
+
+| 配置 | 值 | 作用 |
+|---|---|---|
+| `[camera] stream_scale` | `false`（默认） | 浏览器**直通原帧**：零解码零编码（省 ~25ms/帧） |
+| `[camera] jpeg_quality` | 视带宽调（如 50） | 嫌带宽大就压摄像头侧质量，仍零 CPU |
+| `[display] fps_streaming` | `5`（0=暂停） | 有人看流时屏显示降帧，浏览器优先 |
+| `[camera] exp_fix` | `true`（可选） | 画面稳定 → 脏行命中 → 屏写屏量大幅下降 |
+
 **浏览器优先（CPU 竞争）**：单核 SoC 上"屏显示 + 浏览器取流"同时跑会 CPU 饱和
 （显示每帧 RGB565 转换 + SPI 写屏约 20ms，15fps ≈ 30% 单核；驱动推屏还有内核侧开销），
 会明显拖慢网页看摄像头的帧率与延迟。因此 `/api/camera/stream` 有客户端连接时会把

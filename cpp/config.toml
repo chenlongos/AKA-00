@@ -10,11 +10,17 @@ width = 640
 height = 360
 fps = 15
 jpeg_quality = 75
-# 流式下发缩放（省 WiFi 带宽）：
-# stream_scale = true（默认）时，/api/camera/stream 把采集帧缩到
-# stream_width x stream_height 重编码后下发；
-# stream_scale = false 时直通原帧（更清晰、带宽更大）。
-stream_scale = true
+# 浏览器取流方式（CPU ↔ 带宽 的权衡，按机器负载选）：
+#   stream_scale = false（默认，推荐）：**直通原帧** —— 摄像头出的就是压缩好的
+#     MJPEG，直接转发给浏览器，服务端零解码零编码（单核 SoC 上省 ~25ms/帧，
+#     这是"网页看摄像头不卡"的关键）。代价是带宽大：640x360 q75 原帧约
+#     30~60KB/帧（15fps ≈ 4~7Mbps），而缩到 320x180 只要约 15KB/帧。
+#     嫌带宽大就调低 [camera] jpeg_quality（摄像头侧就压小，仍零 CPU），
+#     而不是打开服务端重编码。
+#   stream_scale = true：服务端把采集帧缩到 stream_width x stream_height 并
+#     重编码后下发 —— 省 WiFi 带宽，但每帧多花 ~15ms CPU（解码 10ms 可与屏
+#     显示共享，编码 15ms 省不掉），单核机器上会拖慢取流。
+stream_scale = false
 stream_width = 320
 stream_height = 180
 stream_quality = 75
