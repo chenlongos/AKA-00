@@ -18,6 +18,10 @@ stream_scale = true
 stream_width = 320
 stream_height = 180
 stream_quality = 75
+# 固定曝光/AWB/增益（默认 false）：廉价 UVC 的自动曝光/AWB 会周期性抖动，
+# 整幅画面每帧一起变 → 屏显示的脏行检测失效（写屏流量上升、帧率下降）。
+# 开启后画面亮度恒定（暗光下会偏暗）；= demo 的 DEMO_EXP_FIX=1。
+exp_fix = false
 
 [motor]
 backend = "tt_pid"

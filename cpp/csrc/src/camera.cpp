@@ -171,6 +171,9 @@ bool Camera::open_device(int width, int height, int fps) {
             return false;
         }
     }
+    // 固定曝光/AWB/增益（可选）：必须在开流前设置
+    if (fixed_exposure_) apply_fixed_exposure();
+
     for (unsigned i = 0; i < nbufs_; i++) {
         v4l2_buffer b;
         std::memset(&b, 0, sizeof b);
@@ -185,6 +188,46 @@ bool Camera::open_device(int width, int height, int fps) {
         return false;
     }
     return true;
+}
+
+// 固定曝光/AWB/增益（best-effort）：关自动控制并写回当前值。
+// 动机：廉价 UVC 的自动曝光/AWB 周期性抖动 → 整幅画面每帧一起变，屏显示的
+// 脏行检测失效（demo 实测 maxΔ 周期性飙到 50+）、写屏流量与帧率下降。
+void Camera::apply_fixed_exposure() {
+    if (fd_ < 0) return;
+    v4l2_control c;
+    auto s_ctrl = [&](uint32_t id, int val) -> bool {
+        std::memset(&c, 0, sizeof c);
+        c.id = id;
+        c.value = val;
+        return ::ioctl(fd_, VIDIOC_S_CTRL, &c) == 0;
+    };
+    auto g_ctrl = [&](uint32_t id, int* out) -> bool {
+        std::memset(&c, 0, sizeof c);
+        c.id = id;
+        if (::ioctl(fd_, VIDIOC_G_CTRL, &c) != 0) return false;
+        *out = c.value;
+        return true;
+    };
+
+    const bool ok_awb = s_ctrl(V4L2_CID_AUTO_WHITE_BALANCE, 0);
+    int gain = 0;
+    bool ok_gain = false;
+    if (g_ctrl(V4L2_CID_GAIN, &gain)) {
+        s_ctrl(V4L2_CID_AUTOGAIN, 0);            // 手动增益
+        ok_gain = s_ctrl(V4L2_CID_GAIN, gain);   // 写回固定增益
+    }
+    int exp = 0;
+    bool ok_exp = false;
+    if (g_ctrl(V4L2_CID_EXPOSURE_ABSOLUTE, &exp)) {
+        s_ctrl(V4L2_CID_EXPOSURE_AUTO, 1);                  // V4L2_EXPOSURE_MANUAL
+        ok_exp = s_ctrl(V4L2_CID_EXPOSURE_ABSOLUTE, exp);   // 写回固定曝光
+    }
+    s_ctrl(V4L2_CID_BACKLIGHT_COMPENSATION, 0);
+    CAM_INFO("[camera] 固定曝光: AWB=%s 增益=%s%s 曝光=%s%s 背光补偿=关",
+             ok_awb ? "关" : "不支持",
+             ok_gain ? "固定" : "不支持", ok_gain ? ("(" + std::to_string(gain) + ")").c_str() : "",
+             ok_exp ? "固定" : "不支持", ok_exp ? ("(" + std::to_string(exp) + ")").c_str() : "");
 }
 
 void Camera::close() {

@@ -24,6 +24,10 @@ struct CameraConfig {
     int stream_width = 320;
     int stream_height = 180;
     int stream_quality = 60;
+    // 固定曝光/AWB/增益（默认关）：廉价 UVC 的自动曝光/AWB 周期性抖动会让整幅
+    // 画面每帧一起变，屏显示的脏行检测失效（写屏流量上升、帧率下降）。
+    // 开启后画面亮度恒定（暗光下会偏暗），与 demo 的 DEMO_EXP_FIX=1 等价。
+    bool exp_fix = false;
 };
 
 struct MotorConfig {

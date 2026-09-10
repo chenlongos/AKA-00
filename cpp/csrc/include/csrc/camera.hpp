@@ -30,6 +30,13 @@ public:
     void close();
     bool is_available() const { return available_; }
 
+    /// 固定曝光/白平衡/增益（须在 open() 之前设置）。
+    /// 廉价 UVC 摄像头的自动曝光/AWB 会周期性抖动 → 整幅画面每帧一起变
+    /// （demo 实测 maxΔ 周期性飙到 50+），屏显示的脏行检测因此失效、写屏流量上升。
+    /// 开启后在开流前关掉自动控制并写回当前值（best-effort，不支持的控件忽略）。
+    void set_fixed_exposure(bool on) { fixed_exposure_ = on; }
+    bool fixed_exposure() const { return fixed_exposure_; }
+
     struct Frame {
         std::vector<uint8_t> data;
         int w = 0, h = 0;
@@ -88,9 +95,11 @@ public:
 private:
     void capture_loop();
     bool open_device(int width, int height, int fps);
+    void apply_fixed_exposure();   // fixed_exposure_ 为真时在开流前调用
 
     bool available_ = false;
     bool running_ = false;
+    bool fixed_exposure_ = false;   // set_fixed_exposure() → open_device 时应用
     std::thread* thread_ = nullptr;
 
     mutable std::mutex mu_;

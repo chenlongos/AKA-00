@@ -318,6 +318,21 @@ screen_test bench           # 写屏带宽基准（整块 vs 逐行）
 screen_test camera [scale]  # 摄像头实时预览（默认 scale=2 半屏）
 ```
 
+**相关配置**（`config.toml`）
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `[camera] width/height` | 640x360 | 须用原生可出流档；**320x240 是假档**（S_FMT 成功但不出帧） |
+| `[camera] exp_fix` | false | 固定曝光/AWB/增益：自动控制抖动会让整幅画面每帧一起变、脏行检测失效（暗光下画面会偏暗）。等价于 demo 的 `DEMO_EXP_FIX=1` |
+| `[display] enabled` | true | 随服务开屏（无 `/dev/fb0` 自动跳过） |
+| `[display] scale` | 2 | 显示区域 = 屏幕 1/scale（2 → 160x240，吃满摄像头帧率） |
+| `[display] orient` | 3 | 0无 1水平翻 2垂直翻 3=180°（本板实测 3 为正） |
+| `[display] fps` | 15 | 显示帧率上限（与 `[camera] fps` 对齐） |
+| `[display] noise` | 1 | 脏行容差：忽略每通道 N 个 LSB |
+| `[display] decode_max_w` | 320 | 解码降采样上限宽；与 `[camera] stream_width` 一致可命中共享缓存 |
+
+运行期：`GET /api/display/status`、`POST /api/display?enabled=&scale=&orient=&fps=&noise=`。
+
 ## 与原 Python 版本的差异（有意为之）
 
 1. **摄像头采集**：V4L2 + libjpeg（参考 `tests/demo_camera.c` 思路），不依赖
