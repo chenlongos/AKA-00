@@ -19,21 +19,31 @@
  *   - 旋转/缩放映射预计算成整数查表，内层无浮点
  *   - 每秒报告 fps + 解码/绘制分步耗时（dec ms/f、draw ms/f），方便定位瓶颈
  *
- * 编译：
+ * 编译（在仓库根执行；libjpeg 用 cpp/third_party/jpeg 里那份 riscv64 musl 交叉产物）：
+ *
+ *   # 板子 (riscv64 musl, SG2002) 交叉编译 —— macOS 上经 orb 转发：
+ *   orb run -p bash -lc 'export PATH=/home/junbo_dai/riscv64-linux-musl-x86_64/bin:$PATH; \
+ *     cd /Users/junbo.dai/projects/AKA-00 && \
+ *     riscv64-unknown-linux-musl-gcc -O2 -Wall -static -o demo_camera tests/demo_camera.c \
+ *       -Icpp/third_party/jpeg/include cpp/third_party/jpeg/lib/libjpeg.a'
+ *
  *   # 本机 (macOS) 编译验证（Linux 专属代码自动跳过，仅跑 JPEG 冒烟）：
- *   gcc -O2 -Wall -o demo_camera demo_camera.c \
+ *   gcc -O2 -Wall -o /tmp/demo_camera tests/demo_camera.c \
  *       -I/opt/homebrew/include -L/opt/homebrew/opt/jpeg-turbo/lib -ljpeg
  *
- *   # 板子 (riscv64 musl, SG2002) 交叉编译 —— 与 demo_image.c 共用同一份 libjpeg.a：
- *   riscv64-unknown-linux-musl-gcc -O2 -static -o demo_camera demo_camera.c \
- *       -I../../dora/libs/jpeg ../../dora/libs/jpeg/libjpeg.a
+ * 注：这是独立单文件 demo（自带 V4L2 + fb0 逻辑），用于屏/摄像头链路排障；
+ * cpp/ 工程里的正式实现见 csrc/screen_display.*（同一套算法，接入 Web 服务）。
+ * 另可用 cpp 工程编译出的板测工具：cpp/csrc/tools/screen_test.cpp
+ *   screen_test info|colors|bench|camera [scale]
  *
  * 用法（板上）：
- *   ./demo_camera                          # 默认: 原始YUYV + 半屏 160x240 流畅预览
+ *   ./demo_camera                          # 默认: 640x360 采集 + 原始YUYV + 半屏 160x240
+ *                                          # （本摄像头 320x240 是"假档"不出帧，故默认 640x360）
  *   ./demo_camera /dev/video1              # 指定摄像头设备
- *   CAMERA_WIDTH=640 CAMERA_HEIGHT=480 ./demo_camera   # 指定分辨率
+ *   CAMERA_WIDTH=320 CAMERA_HEIGHT=240 ./demo_camera   # 显式指定分辨率
+ *   DEMO_DECODE_W=320 ./demo_camera        # JPEG 解码降采样上限（默认 320；0=不降采样，更清晰更慢）
  *   SCREEN_ORIENT=1 ./demo_camera          # 方向修正: 0无 1水平翻 2垂直翻 3=180°(默认)
- *   DEMO_SCALE=2 ./demo_camera             # 半屏 160x240（写屏字节 1/4，帧率约 4 倍，实时预览推荐）
+ *   DEMO_SCALE=1 ./demo_camera             # 全屏 320x480（默认 2 = 半屏 160x240，更快）
  *   DEMO_RAW=1 ./demo_camera               # 摄像头直接出原始 YUYV，免 JPEG 解码一步拷屏（"整帧拷贝"）
  *   DEMO_LISTFMT=1 ./demo_camera           # 枚举摄像头支持的所有格式/分辨率后退出
  *   DEMO_NOISE=0|1|2|3 ./demo_camera       # 脏行检测容差：忽略每通道 0~3 个 LSB（默认 1）
@@ -42,6 +52,10 @@
  *   DEMO_TEST=1 ./demo_camera              # 测试图案模式（红绿蓝白 vs 字节交换版，确认屏字节序）
  *   DEMO_SWAP=1 ./demo_camera              # RGB565 高低字节交换
  *   DEMO_BGR=1 ./demo_camera               # RGB565 R/B 通道对调
+ *
+ * 注意：摄像头同一时刻只能被一个进程占用 —— 跑之前先停掉 capp **及其守护脚本**：
+ *   pkill -f aka-capp; pkill -f 'AKA-00/init.sh'
+ * 否则 init.sh 会在 2 秒后把 capp 拉起并抢走 /dev/video0（表现为 Resource busy）。
  *
  * 注意：运行前确保 /sys/class/graphics/fb0/state 为 1（显示引擎开启，程序启动时也会自动开）。
  * Ctrl-C 退出并清理（停流、释放 buffer、清屏）。
@@ -61,6 +75,7 @@
 #if defined(__linux__)
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <linux/fb.h>          /* struct fb_var_screeninfo（FBIOGET_VSCREENINFO 必须用它） */
 #include <linux/videodev2.h>
 #endif
 
@@ -157,12 +172,15 @@ static int open_fb(void) {
         DEMO_LOG("open /dev/fb0 failed: %s", strerror(errno));
         return 0;
     }
-    /* FBIOGET_VSCREENINFO = 0x4600 (linux/fb.h 标准值) */
-    struct { unsigned xres, yres, xres_v, yres_v, xoff, yoff, bpp; } vi;
+    /* FBIOGET_VSCREENINFO：内核会写满 struct fb_var_screeninfo（160 字节），
+     * 必须用真结构体接收 —— 曾用 28 字节手写小结构体，内核越界写 132 字节踩栈，
+     * 表现为日志串被改坏 + 随机段错误（板上实测）。 */
+    struct fb_var_screeninfo vi;
     memset(&vi, 0, sizeof vi);
-    if (ioctl(fb_fd, 0x4600, &vi) == 0 && vi.xres > 0 && vi.bpp > 0) {
+    if (ioctl(fb_fd, FBIOGET_VSCREENINFO, &vi) == 0 &&
+        vi.xres > 0 && vi.yres > 0 && vi.bits_per_pixel > 0) {
         fb_words = (size_t)vi.xres * vi.yres;
-        fb_bytes = fb_words * (vi.bpp / 8);
+        fb_bytes = fb_words * (vi.bits_per_pixel / 8);
     } else {
         DEMO_LOG("FBIOGET_VSCREENINFO failed, assuming %dx%d @16bpp", SW, SH);
         fb_words = SW * SH;
@@ -528,11 +546,13 @@ static int jpeg_get_size(const unsigned char *src, size_t src_len, int *w, int *
 
 /* 解码 JPEG → RGB888，按需扩容 *buf。
  *
- * 性能关键：本板摄像头若输出高分辨率帧（如 640x480 / 1280x720），通用
- * libjpeg 整帧解码在 C906 上要几百毫秒 → 帧率暴跌。反正最后要 cover 缩到
- * 320x480，这里用 libjpeg 的 scale_num/scale_denom 先做 1/2..1/8 降采样
- * 解码（输出宽 > 640 就降一档），解码量小 4~64 倍，视觉几乎无损。
- * 320x240 的源不降采样，保持原画质。 */
+ * 性能关键：本板摄像头输出 640x360（320x240 是假档不出帧），通用 libjpeg
+ * 整帧解码在 C906 上要几十毫秒 → 直接拖低帧率。反正最后要 cover 缩到
+ * 160x240/320x480 的显示区，这里用 libjpeg 的 scale_num/scale_denom 降采样解码：
+ * 输出宽 > g_decode_max_w（默认 320，env DEMO_DECODE_W 可调）就降一档，
+ * 解码量小 4~64 倍，屏上视觉几乎无损。 */
+static int g_decode_max_w = 320;
+
 static int jpeg_to_rgb(const unsigned char *src, size_t src_len,
                        unsigned char **buf, size_t *cap,
                        int *out_w, int *out_h) {
@@ -552,7 +572,10 @@ static int jpeg_to_rgb(const unsigned char *src, size_t src_len,
     }
     cinfo.out_color_space = JCS_RGB;   /* 强制 RGB，避免 CMYK/YCCK */
     unsigned scale = 1;
-    while ((cinfo.image_width / scale) > 640 && scale < 8) scale <<= 1;
+    if (g_decode_max_w > 0) {
+        while ((cinfo.image_width / scale) > (unsigned)g_decode_max_w && scale < 8)
+            scale <<= 1;
+    }
     cinfo.scale_num   = 1;
     cinfo.scale_denom = scale;
     jpeg_start_decompress(&cinfo);
@@ -696,14 +719,23 @@ int main(int argc, char **argv) {
     signal(SIGINT, on_sigint);
     signal(SIGTERM, on_sigint);
 
-    /* 分辨率：CAMERA_WIDTH/CAMERA_HEIGHT env（init.sh 从 config.toml 注入），缺省 320x240 */
-    int cam_w = 320, cam_h = 240;
+    /* 分辨率：CAMERA_WIDTH/CAMERA_HEIGHT env（init.sh 从 config.toml 注入）。
+     * 缺省 640x360 —— 本机器人摄像头（Hy-UXGA/B5M2）实测 **320x240 是"假档"**：
+     * S_FMT 会成功但固件根本不出帧（见 cpp/config.toml 的 [camera] 注释与
+     * csrc/camera.cpp 的无帧看门狗），640x360 才是稳定出流档。 */
+    int cam_w = 640, cam_h = 360;
     {
         const char *ew = getenv("CAMERA_WIDTH"), *eh = getenv("CAMERA_HEIGHT");
         if (ew) cam_w = atoi(ew);
         if (eh) cam_h = atoi(eh);
-        if (cam_w <= 0) cam_w = 320;
-        if (cam_h <= 0) cam_h = 240;
+        if (cam_w <= 0) cam_w = 640;
+        if (cam_h <= 0) cam_h = 360;
+        /* 解码降采样上限（默认 320：屏上只显示 160x240/320x480，全解无意义） */
+        const char *ed = getenv("DEMO_DECODE_W");
+        if (ed) {
+            g_decode_max_w = atoi(ed);
+            if (g_decode_max_w < 0) g_decode_max_w = 0;   /* 0 = 不降采样 */
+        }
     }
     const char *device = (argc >= 2) ? argv[1] : NULL;   /* NULL → /dev/video0 */
 

@@ -191,21 +191,17 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    /* FBIOGET_VSCREENINFO：内核会写满 struct fb_var_screeninfo（160 字节），
+     * 必须用真结构体接收 —— 曾用 28 字节手写小结构体，内核越界写 132 字节踩栈，
+     * 表现为随机段错误。 */
     struct fb_var_screeninfo vinfo;
-    {
-        unsigned long request = 0x4600;  /* FBIOGET_VSCREENINFO */
-        struct { unsigned xres, yres, xres_v, yres_v, xoff, yoff, bpp; } vi;
-        memset(&vi, 0, sizeof vi);
-        if (ioctl(fd, request, &vi) == 0 && vi.xres > 0 && vi.bpp > 0) {
-            vinfo.xres = vi.xres;
-            vinfo.yres = vi.yres;
-            vinfo.bits_per_pixel = vi.bpp;
-        } else {
-            fprintf(stderr, "Warning: FBIOGET_VSCREENINFO failed, assuming 320x480@16bpp\n");
-            vinfo.xres = 320;
-            vinfo.yres = 480;
-            vinfo.bits_per_pixel = 16;
-        }
+    memset(&vinfo, 0, sizeof vinfo);
+    if (ioctl(fd, FBIOGET_VSCREENINFO, &vinfo) != 0 ||
+        vinfo.xres <= 0 || vinfo.yres <= 0 || vinfo.bits_per_pixel <= 0) {
+        fprintf(stderr, "Warning: FBIOGET_VSCREENINFO failed, assuming 320x480@16bpp\n");
+        vinfo.xres = 320;
+        vinfo.yres = 480;
+        vinfo.bits_per_pixel = 16;
     }
 
     printf("[demo_image] fb0: %dx%d @%dbpp\n",
