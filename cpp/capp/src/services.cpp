@@ -450,6 +450,17 @@ csrc::Json motor_status_json(AppContext& ctx) {
 
 // ═══════════════════════ 摄像头服务 ═══════════════════════
 
+// 内部：在"摄像头已开"的前提下启动屏显示（不再回调 ensure_camera，避免递归）
+static bool start_display_locked_on_camera(AppContext& ctx) {
+    csrc::DisplayConfig dc = ctx.config.display;
+    if (dc.decode_max_w <= 0) dc.decode_max_w = ctx.config.camera.stream_width;
+    if (!ctx.display.start(dc)) {
+        CAM_INFO("[display] screen disabled (no framebuffer)");
+        return false;
+    }
+    return true;
+}
+
 bool ensure_camera(AppContext& ctx) {
     if (ctx.camera_on) return true;
     // 固定曝光（可选，须在 open 前设置；对应 demo 的 DEMO_EXP_FIX=1）
@@ -457,10 +468,19 @@ bool ensure_camera(AppContext& ctx) {
     bool ok = ctx.camera.open(ctx.config.camera.width, ctx.config.camera.height,
                               ctx.config.camera.fps);
     ctx.camera_on = ok;
+    // 屏显示跟随摄像头：摄像头一开，屏就出图（follow_camera=false 时由开机流程常显）
+    if (ok && ctx.config.display.enabled) {
+        if (!ctx.display.running()) {
+            CAM_INFO("[display] 摄像头已开 → 屏开始显示");
+            start_display_locked_on_camera(ctx);
+        }
+    }
     return ok;
 }
 
 void close_camera(AppContext& ctx) {
+    // 先停显示（stop() 会清屏熄屏），再关摄像头
+    close_display(ctx);
     ctx.camera.close();
     ctx.camera_on = false;
 }
@@ -515,6 +535,8 @@ bool build_stream_jpeg_rgb(AppContext& ctx, const csrc::Camera::RgbFrame& rgb,
 
 // ═══════════════════════ 板载屏显示服务 ═══════════════════════
 
+// 启动屏显示（幂等）。摄像头未开时按需打开（屏要画面就得有摄像头）——
+// 摄像头打开后 ensure_camera 内部也会自动启动显示，两条路都通。
 bool ensure_display(AppContext& ctx) {
     if (ctx.display.running()) return true;
     if (!ctx.config.display.enabled) return false;
@@ -523,14 +545,7 @@ bool ensure_display(AppContext& ctx) {
         CAM_WARN("[display] camera unavailable — screen off");
         return false;
     }
-    csrc::DisplayConfig dc = ctx.config.display;
-    // 解码降采样上限与浏览器流一致 → 命中共享缓存（同一帧只解码一次）
-    if (dc.decode_max_w <= 0) dc.decode_max_w = ctx.config.camera.stream_width;
-    if (!ctx.display.start(dc)) {
-        CAM_INFO("[display] screen disabled (no framebuffer)");
-        return false;
-    }
-    return true;
+    return start_display_locked_on_camera(ctx);
 }
 
 void close_display(AppContext& ctx) { ctx.display.stop(); }

@@ -176,6 +176,10 @@ Config Config::load() {
         std::string ev = toml.get("display", "enabled", "");
         if (!ev.empty()) cfg.display.enabled = (ev == "true" || ev == "1" || ev == "yes");
     }
+    {
+        std::string fv = toml.get("display", "follow_camera", "");
+        if (!fv.empty()) cfg.display.follow_camera = (fv == "true" || fv == "1" || fv == "yes");
+    }
     cfg.display.scale = toml.geti("display", "scale", cfg.display.scale);
     cfg.display.orient = toml.geti("display", "orient", cfg.display.orient);
     cfg.display.fps = toml.geti("display", "fps", cfg.display.fps);

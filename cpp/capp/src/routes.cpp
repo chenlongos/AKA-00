@@ -530,23 +530,28 @@ void register_routes(Router& router, AppContext& ctx) {
     });
 
     // ── /api/camera ──
+    // 注：屏显示跟随摄像头开关（[display] follow_camera=true）——
+    //     open 后屏自动出图、close 后屏清屏熄灭，故响应里带上 display_running。
     router.add("GET", "/api/camera/status", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
         Json j;
         j["camera_on"] = ctx.camera_on && ctx.camera.is_available();
+        j["display_running"] = ctx.display.running();
         resp.set_json(j);
     });
 
     router.add("POST", "/api/camera/open", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
-        bool ok = ensure_camera(ctx);
+        bool ok = ensure_camera(ctx);   // 摄像头打开 → 屏随之开始显示
         Json j;
         j["camera_on"] = ok && ctx.camera.is_available();
+        j["display_running"] = ctx.display.running();
         resp.set_json(j, ok ? 200 : 500);
     });
 
     router.add("POST", "/api/camera/close", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
-        close_camera(ctx);
+        close_camera(ctx);              // 摄像头关闭 → 屏清屏熄灭
         Json j;
         j["camera_on"] = false;
+        j["display_running"] = ctx.display.running();
         resp.set_json(j);
     });
 
@@ -657,7 +662,9 @@ void register_routes(Router& router, AppContext& ctx) {
     });
 
     // 运行期控制：POST /api/display?enabled=0|1&scale=2&orient=3&fps=15&noise=1
-    // 改参数会重启显示线程（立即生效；不写回 config.toml）
+    // 改参数会重启显示线程（立即生效；不写回 config.toml）。
+    // 屏显示默认跟随摄像头开关；这里手动 enabled=1 时若摄像头未开会顺带打开它
+    // （要画面就得有摄像头），enabled=0 只停显示、不关摄像头。
     router.add("POST", "/api/display", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
         csrc::DisplayConfig dc = ctx.display.config();
         bool restart = false;

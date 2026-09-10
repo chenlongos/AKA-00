@@ -168,9 +168,27 @@ void ScreenDisplay::stop() {
         delete thread_;
         thread_ = nullptr;
     }
+    // 清屏：摄像头关闭 → 屏熄灭（否则会留最后一帧静止画面，看起来像还在采集）
+    if (fb_) {
+        clear();
+        CAM_INFO("[display] 清屏（摄像头已关）");
+    }
     close_fb();
     blit_dst_ = nullptr;
     CAM_INFO("[display] ⏸  stopped");
+}
+
+void ScreenDisplay::clear() {
+    if (!fb_) return;
+    for (size_t i = 0; i < fb_words_; i++) fb_[i] = 0;
+}
+
+bool ScreenDisplay::clear_screen_once() {
+    ScreenDisplay tmp;
+    if (!tmp.open_fb()) return false;
+    tmp.clear();
+    tmp.close_fb();
+    return true;
 }
 
 /// RGB8 → RGB565：旋转 90°（顺时针）+ cover 缩放居中裁切到显示区。
@@ -324,6 +342,8 @@ bool ScreenDisplay::start(const DisplayConfig& cfg) {
     return false;
 }
 void ScreenDisplay::stop() {}
+void ScreenDisplay::clear() {}
+bool ScreenDisplay::clear_screen_once() { return false; }
 void ScreenDisplay::convert(const uint8_t*, int, int) {}
 void ScreenDisplay::blit_dirty(int& rows) { rows = 0; }
 void ScreenDisplay::loop() {}
@@ -344,6 +364,8 @@ bool ScreenDisplay::start(const DisplayConfig& cfg) {
     return false;
 }
 void ScreenDisplay::stop() {}
+void ScreenDisplay::clear() {}
+bool ScreenDisplay::clear_screen_once() { return false; }
 void ScreenDisplay::convert(const uint8_t*, int, int) {}
 void ScreenDisplay::blit_dirty(int& rows) { rows = 0; }
 void ScreenDisplay::loop() {}

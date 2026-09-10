@@ -58,6 +58,11 @@ level = "info"
 # 因此开屏不会拖慢浏览器看摄像头的速度/效率；无 /dev/fb0 时自动跳过，不影响服务。
 [display]
 enabled = true
+# 屏显示跟随摄像头开关（默认 true）：
+#   开机摄像头是关的 → 屏保持黑不出图；打开摄像头（前端开关 / POST /api/camera/open）
+#   → 屏开始显示；关闭摄像头（POST /api/camera/close）→ 屏清屏熄灭。
+# 设为 false = 开机就常显（会顺带打开摄像头，旧行为）。
+follow_camera = true
 # 显示区域 = 屏幕 1/scale：2 → 160x240 居中（推荐，75KB/帧，可吃满摄像头帧率）
 #                        1 → 全屏 320x480（307KB/帧，受 SPI 带宽限制约 8fps）
 scale = 2

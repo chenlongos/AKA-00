@@ -70,7 +70,13 @@ struct LoggingConfig {
 /// （scale=2 → 160x240，75KB/帧）以吃满摄像头帧率。显示线程与浏览器流共享同一份
 /// 解码结果（Camera::latest_rgb 缓存），开屏不会拖慢浏览器看摄像头画面。
 struct DisplayConfig {
-    bool enabled = true;     // 随服务启动开屏（无 /dev/fb0 时自动跳过）
+    bool enabled = true;     // 是否启用屏显示（无 /dev/fb0 时自动跳过）
+    /// 屏显示跟随摄像头开关（默认 true）：
+    ///   摄像头关（默认开机态）→ 屏保持黑，不出图；
+    ///   打开摄像头（前端开关 / POST /api/camera/open）→ 屏开始显示；
+    ///   关闭摄像头（POST /api/camera/close）→ 屏清屏熄灭。
+    /// false = 开机就常显（等价于旧行为，会顺带打开摄像头）。
+    bool follow_camera = true;
     int scale = 2;           // 显示区域 = 屏幕 1/scale（2 → 160x240 居中）；1 = 全屏
     int orient = 3;          // 0无 1水平翻 2垂直翻 3=180°（本板实测 3 为正）
     int fps = 15;            // 显示帧率上限（建议与 camera.fps 一致）

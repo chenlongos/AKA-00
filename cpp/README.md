@@ -331,7 +331,18 @@ screen_test camera [scale]  # 摄像头实时预览（默认 scale=2 半屏）
 | `[display] noise` | 1 | 脏行容差：忽略每通道 N 个 LSB |
 | `[display] decode_max_w` | 320 | 解码降采样上限宽；与 `[camera] stream_width` 一致可命中共享缓存 |
 
-运行期：`GET /api/display/status`、`POST /api/display?enabled=&scale=&orient=&fps=&noise=`。
+**运行期：`GET /api/display/status`、`POST /api/display?enabled=&scale=&orient=&fps=&noise=`。**
+
+**开关联动**（默认 `[display] follow_camera = true`，屏跟随摄像头开关）
+
+| 动作 | 屏行为 |
+|---|---|
+| 开机（摄像头默认关） | 清一次屏、保持黑，不出图 |
+| 前端打开摄像头（`CameraToggle` / RC 页黑屏点击 → `POST /api/camera/open`） | 屏自动开始显示画面 |
+| 前端关闭摄像头（`POST /api/camera/close`） | 屏清屏熄灭（不留最后一帧） |
+| `GET /api/camera/status`、open/close 响应 | 带 `display_running` 字段，前端可据此显示屏状态 |
+| `POST /api/display?enabled=1` 手动开屏 | 摄像头未开时顺带打开它（要画面就得有摄像头） |
+| `[display] follow_camera = false` | 退化为开机常显（旧行为，会顺带打开摄像头） |
 
 ## 与原 Python 版本的差异（有意为之）
 

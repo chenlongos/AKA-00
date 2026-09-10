@@ -46,9 +46,14 @@ public:
 
     /// 启动显示线程（幂等）。返回 false = 无可用 framebuffer（无屏板不影响服务运行）。
     bool start(const DisplayConfig& cfg);
-    /// 停止显示线程并释放 framebuffer。
+    /// 停止显示线程并释放 framebuffer（会先清屏，屏变黑）。
     void stop();
     bool running() const { return running_; }
+    /// 清屏（把 framebuffer 填黑）。stop() 内部会自动调用。
+    void clear();
+    /// 不启动显示线程、只清一次屏：开机时摄像头未开 → 屏保持黑，
+    /// 等摄像头打开（/api/camera/open）再由显示线程出图。
+    static bool clear_screen_once();
     /// /dev/fb0 是否已映射成功（有屏板）
     bool available() const {
 #if defined(__linux__)

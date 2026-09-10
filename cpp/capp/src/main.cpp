@@ -43,9 +43,24 @@ int main() {
     capp::init_services(ctx);
 
     // 板载屏显示（摄像头画面 → /dev/fb0；无屏板自动跳过）
-    // 与浏览器 /api/camera/stream 共享同一份解码结果（Camera::latest_rgb 缓存），
+    //
+    // 默认「屏跟随摄像头开关」([display] follow_camera = true)：
+    //   开机时摄像头是关的 → 屏只清一次屏（保持黑，不出图）；
+    //   前端打开摄像头（POST /api/camera/open）→ ensure_camera 自动启动显示；
+    //   前端关闭摄像头（POST /api/camera/close）→ 屏清屏熄灭。
+    // follow_camera = false 时退化为旧行为：开机就常显（会顺带打开摄像头）。
+    // 显示与浏览器 /api/camera/stream 共享同一份解码结果（Camera::latest_rgb 缓存），
     // 因此开屏不会拖慢浏览器看摄像头的速度/效率。
-    capp::ensure_display(ctx);
+    if (ctx.config.display.enabled) {
+        if (!ctx.config.display.follow_camera) {
+            capp::ensure_display(ctx);
+        } else if (ctx.camera_on) {
+            capp::ensure_display(ctx);
+        } else {
+            csrc::ScreenDisplay::clear_screen_once();
+            CAM_INFO("[display] 等摄像头打开后出图（当前屏保持黑）");
+        }
+    }
 
     // 云端状态上报
     capp::start_status_reporter(ctx);
