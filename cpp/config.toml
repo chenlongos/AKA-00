@@ -45,3 +45,23 @@ gear_ratio = 90
 
 [logging]
 level = "info"
+
+# ── 板载 SPI 屏实时显示（摄像头画面 → /dev/fb0）──
+# 屏板：ST7796S 320x480 RGB565，SPI 接口。写屏带宽是硬瓶颈：
+#   出厂 4MHz ≈ 420KB/s（约 2fps）→ 设备树 spi-max-frequency 提到 20MHz ≈ 2MB/s
+#   （该板实测 24MHz 起白屏，20MHz 是稳定上限）。
+# 显示线程与浏览器 /api/camera/stream 共享同一份解码结果（Camera::latest_rgb 缓存），
+# 因此开屏不会拖慢浏览器看摄像头的速度/效率；无 /dev/fb0 时自动跳过，不影响服务。
+[display]
+enabled = true
+# 显示区域 = 屏幕 1/scale：2 → 160x240 居中（推荐，75KB/帧，可吃满摄像头帧率）
+#                        1 → 全屏 320x480（307KB/帧，受 SPI 带宽限制约 8fps）
+scale = 2
+# 方向修正：0无 1水平翻 2垂直翻 3=180°（本板实测 3 为正）
+orient = 3
+# 显示帧率上限（与 [camera] fps 对齐即可）
+fps = 15
+# 脏行检测容差：忽略 RGB565 每通道 N 个 LSB（实况有传感器噪声，0=精确会"全行都变"）
+noise = 1
+# 解码降采样上限宽（与 [camera] stream_width 一致 → 与浏览器共用同一次解码）
+decode_max_w = 320

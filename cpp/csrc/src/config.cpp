@@ -167,6 +167,17 @@ Config Config::load() {
 
     cfg.logging.level = toml.get("logging", "level", cfg.logging.level);
 
+    // 板载屏显示（[display]）
+    {
+        std::string ev = toml.get("display", "enabled", "");
+        if (!ev.empty()) cfg.display.enabled = (ev == "true" || ev == "1" || ev == "yes");
+    }
+    cfg.display.scale = toml.geti("display", "scale", cfg.display.scale);
+    cfg.display.orient = toml.geti("display", "orient", cfg.display.orient);
+    cfg.display.fps = toml.geti("display", "fps", cfg.display.fps);
+    cfg.display.noise = toml.geti("display", "noise", cfg.display.noise);
+    cfg.display.decode_max_w = toml.geti("display", "decode_max_w", cfg.display.decode_max_w);
+
     // 环境变量覆盖（与 app/config.py 一致）
     if (const char* v = std::getenv("STATUS_REPORT_URL")) cfg.status_report_url = v;
     if (const char* v = std::getenv("OTA_CHECK_URL")) cfg.ota.check_url = v;

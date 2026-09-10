@@ -40,6 +40,23 @@ public:
     /// 拷贝最新帧。返回 true 且有数据。
     bool read_latest(Frame& out);
 
+    /// 最新帧的时间戳（0 = 还没有帧）。轻量：不拷贝帧数据，
+    /// 供高频轮询的消费者（屏幕显示线程）判断"是否有新帧"再决定是否拷贝/解码。
+    uint64_t latest_ts();
+
+    /// 解码后的 RGB 帧（屏幕显示 / 浏览器流共用）
+    struct RgbFrame {
+        std::vector<uint8_t> data;   // RGB8，行宽 w*3
+        int w = 0, h = 0;
+        uint64_t ts_ms = 0;          // 对应采集帧时间戳（同一帧多次调用相同）
+    };
+
+    /// 取最新帧的解码 RGB8（**带缓存**）：同一 (ts_ms, max_out_w) 只解码一次，
+    /// 多个消费者共享（屏幕显示线程与 /api/camera/stream 的重编码路径）。
+    /// max_out_w > 0 时按 libjpeg 整数降采样解码（输出宽 ≤ max_out_w）。
+    /// 这样"开屏"不会让浏览器变慢：整帧解码由两边共享，浏览器反而省掉一次解码。
+    bool latest_rgb(int max_out_w, RgbFrame& out);
+
     // ── JPEG 工具（供 capp 路由复用）──
 
     /// 解码 JPEG → RGB8（w*h*3）。max_out_w>0 时自动降采样解码（输出宽 ≤ max_out_w）。
@@ -78,6 +95,11 @@ private:
 
     mutable std::mutex mu_;
     Frame latest_;
+
+    // 解码缓存（latest_rgb）：同一帧只解码一次，多消费者共享
+    std::mutex rgb_mu_;
+    RgbFrame rgb_cache_;
+    int rgb_cache_max_w_ = -1;
 
     // Linux V4L2 状态（非 Linux 编译时不定义）
     int fd_ = -1;

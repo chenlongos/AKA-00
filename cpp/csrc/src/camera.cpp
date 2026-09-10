@@ -297,6 +297,52 @@ bool Camera::read_latest(Frame& out) {
     return true;
 }
 
+// 轻量时间戳查询：不拷贝帧数据（显示线程高频轮询用，避免白拷 172KB/次）
+uint64_t Camera::latest_ts() {
+    std::lock_guard<std::mutex> lk(mu_);
+    return latest_.data.empty() ? 0 : latest_.ts_ms;
+}
+
+// 带缓存的解码：同一 (ts_ms, max_out_w) 只解码一次，供屏幕显示与浏览器流共享。
+// 注意：解码**不持 mu_**（否则会阻塞采集线程写最新帧），只在缓存读写时持 rgb_mu_。
+bool Camera::latest_rgb(int max_out_w, RgbFrame& out) {
+    Frame f;
+    if (!read_latest(f) || f.data.empty()) return false;   // 拷贝最新帧（~30KB，微秒级）
+
+    {
+        std::lock_guard<std::mutex> lk(rgb_mu_);
+        if (rgb_cache_.ts_ms == f.ts_ms && rgb_cache_max_w_ == max_out_w &&
+            !rgb_cache_.data.empty()) {
+            out = rgb_cache_;   // 命中：本帧已解过，直接用
+            return true;
+        }
+    }
+
+    RgbFrame rgb;
+    rgb.ts_ms = f.ts_ms;
+    int w = f.w, h = f.h;
+    if (is_jpeg(f.data.data(), f.data.size())) {
+        if (!jpeg_to_rgb(f.data.data(), f.data.size(), w, h, rgb.data, max_out_w))
+            return false;
+    } else if (w > 0 && h > 0) {
+        // YUYV 兜底：不支持降采样解码，按原尺寸转
+        rgb.data.resize((size_t)w * h * 3);
+        yuyv_to_rgb(f.data.data(), w, h, rgb.data.data());
+    } else {
+        return false;
+    }
+    rgb.w = w;
+    rgb.h = h;
+
+    {
+        std::lock_guard<std::mutex> lk(rgb_mu_);
+        rgb_cache_ = rgb;             // 存入缓存供其它消费者复用
+        rgb_cache_max_w_ = max_out_w;
+    }
+    out = std::move(rgb);
+    return true;
+}
+
 // ── JPEG 工具 ──
 
 bool Camera::jpeg_to_rgb(const uint8_t* jpg, size_t len, int& w, int& h,
@@ -460,6 +506,8 @@ bool Camera::open(int, int, int) {
 }
 void Camera::close() {}
 bool Camera::read_latest(Frame&) { return false; }
+uint64_t Camera::latest_ts() { return 0; }
+bool Camera::latest_rgb(int, RgbFrame&) { return false; }
 
 bool Camera::jpeg_to_rgb(const uint8_t*, size_t, int&, int&, std::vector<uint8_t>&, int) {
     return false;

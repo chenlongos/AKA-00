@@ -4,7 +4,8 @@
 # 本机 (macOS/Linux) 开发构建；板上交叉编译用 Makefile.cross
 #
 # 用法:
-#   make            # 编译 libcsrc.a
+#   make                    # 带屏版本 → build/libcsrc.a
+#   make WITH_SCREEN=0      # 不带屏版本 → build-noscreen/libcsrc.a（裁掉显示栈）
 #   make clean
 # =============================================================================
 
@@ -13,14 +14,26 @@ AR       ?= ar
 CXXFLAGS ?= -std=c++17 -O2 -Wall -Wextra -Iinclude -MMD -MP
 ARFLAGS   = rcs
 
+# 带屏 / 不带屏两个变体（与 Makefile.cross、顶层 Makefile 的 screen/noscreen 对齐）
+WITH_SCREEN ?= 1
+ifeq ($(WITH_SCREEN),1)
+SCREEN_SUFFIX :=
+SCREEN_DEF    := -DAKA_WITH_SCREEN=1
+else
+SCREEN_SUFFIX := -noscreen
+SCREEN_DEF    := -DAKA_WITH_SCREEN=0
+endif
+CXXFLAGS += $(SCREEN_DEF)
+
 # 摄像头 JPEG（Linux 主机需要 jpeglib.h；macOS 走 stub，无需）
 JPEG_DIR ?= ../third_party/jpeg
 JPEG_INC := $(if $(wildcard $(JPEG_DIR)/include/jpeglib.h),-I$(JPEG_DIR)/include,)
 CXXFLAGS += $(JPEG_INC)
 
+OBJDIR := build$(SCREEN_SUFFIX)
 SRCS := $(wildcard src/*.cpp)
-OBJS := $(SRCS:src/%.cpp=build/%.o)
-LIB  := build/libcsrc.a
+OBJS := $(SRCS:src/%.cpp=$(OBJDIR)/%.o)
+LIB  := $(OBJDIR)/libcsrc.a
 DEPS := $(OBJS:.o=.d)
 -include $(DEPS)
 
@@ -29,15 +42,15 @@ DEPS := $(OBJS:.o=.d)
 
 all: $(LIB)
 
-build:
-	mkdir -p build
+$(OBJDIR):
+	mkdir -p $(OBJDIR)
 
-build/%.o: src/%.cpp | build
+$(OBJDIR)/%.o: src/%.cpp | $(OBJDIR)
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 $(LIB): $(OBJS)
 	$(AR) $(ARFLAGS) $@ $(OBJS)
-	@echo "  ✓ libcsrc.a built"
+	@echo "  ✓ libcsrc.a$(SCREEN_SUFFIX) built"
 
 clean:
-	rm -rf build
+	rm -rf build build-noscreen

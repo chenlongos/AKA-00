@@ -8,16 +8,30 @@
 # JPEG_DIR 指向 libjpeg 安装前缀（含 include/ 与 lib/，由 scripts/build-libjpeg.sh 生成）
 # =============================================================================
 
+# 带屏 / 不带屏两个变体：
+#   WITH_SCREEN=1（默认）→ build-cross/libcsrc.a          含屏显示（screen_display）
+#   WITH_SCREEN=0         → build-cross-noscreen/libcsrc.a 裁掉显示栈（不带屏版本）
+WITH_SCREEN ?= 1
+ifeq ($(WITH_SCREEN),1)
+SCREEN_SUFFIX :=
+SCREEN_DEF    := -DAKA_WITH_SCREEN=1
+else
+SCREEN_SUFFIX := -noscreen
+SCREEN_DEF    := -DAKA_WITH_SCREEN=0
+endif
+
 # 注意用 := 覆盖环境变量（orb 登录 shell 常导出 CXX=g++ 之类，会污染交叉编译）
 CXX      := /home/junbo_dai/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-g++
 AR       := /home/junbo_dai/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-ar
 JPEG_DIR ?= ../third_party/jpeg
-CXXFLAGS := -std=c++17 -O3 -Wall -Wextra -mcpu=c906fdv -MMD -MP -mabi=lp64d -Iinclude -I$(JPEG_DIR)/include
+CXXFLAGS := -std=c++17 -O3 -Wall -Wextra -mcpu=c906fdv -MMD -MP -mabi=lp64d \
+            $(SCREEN_DEF) -Iinclude -I$(JPEG_DIR)/include
 ARFLAGS   = rcs
 
+OBJDIR   := build-cross$(SCREEN_SUFFIX)
 SRCS := $(wildcard src/*.cpp)
-OBJS := $(SRCS:src/%.cpp=build-cross/%.o)
-LIB  := build-cross/libcsrc.a
+OBJS := $(SRCS:src/%.cpp=$(OBJDIR)/%.o)
+LIB  := $(OBJDIR)/libcsrc.a
 DEPS := $(OBJS:.o=.d)
 -include $(DEPS)
 
@@ -28,22 +42,24 @@ all: $(LIB)
 
 # 直测工具（板上排查硬件链路用）
 TOOLS := $(wildcard tools/*.cpp)
-TOOL_BINS := $(TOOLS:tools/%.cpp=build-cross/%)
+TOOL_BINS := $(TOOLS:tools/%.cpp=$(OBJDIR)/%)
 
 tools: $(TOOL_BINS)
 
-build-cross/%: tools/%.cpp $(LIB)
-	$(CXX) $(CXXFLAGS) -static -o $@ $< $(LIB) -lpthread
+# 工具链接 libjpeg：用到 csrc::Camera（jpeg 解码/编码）的工具会拉进 camera.o，
+# 不显式链接会报 undefined reference to jpeg_*
+$(OBJDIR)/%: tools/%.cpp $(LIB)
+	$(CXX) $(CXXFLAGS) -static -o $@ $< $(LIB) $(JPEG_DIR)/lib/libjpeg.a -lpthread
 
-build-cross:
-	mkdir -p build-cross
+$(OBJDIR):
+	mkdir -p $(OBJDIR)
 
-build-cross/%.o: src/%.cpp | build-cross
+$(OBJDIR)/%.o: src/%.cpp | $(OBJDIR)
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 $(LIB): $(OBJS)
 	$(AR) $(ARFLAGS) $@ $(OBJS)
-	@echo "  ✓ libcsrc.a (riscv64) built"
+	@echo "  ✓ libcsrc.a$(SCREEN_SUFFIX) (riscv64$(if $(SCREEN_SUFFIX), 不带屏, 带屏)) built"
 
 clean:
-	rm -rf build-cross
+	rm -rf build-cross build-cross-noscreen

@@ -59,6 +59,21 @@ struct LoggingConfig {
     std::string level = "info";
 };
 
+/// 板载 SPI 屏实时显示（/dev/fb0，ST7796S 320x480 RGB565）
+///
+/// 板上实测：屏是 SPI 接口，写屏带宽是硬瓶颈——出厂 4MHz 时 ~420KB/s（约 2fps），
+/// 该板稳定上限 20MHz（~2MB/s，需改设备树 spi-max-frequency）。故默认半屏
+/// （scale=2 → 160x240，75KB/帧）以吃满摄像头帧率。显示线程与浏览器流共享同一份
+/// 解码结果（Camera::latest_rgb 缓存），开屏不会拖慢浏览器看摄像头画面。
+struct DisplayConfig {
+    bool enabled = true;     // 随服务启动开屏（无 /dev/fb0 时自动跳过）
+    int scale = 2;           // 显示区域 = 屏幕 1/scale（2 → 160x240 居中）；1 = 全屏
+    int orient = 3;          // 0无 1水平翻 2垂直翻 3=180°（本板实测 3 为正）
+    int fps = 15;            // 显示帧率上限（建议与 camera.fps 一致）
+    int noise = 1;           // 脏行容差：忽略每通道 N 个 LSB（0=精确，越大越宽容）
+    int decode_max_w = 320;  // 解码降采样上限宽（与 camera.stream_width 一致可命中共享缓存）
+};
+
 struct Config {
     CameraConfig camera;
     MotorConfig motor;
@@ -67,6 +82,7 @@ struct Config {
     OtaConfig ota;
     ChassisConfig chassis;
     LoggingConfig logging;
+    DisplayConfig display;
 
     // 云端 URL（app/config.py HardwareConfig 对齐）
     std::string demo_server_url = "http://124.222.162.228:8888";

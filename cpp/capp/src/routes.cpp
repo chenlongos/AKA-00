@@ -598,45 +598,91 @@ void register_routes(Router& router, AppContext& ctx) {
         // 编码输出缓冲跨帧复用，避免每帧 malloc（长时间运行更稳）
         std::vector<uint8_t> jpeg;
         while (true) {
-            csrc::Camera::Frame f;
-            if (ctx.camera.read_latest(f) && !f.data.empty() && f.ts_ms != last_ts) {
-                auto now = std::chrono::steady_clock::now();
-                if (now - last_send >= min_interval) {
-                    bool ok = false;
-                    auto t0 = std::chrono::steady_clock::now();
-                    if (downscale) {
+            auto now = std::chrono::steady_clock::now();
+            if (now - last_send >= min_interval) {
+                bool ok = false;
+                uint64_t ts = 0;
+                auto t0 = std::chrono::steady_clock::now();
+                if (downscale) {
+                    // 缩放路径：解码走 Camera::latest_rgb **共享缓存** ——
+                    // 屏显示线程通常已解过这一帧，这里直接命中，省掉整帧解码
+                    // （640x360 MJPEG → 320 宽，C906 上约 10ms/帧）。
+                    csrc::Camera::RgbFrame rgb;
+                    if (ctx.camera.latest_rgb(ctx.config.camera.stream_width, rgb) &&
+                        !rgb.data.empty() && rgb.ts_ms != last_ts) {
                         jpeg.clear();
-                        ok = build_stream_jpeg(ctx, f, jpeg);
-                    } else if (csrc::Camera::is_jpeg(f.data.data(), f.data.size())) {
+                        ok = build_stream_jpeg_rgb(ctx, rgb, jpeg);
+                        ts = rgb.ts_ms;
+                    }
+                } else {
+                    // 直通路径：原帧直接下发，完全不碰解码
+                    csrc::Camera::Frame f;
+                    if (ctx.camera.read_latest(f) && !f.data.empty() && f.ts_ms != last_ts &&
+                        csrc::Camera::is_jpeg(f.data.data(), f.data.size())) {
                         jpeg = std::move(f.data);
                         ok = true;
+                        ts = f.ts_ms;
                     }
-                    double enc_ms = std::chrono::duration<double, std::milli>(
-                                        std::chrono::steady_clock::now() - t0).count();
-                    // 诊断：单帧耗时 >120ms 即肉眼可见卡顿，记录一次(每帧, debug 级)
-                    if (enc_ms > 120.0) {
-                        CAM_DEBUG("camera stream frame encode %.0fms (cpu busy? size=%zu)",
-                                  enc_ms, jpeg.size());
-                    }
-                    if (ok && !jpeg.empty()) {
-                        // MJPEG 直通/重编码帧：头 + jpeg + 尾拼成一个 buffer 一次 write（减少系统调用）
-                        std::string part = "--frame\r\nContent-Type: image/jpeg\r\n"
-                                           "Content-Length: " + std::to_string(jpeg.size()) +
-                                           "\r\n\r\n";
-                        std::string out;
-                        out.reserve(part.size() + jpeg.size() + 2);
-                        out += part;
-                        out.append((const char*)jpeg.data(), jpeg.size());
-                        out += "\r\n";
-                        if (!conn.write_all(out)) break;
-                        last_ts = f.ts_ms;
-                        last_send = now;
-                    }
+                }
+                double enc_ms = std::chrono::duration<double, std::milli>(
+                                    std::chrono::steady_clock::now() - t0).count();
+                // 诊断：单帧耗时 >120ms 即肉眼可见卡顿，记录一次(每帧, debug 级)
+                if (enc_ms > 120.0) {
+                    CAM_DEBUG("camera stream frame encode %.0fms (cpu busy? size=%zu)",
+                              enc_ms, jpeg.size());
+                }
+                if (ok && !jpeg.empty()) {
+                    // MJPEG 直通/重编码帧：头 + jpeg + 尾拼成一个 buffer 一次 write（减少系统调用）
+                    std::string part = "--frame\r\nContent-Type: image/jpeg\r\n"
+                                       "Content-Length: " + std::to_string(jpeg.size()) +
+                                       "\r\n\r\n";
+                    std::string out;
+                    out.reserve(part.size() + jpeg.size() + 2);
+                    out += part;
+                    out.append((const char*)jpeg.data(), jpeg.size());
+                    out += "\r\n";
+                    if (!conn.write_all(out)) break;
+                    last_ts = ts;
+                    last_send = now;
                 }
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         conn.close();
+    });
+
+    // ── /api/display （板载 SPI 屏显示：摄像头画面 → /dev/fb0）──
+    router.add("GET", "/api/display/status", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
+        resp.set_json(display_status_json(ctx));
+    });
+
+    // 运行期控制：POST /api/display?enabled=0|1&scale=2&orient=3&fps=15&noise=1
+    // 改参数会重启显示线程（立即生效；不写回 config.toml）
+    router.add("POST", "/api/display", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
+        csrc::DisplayConfig dc = ctx.display.config();
+        bool restart = false;
+        std::string s;
+        if (!(s = req.query_param("scale")).empty())  { dc.scale = atoi(s.c_str());  restart = true; }
+        if (!(s = req.query_param("orient")).empty()) { dc.orient = atoi(s.c_str()); restart = true; }
+        if (!(s = req.query_param("fps")).empty())    { dc.fps = atoi(s.c_str());    restart = true; }
+        if (!(s = req.query_param("noise")).empty())  { dc.noise = atoi(s.c_str());  restart = true; }
+        bool want_on = dc.enabled;
+        std::string en = req.query_param("enabled");
+        if (!en.empty()) {
+            want_on = (en == "1" || en == "true" || en == "yes");
+            dc.enabled = want_on;
+        }
+        ctx.config.display = dc;   // 运行期覆盖
+
+        if (!want_on) {
+            close_display(ctx);
+        } else if (restart || !ctx.display.running()) {
+            close_display(ctx);     // 先停再起，保证新参数生效
+            ensure_display(ctx);
+        }
+        csrc::Json j = display_status_json(ctx);
+        j["ok"] = true;
+        resp.set_json(j);
     });
 
     router.add("GET", "/api/camera/speed", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {

@@ -21,6 +21,7 @@ cpp/
 │   │   ├── sts3215.hpp       STS3215 总线舵机驱动（对应 sts3215/__init__.py）
 │   │   ├── gripper.hpp       Gripper 接口 + 适配器 + 工厂（对应 arm_control/interfaces.py）
 │   │   ├── camera.hpp        V4L2 + libjpeg 摄像头（参考 tests/demo_camera.c）
+│   │   ├── screen_display.hpp 摄像头画面 → 板载 SPI 屏（/dev/fb0，ST7796S 320x480）
 │   │   ├── state.hpp         RobotStatus + StateCollector（对应 src/state/__init__.py）
 │   │   ├── system_utils.hpp  IP / MAC / CPU / 内存 / 磁盘 / uptime
 │   │   └── http_client.hpp   极简 HTTP 客户端（https 走 curl 兜底）
@@ -65,14 +66,36 @@ static/ (index.html + assets/)  --打包-->  板上 $AKA_HOME/static/
 ```sh
 cd cpp
 
+# ── 带屏版本（默认）──
 make                      # 全流程: libjpeg → mbedtls → csrc → capp(riscv64) → package
+make screen               # 同 make（显式）
+# → 产物: capp/bin/aka-capp、dist/AKA-00/、dist/aka-capp.tar.gz
+
+# ── 不带屏版本（整个显示栈编译期裁掉）──
+make noscreen
+# → 产物: capp/bin/aka-capp-noscreen、dist-noscreen/AKA-00/、dist-noscreen/aka-capp-noscreen.tar.gz
+
 make libjpeg              # 交叉编译 libjpeg（首次自动下载源码）
 make mbedtls              # 交叉编译 mbedTLS（首次自动下载源码，HTTPS 用）
-make csrc                 # 交叉编译 csrc
-make capp                 # 交叉编译 capp → bin/aka-capp（riscv64 静态）
-make package              # 组装 dist/AKA-00/ + aka-capp.tar.gz
+make csrc | capp | tools | package                      # 带屏版各步骤
+make csrc-noscreen | capp-noscreen | package-noscreen   # 不带屏版各步骤
 make clean                # 清理全部构建产物
 ```
+
+**两个版本的区别**（编译期开关 `AKA_WITH_SCREEN`，构建目录与产物完全隔离、互不覆盖）：
+
+| | 带屏版（默认） | 不带屏版 |
+|---|---|---|
+| 编译宏 | `-DAKA_WITH_SCREEN=1` | `-DAKA_WITH_SCREEN=0` |
+| 二进制 | `bin/aka-capp` | `bin/aka-capp-noscreen` |
+| 构建目录 | `build-cross/` | `build-cross-noscreen/` |
+| 部署包 | `dist/aka-capp.tar.gz` | `dist-noscreen/aka-capp-noscreen.tar.gz` |
+| 工具 | 含 `screen_test` | 不含 |
+| 屏显示 | 摄像头画面 → /dev/fb0 | **整个显示栈不参与编译**（二进制里无 `/dev/fb0`，`[display]` 配置被忽略） |
+
+给没有屏的机器用不带屏版：二进制更小、完全不碰 framebuffer，也彻底排除
+屏相关代码对采集/服务的影响。整机行为其余部分完全一致。
+
 
 说明：
 
@@ -250,6 +273,7 @@ capp 同时支持 HTTP 和 HTTPS：默认 `:80` 与 `:5443` 共存（与原 Pyth
 | `GET /api/motor/status` `GET /api/motor/direct?left=&right=&duration=` `GET /api/motor/raw_command?cmd=` | 电机 |
 | `GET/POST /api/arm/angles` `GET/POST /api/arm/angles/default` `POST /api/arm/angles/preview` | 机械臂 |
 | `GET /api/camera/status` `POST /api/camera/open|close` `GET /api/camera/stream|snapshot|speed|all_status` | 摄像头 |
+| `GET /api/display/status` `POST /api/display?enabled=&scale=&orient=&fps=&noise=` | 板载屏显示 |
 | `GET /api/demo/list|name` `POST /api/demo/init|stop|download_model_with_progress|upload_model` `GET /api/demo/download_progress/{id}` | demo |
 | `GET /api/ota/version|status|check|upgrade/progress` `POST /api/ota/upgrade|update` | OTA |
 | `GET /api/system/info|ip|heartbeat` | 系统 |
@@ -257,6 +281,42 @@ capp 同时支持 HTTP 和 HTTPS：默认 `:80` 与 `:5443` 共存（与原 Pyth
 | `GET/POST /api/config/speed` | 速度配置 |
 | `WS /ws/control` | 二进制控制通道（0xAA 摇杆 / 0xDD JSON / 0xBB 状态） |
 | `GET /` 及 `/assets/*` | 前端静态文件（SPA fallback → index.html） |
+
+## 板载屏显示（摄像头 → /dev/fb0）
+
+`csrc::ScreenDisplay` 把摄像头画面实时显示到板载 SPI 屏（ST7796S 320x480 RGB565），
+随 capp 启动（`[display] enabled = true`），也可用 `POST /api/display` 运行期开关/调参。
+
+**硬件事实（板上实测，决定了参数选择）**
+
+| 项 | 值 | 说明 |
+|---|---|---|
+| SPI 时钟 | 出厂 **4MHz** → 实测稳定上限 **20MHz** | 设备树 `st7796s@0/spi-max-frequency`；4MHz 时 ~420KB/s（约 2fps），20MHz 时 ~2MB/s |
+| 24MHz 及以上 | ✗ 白屏 | 面板/走线信号完整性到顶；杜邦线转接会明显降低可跑频率 |
+| 全屏写 | 307KB/帧 | 20MHz 下受带宽限制约 8fps |
+| 半屏写（默认 scale=2） | 75KB/帧 | 可吃满摄像头 15fps |
+
+**实现要点**
+
+- **共享解码**（保证不拖慢浏览器）：`Camera::latest_rgb(max_out_w, ...)` 带缓存，
+  同一帧只解码一次 —— 屏显示线程与 `/api/camera/stream` 的重编码路径共用结果，
+  所以开屏后浏览器反而省掉自己那次整帧解码（640x360 MJPEG → 320 宽约 10ms/帧）。
+  屏幕新增开销只有 RGB565 转换 + 脏行写屏（各几 ms）。
+- **脏行检测**：逐行比较，只重写内容变化的行（SPI 屏按行扫描，静态区域零流量）；
+  带噪声容差（`[display] noise`，忽略每通道 N 个 LSB），否则实况噪声会让"全行都变"。
+- **整数查表转换**：RGB8→RGB565 + 旋转 90° + cover 缩放预计算成查表，
+  riscv64 上避免逐像素浮点（否则慢一个量级）。
+- **不干扰 Web 服务**：显示帧率上限 `[display] fps`，无新帧时零拷贝零解码，
+  无 `/dev/fb0` 时自动跳过（不影响服务启动）。
+
+**板上直测工具**（不起 Web 服务，排查屏/接线用）：
+
+```sh
+screen_test info            # framebuffer 信息 + 显示引擎状态
+screen_test colors          # 纯色顺序播放（确认 RGB565 字节序/通道序/方向）
+screen_test bench           # 写屏带宽基准（整块 vs 逐行）
+screen_test camera [scale]  # 摄像头实时预览（默认 scale=2 半屏）
+```
 
 ## 与原 Python 版本的差异（有意为之）
 

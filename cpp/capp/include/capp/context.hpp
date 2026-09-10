@@ -27,6 +27,7 @@
 #include "csrc/gripper.hpp"
 #include "csrc/json.hpp"
 #include "csrc/motor_pair.hpp"
+#include "csrc/screen_display.hpp"
 #include "csrc/state.hpp"
 
 namespace capp {
@@ -39,6 +40,8 @@ struct AppContext {
     std::unique_ptr<csrc::Gripper> gripper;
     csrc::StateCollector& collector = csrc::StateCollector::get_instance();
     csrc::Camera& camera = csrc::Camera::get_instance();
+    /// 板载 SPI 屏显示（摄像头画面 → /dev/fb0）
+    csrc::ScreenDisplay display;
 
     bool camera_on = false;
 
@@ -124,6 +127,18 @@ bool current_jpeg(AppContext& ctx, int quality, std::vector<uint8_t>& out);
 /// 流帧 → JPEG 字节：按 config.camera.stream_* 缩放重编码（=0 时等价直通）。
 /// 返回 false = 帧不可用。
 bool build_stream_jpeg(AppContext& ctx, const csrc::Camera::Frame& f, std::vector<uint8_t>& out);
+/// 流帧 → JPEG 字节（用共享解码结果版本）：屏幕显示与浏览器流共用一次解码。
+bool build_stream_jpeg_rgb(AppContext& ctx, const csrc::Camera::RgbFrame& rgb,
+                           std::vector<uint8_t>& out);
+
+// ── 板载屏显示服务 ──
+
+/// 启动屏显示（按 config.display；无 /dev/fb0 时返回 false 但不影响其它服务）
+bool ensure_display(AppContext& ctx);
+/// 停止屏显示并释放 framebuffer
+void close_display(AppContext& ctx);
+/// 屏显示状态（JSON：running/available/fps/frames/区域尺寸等）
+csrc::Json display_status_json(AppContext& ctx);
 
 // ── 状态上报（对应 app/services/status_reporter.py）──
 

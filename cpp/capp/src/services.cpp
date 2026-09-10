@@ -479,37 +479,83 @@ bool current_jpeg(AppContext& ctx, int quality, std::vector<uint8_t>& out) {
 
 // 解码 → 等比缩放（黑边补齐到 stream_* 尺寸）→ 重编码 JPEG。
 // 返回 false 表示该帧无法转出 JPEG（坏帧/未知格式），调用方应跳过而不是断开。
+//
+// 关键：解码走 Camera::latest_rgb（**共享缓存**）——屏幕显示线程与浏览器流共用
+// 同一帧的解码结果，同一帧只解码一次。所以"开屏"不会拖慢浏览器：浏览器反而省掉
+// 了自己那次整帧解码（640x360 MJPEG → 320 宽，C906 上约 10ms/帧）。
 bool build_stream_jpeg(AppContext& ctx, const csrc::Camera::Frame& f,
                        std::vector<uint8_t>& out) {
+    if (f.data.empty()) return false;
+    csrc::Camera::RgbFrame rgb;
+    if (!ctx.camera.latest_rgb(ctx.config.camera.stream_width, rgb) || rgb.data.empty())
+        return false;
+    return build_stream_jpeg_rgb(ctx, rgb, out);
+}
+
+// 由已解码的 RGB 帧出流（缓存命中路径）：缩放补齐 + 编码，不再重复解码。
+bool build_stream_jpeg_rgb(AppContext& ctx, const csrc::Camera::RgbFrame& rgb,
+                           std::vector<uint8_t>& out) {
     const int ow = ctx.config.camera.stream_width;
     const int oh = ctx.config.camera.stream_height;
     const int q = ctx.config.camera.stream_quality;
-    if (ow <= 0 || oh <= 0 || q <= 0 || f.data.empty()) return false;
-
-    std::vector<uint8_t> rgb;
-    int w = 0, h = 0;
-    if (csrc::Camera::is_jpeg(f.data.data(), f.data.size())) {
-        // libjpeg 缩放解码：输出宽 ≤ ow（保持宽高比，1/1..1/8 整数降采样）
-        if (!csrc::Camera::jpeg_to_rgb(f.data.data(), f.data.size(), w, h, rgb, ow))
-            return false;
-    } else if (f.w > 0 && f.h > 0) {
-        // YUYV 兜底：先转 RGB，再缩放
-        w = f.w;
-        h = f.h;
-        rgb.resize((size_t)w * h * 3);
-        csrc::Camera::yuyv_to_rgb(f.data.data(), w, h, rgb.data());
-    } else {
-        return false;
-    }
+    if (ow <= 0 || oh <= 0 || q <= 0 || rgb.data.empty()) return false;
+    const int w = rgb.w, h = rgb.h;
     if (w <= 0 || h <= 0) return false;
 
     if (w == ow && h == oh) {
-        return csrc::Camera::rgb_to_jpeg(rgb.data(), w, h, q, out);
+        return csrc::Camera::rgb_to_jpeg(rgb.data.data(), w, h, q, out);
     }
     std::vector<uint8_t> box((size_t)ow * oh * 3);
-    if (!csrc::Camera::letterbox_rgb(rgb.data(), w, h, box.data(), ow, oh))
+    if (!csrc::Camera::letterbox_rgb(rgb.data.data(), w, h, box.data(), ow, oh))
         return false;
     return csrc::Camera::rgb_to_jpeg(box.data(), ow, oh, q, out);
+}
+
+// ═══════════════════════ 板载屏显示服务 ═══════════════════════
+
+bool ensure_display(AppContext& ctx) {
+    if (ctx.display.running()) return true;
+    if (!ctx.config.display.enabled) return false;
+    // 显示依赖摄像头最新帧（复用 Camera 单例，不额外占用设备）
+    if (!ensure_camera(ctx)) {
+        CAM_WARN("[display] camera unavailable — screen off");
+        return false;
+    }
+    csrc::DisplayConfig dc = ctx.config.display;
+    // 解码降采样上限与浏览器流一致 → 命中共享缓存（同一帧只解码一次）
+    if (dc.decode_max_w <= 0) dc.decode_max_w = ctx.config.camera.stream_width;
+    if (!ctx.display.start(dc)) {
+        CAM_INFO("[display] screen disabled (no framebuffer)");
+        return false;
+    }
+    return true;
+}
+
+void close_display(AppContext& ctx) { ctx.display.stop(); }
+
+csrc::Json display_status_json(AppContext& ctx) {
+    csrc::Json j;
+    const csrc::DisplayConfig& dc = ctx.display.config();
+    j["enabled"] = dc.enabled;
+    j["running"] = ctx.display.running();
+    j["available"] = ctx.display.available();   // /dev/fb0 映射成功
+    j["scale"] = dc.scale;
+    j["orient"] = dc.orient;
+    j["fps_limit"] = dc.fps;
+    j["noise"] = dc.noise;
+    csrc::ScreenDisplay::Stats st = ctx.display.stats();
+    j["fps"] = st.fps;
+    j["frames"] = (int64_t)st.frames;
+    j["dec_ms"] = st.dec_ms;
+    j["conv_ms"] = st.conv_ms;
+    j["blit_ms"] = st.blit_ms;
+    j["rows"] = st.rows;
+    j["total_rows"] = st.total_rows;
+    j["region_w"] = st.out_w;
+    j["region_h"] = st.out_h;
+    j["screen_w"] = st.fb_w;
+    j["screen_h"] = st.fb_h;
+    return j;
 }
 
 // ═══════════════════════ 状态上报 ═══════════════════════

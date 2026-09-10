@@ -2,7 +2,8 @@
 # capp — 交叉编译 Makefile（SG2002 / riscv64 musl 静态）
 #
 # 用法:
-#   make -f Makefile.cross                          # 默认工具链
+#   make -f Makefile.cross                        # 带屏版本 → bin/aka-capp
+#   make -f Makefile.cross WITH_SCREEN=0          # 不带屏 → bin/aka-capp-noscreen
 #   make -f Makefile.cross CXX=/path/to/riscv64-unknown-linux-musl-g++ \
 #                          JPEG_DIR=/path/to/libjpeg
 #
@@ -11,19 +12,32 @@
 # （riscv64 musl 交叉编译 libjpeg）；也可以指向自己的交叉 libjpeg。
 # =============================================================================
 
+# 带屏 / 不带屏两个变体（与 csrc、顶层 Makefile 的 screen/noscreen 对齐）
+WITH_SCREEN ?= 1
+ifeq ($(WITH_SCREEN),1)
+SCREEN_SUFFIX :=
+SCREEN_DEF    := -DAKA_WITH_SCREEN=1
+else
+SCREEN_SUFFIX := -noscreen
+SCREEN_DEF    := -DAKA_WITH_SCREEN=0
+endif
+
 # 注意用 := 覆盖环境变量（orb 登录 shell 常导出 CXX=g++ 之类，会污染交叉编译）
 CXX      := /home/junbo_dai/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-g++
 CSRC     := ../csrc
 JPEG_DIR ?= ../third_party/jpeg
 MBEDTLS_DIR ?= ../third_party/mbedtls
-TARGET   := bin/aka-capp
+TARGET   := bin/aka-capp$(SCREEN_SUFFIX)
+CSRC_LIB := $(CSRC)/build-cross$(SCREEN_SUFFIX)/libcsrc.a
 
 CXXFLAGS := -std=c++17 -O3 -Wall -Wextra -mcpu=c906fdv -MMD -MP -mabi=lp64d \
+            $(SCREEN_DEF) \
             -Iinclude -I$(CSRC)/include -I$(JPEG_DIR)/include -I$(MBEDTLS_DIR)/include
 LDFLAGS  := -static -L$(JPEG_DIR)/lib -L$(MBEDTLS_DIR)/lib
 
+OBJDIR := build-cross$(SCREEN_SUFFIX)
 SRCS := $(wildcard src/*.cpp)
-OBJS := $(SRCS:src/%.cpp=build-cross/%.o)
+OBJS := $(SRCS:src/%.cpp=$(OBJDIR)/%.o)
 DEPS := $(OBJS:.o=.d)
 -include $(DEPS)
 
@@ -32,19 +46,19 @@ DEPS := $(OBJS:.o=.d)
 
 all: $(TARGET)
 
-build-cross:
-	mkdir -p build-cross bin
+$(OBJDIR):
+	mkdir -p $(OBJDIR) bin
 
-build-cross/%.o: src/%.cpp | build-cross
+$(OBJDIR)/%.o: src/%.cpp | $(OBJDIR)
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
-$(CSRC)/build-cross/libcsrc.a:
-	$(MAKE) -f Makefile.cross -C $(CSRC)
+$(CSRC_LIB):
+	$(MAKE) -f Makefile.cross -C $(CSRC) WITH_SCREEN=$(WITH_SCREEN)
 
-$(TARGET): $(OBJS) $(CSRC)/build-cross/libcsrc.a | bin
-	$(CXX) $(CXXFLAGS) -o $@ $(OBJS) $(CSRC)/build-cross/libcsrc.a \
+$(TARGET): $(OBJS) $(CSRC_LIB)
+	$(CXX) $(CXXFLAGS) -o $@ $(OBJS) $(CSRC_LIB) \
 	    $(LDFLAGS) -ljpeg -lmbedtls -lmbedx509 -lmbedcrypto -lpthread
-	@echo "  ✓ aka-capp (riscv64 static) built"
+	@echo "  ✓ aka-capp$(SCREEN_SUFFIX) (riscv64 static$(if $(SCREEN_SUFFIX), 不带屏, 带屏)) built"
 
 clean:
-	rm -rf build-cross bin
+	rm -rf build-cross build-cross-noscreen bin

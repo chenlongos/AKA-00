@@ -42,6 +42,11 @@ int main() {
     // 服务层（硬件 + 状态采集）
     capp::init_services(ctx);
 
+    // 板载屏显示（摄像头画面 → /dev/fb0；无屏板自动跳过）
+    // 与浏览器 /api/camera/stream 共享同一份解码结果（Camera::latest_rgb 缓存），
+    // 因此开屏不会拖慢浏览器看摄像头的速度/效率。
+    capp::ensure_display(ctx);
+
     // 云端状态上报
     capp::start_status_reporter(ctx);
 
@@ -76,6 +81,7 @@ int main() {
     server.run();  // 阻塞直到 SIGTERM/SIGINT（on_signal → ctx.shutdown）
 
     // 退出清理
+    capp::close_display(ctx);   // 先停显示线程（它要用摄像头最新帧）
     capp::close_camera(ctx);
     {
         std::lock_guard<std::mutex> lk(ctx.timer_mu);
