@@ -89,6 +89,16 @@ struct DisplayConfig {
     int fps_streaming = 5;
     int noise = 1;           // 脏行容差：忽略每通道 N 个 LSB（0=精确，越大越宽容）
     int decode_max_w = 320;  // 解码降采样上限宽（与 camera.stream_width 一致可命中共享缓存）
+
+    // ── 熄屏待机图（摄像头关闭 / 屏停用时显示的画面，替代原来的纯黑清屏）──
+    /// 图片路径：空字符串 = 保持旧行为（黑屏）；相对路径按 $AKA_HOME 解析。
+    /// 开关联动：打开摄像头 → 清屏切实时画面；关闭摄像头 → 重新显示这张图。
+    std::string standby_image = "start_img.jpg";
+    /// 铺满整屏（true，默认）；false = 只铺摄像头显示区（屏幕 1/scale 的居中区域）
+    bool standby_full_screen = true;
+    /// 解码宽度上限（0 = 原尺寸解码）。1500x1000 的图取 750 → libjpeg 走 1/2 档
+    /// （输出 750x500），再盒式缩放到面板；板上只在切图时跑一次，几十毫秒量级。
+    int standby_decode_w = 750;
 };
 
 struct Config {

@@ -12,6 +12,8 @@ cpp/csrc/build/
 cpp/csrc/build-noscreen/
 cpp/csrc/build-cross/
 cpp/csrc/build-cross-noscreen/
+# 开发机单测产物（make -C cpp/csrc test-standby）
+cpp/csrc/build-tests/
 cpp/capp/build/
 cpp/capp/build-noscreen/
 cpp/capp/build-cross/

@@ -121,6 +121,10 @@ define PACKAGE_RECIPE
 	[ -f "$(ROOT)/arm_angles_default.json" ] && cp "$(ROOT)/arm_angles_default.json" "$$DIST/"; \
 	[ -f "$(ROOT)/speed_config.json" ] && cp "$(ROOT)/speed_config.json" "$$DIST/"; \
 	[ -f "$(ROOT)/VERSION" ] && cp "$(ROOT)/VERSION" "$$DIST/"; \
+	if [ "$(1)" = "1" ] && [ -f "$(ROOT)/start_img.jpg" ]; then \
+	    cp "$(ROOT)/start_img.jpg" "$$DIST/"; \
+	    echo "  ✓ 熄屏待机图 start_img.jpg 已打包"; \
+	fi; \
 	if [ ! -f "$$DIST/config.toml" ]; then \
 	    echo "ERROR: 缺少配置源 $(CPP)/config.toml —— config.toml 必须由 cpp/ 提供（打包不再内置生成）" >&2; \
 	    exit 1; \

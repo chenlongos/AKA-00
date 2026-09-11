@@ -9,6 +9,9 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include "csrc/camera.hpp"
@@ -58,6 +61,65 @@ void enable_display_engine() {
 namespace csrc {
 
 ScreenDisplay::~ScreenDisplay() { stop(); }
+
+/// 待机图转换：来源 RGB8 → 目标 RGB565，几何与 convert() 完全一致
+/// （90° 顺时针旋转 + cover 缩放居中裁切 + orient 位0=水平翻/位1=垂直翻），
+/// 差别只在取样方式：这里对每个目标像素取源图一小块做**盒式平均**。
+/// 照片从 750x500 缩到 320x480 时，平均比最近邻干净得多（没有锯齿/摩尔纹）。
+void ScreenDisplay::convert_box(const uint8_t* rgb, int w, int h, int out_w, int out_h, int orient,
+                                uint16_t* dst) {
+    if (!rgb || w <= 0 || h <= 0 || out_w <= 0 || out_h <= 0 || !dst) return;
+
+    const double sw = (double)h;      // 旋转后宽
+    const double sh = (double)w;      // 旋转后高
+    const double s = (out_w / sw) > (out_h / sh) ? (out_w / sw) : (out_h / sh);
+    if (s <= 0) return;
+    const double off_x = (sw * s - out_w) / 2.0;
+    const double off_y = (sh * s - out_h) / 2.0;
+
+    // 取样块边长：缩小时 >1（做平均），放大时为 1（等价最近邻）
+    int box = (int)std::ceil(1.0 / s);
+    if (box < 1) box = 1;
+    const int half = box / 2;
+    const size_t stride = (size_t)w * 3;
+
+    for (int oy = 0; oy < out_h; oy++) {
+        // 输出行 ← 源列（与 convert 同一公式）
+        const int sx_c = (int)((off_y + oy + 0.5) / s);
+        int sx0 = sx_c - half, sx1 = sx_c - half + box - 1;
+        if (sx0 < 0) sx0 = 0;
+        if (sx1 > w - 1) sx1 = w - 1;
+        const int dst_oy = (orient & 2) ? (out_h - 1 - oy) : oy;
+        uint16_t* row = dst + (size_t)dst_oy * out_w;
+
+        for (int ox = 0; ox < out_w; ox++) {
+            // 输出列 ← 源行（行号随 ox 增大而减小）
+            const int sy_c = (int)(h - 1 - (off_x + ox + 0.5) / s);
+            int sy0 = sy_c - half, sy1 = sy_c - half + box - 1;
+            if (sy0 < 0) sy0 = 0;
+            if (sy1 > h - 1) sy1 = h - 1;
+
+            uint32_t ar = 0, ag = 0, ab = 0, n = 0;
+            for (int sy = sy0; sy <= sy1; sy++) {
+                const uint8_t* src = rgb + (size_t)sy * stride;
+                for (int sx = sx0; sx <= sx1; sx++) {
+                    const uint8_t* px = src + (size_t)sx * 3;
+                    ar += px[0];
+                    ag += px[1];
+                    ab += px[2];
+                    n++;
+                }
+            }
+            const int dst_ox = (orient & 1) ? (out_w - 1 - ox) : ox;
+            if (n == 0) {
+                row[dst_ox] = 0;
+            } else {
+                const uint8_t r = (uint8_t)(ar / n), g = (uint8_t)(ag / n), b = (uint8_t)(ab / n);
+                row[dst_ox] = (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+            }
+        }
+    }
+}
 
 #if defined(__linux__)
 
@@ -138,6 +200,9 @@ bool ScreenDisplay::start(const DisplayConfig& cfg) {
     if (out_h_ < 8) out_h_ = 8;
 
     blit_dst_ = fb_ + (size_t)((fb_h_ - out_h_) / 2) * fb_stride_ + (fb_w_ - out_w_) / 2;
+    // 开摄像头时清一次屏：上一刻屏上可能是整屏待机图，而实时画面只重绘中间区域，
+    // 不清会把待机图的四边留在屏上。一次性 307KB 写屏（20MHz ≈ 150ms），可忽略。
+    clear();
     buf_.assign((size_t)out_w_ * out_h_, 0);
     // 首帧强制全量上屏：prev 全 0xFF 与任何真实画面都不等
     prev_.assign((size_t)out_w_ * out_h_, 0xFFFF);
@@ -168,10 +233,13 @@ void ScreenDisplay::stop() {
         delete thread_;
         thread_ = nullptr;
     }
-    // 清屏：摄像头关闭 → 屏熄灭（否则会留最后一帧静止画面，看起来像还在采集）
+    // 摄像头关闭 → 屏上不留最后一帧静止画面（否则看起来像还在采集）：
+    // 配了待机图就显示待机图（熄屏画面），没配/读不出来才退化为清黑。
     if (fb_) {
-        clear();
-        CAM_INFO("[display] 清屏（摄像头已关）");
+        if (!show_standby()) {
+            clear();
+            CAM_INFO("[display] 清屏（摄像头已关）");
+        }
     }
     close_fb();
     blit_dst_ = nullptr;
@@ -345,6 +413,90 @@ void ScreenDisplay::loop() {
     }
 }
 
+/// 把 RGB565 缓冲按行写进 framebuffer：dst = fb_ + y0*stride + x0，越界自动裁剪。
+void ScreenDisplay::blit_buffer(const uint16_t* src, int w, int h, int x0, int y0) {
+    if (!fb_ || !src || w <= 0 || h <= 0) return;
+    for (int y = 0; y < h; y++) {
+        const int dy = y0 + y;
+        if (dy < 0 || dy >= fb_h_) continue;
+        int sx = 0, dx = x0, cw = w;
+        if (dx < 0) { sx = -dx; cw -= sx; dx = 0; }
+        if (dx + cw > fb_w_) cw = fb_w_ - dx;
+        if (cw <= 0) continue;
+        std::memcpy(fb_ + (size_t)dy * fb_stride_ + dx, src + (size_t)y * w + sx,
+                    (size_t)cw * sizeof(uint16_t));
+    }
+}
+
+/// 待机图路径解析：相对路径按 $AKA_HOME 解析（打包后 = 应用根下的 start_img.jpg）
+static std::string resolve_standby_path(const std::string& path) {
+    if (path.empty() || path[0] == '/') return path;
+    if (const char* home = std::getenv("AKA_HOME")) return std::string(home) + "/" + path;
+    return path;
+}
+
+bool ScreenDisplay::show_standby(const std::string& image_path) {
+    if (!fb_) return false;
+    const std::string path =
+        resolve_standby_path(image_path.empty() ? cfg_.standby_image : image_path);
+    if (path.empty()) return false;
+
+    // 读文件 → libjpeg 解码（standby_decode_w 走 1/N 降采样档）
+    std::vector<uint8_t> jpg;
+    if (FILE* f = std::fopen(path.c_str(), "rb")) {
+        std::fseek(f, 0, SEEK_END);
+        const long len = std::ftell(f);
+        std::fseek(f, 0, SEEK_SET);
+        if (len > 0) {
+            jpg.resize((size_t)len);
+            if (std::fread(jpg.data(), 1, jpg.size(), f) != jpg.size()) jpg.clear();
+        }
+        std::fclose(f);
+    } else {
+        CAM_INFO("[standby] 待机图打不开: %s（保持黑屏）", path.c_str());
+        return false;
+    }
+    if (jpg.empty()) {
+        CAM_INFO("[standby] 待机图内容为空: %s", path.c_str());
+        return false;
+    }
+
+    int w = 0, h = 0;
+    std::vector<uint8_t> rgb;
+    if (!Camera::jpeg_to_rgb(jpg.data(), jpg.size(), w, h, rgb, cfg_.standby_decode_w)) {
+        CAM_INFO("[standby] 待机图解码失败: %s（保持黑屏）", path.c_str());
+        return false;
+    }
+
+    // 目标区域：整屏（默认）或摄像头显示区（屏幕 1/scale 的居中区域）
+    int out_w = fb_w_, out_h = fb_h_, x0 = 0, y0 = 0;
+    if (!cfg_.standby_full_screen) {
+        const int sc = cfg_.scale > 0 ? cfg_.scale : 1;
+        out_w = fb_w_ / sc;
+        out_h = fb_h_ / sc;
+        if (out_w < 8) out_w = 8;
+        if (out_h < 8) out_h = 8;
+        x0 = (fb_w_ - out_w) / 2;
+        y0 = (fb_h_ - out_h) / 2;
+    }
+
+    std::vector<uint16_t> buf((size_t)out_w * out_h);
+    convert_box(rgb.data(), w, h, out_w, out_h, cfg_.orient, buf.data());
+    blit_buffer(buf.data(), out_w, out_h, x0, y0);
+    CAM_INFO("[standby] 待机图已上屏: %s (%dx%d → %dx%d %s, orient=%d)", path.c_str(), w, h, out_w,
+             out_h, cfg_.standby_full_screen ? "整屏" : "显示区", cfg_.orient);
+    return true;
+}
+
+bool ScreenDisplay::show_standby_once(const std::string& image_path, const DisplayConfig& cfg) {
+    ScreenDisplay tmp;
+    tmp.cfg_ = cfg;
+    if (!tmp.open_fb()) return false;
+    const bool ok = tmp.show_standby(image_path);
+    tmp.close_fb();
+    return ok;
+}
+
 ScreenDisplay::Stats ScreenDisplay::stats() const {
     std::lock_guard<std::mutex> lk(st_mu_);
     return st_;
@@ -362,6 +514,9 @@ bool ScreenDisplay::start(const DisplayConfig& cfg) {
 void ScreenDisplay::stop() {}
 void ScreenDisplay::clear() {}
 bool ScreenDisplay::clear_screen_once() { return false; }
+bool ScreenDisplay::show_standby(const std::string&) { return false; }
+bool ScreenDisplay::show_standby_once(const std::string&, const DisplayConfig&) { return false; }
+void ScreenDisplay::blit_buffer(const uint16_t*, int, int, int, int) {}
 void ScreenDisplay::convert(const uint8_t*, int, int) {}
 void ScreenDisplay::blit_dirty(int& rows) { rows = 0; }
 void ScreenDisplay::loop() {}
@@ -384,6 +539,10 @@ bool ScreenDisplay::start(const DisplayConfig& cfg) {
 void ScreenDisplay::stop() {}
 void ScreenDisplay::clear() {}
 bool ScreenDisplay::clear_screen_once() { return false; }
+bool ScreenDisplay::show_standby(const std::string&) { return false; }
+bool ScreenDisplay::show_standby_once(const std::string&, const DisplayConfig&) { return false; }
+void ScreenDisplay::convert_box(const uint8_t*, int, int, int, int, int, uint16_t*) {}
+void ScreenDisplay::blit_buffer(const uint16_t*, int, int, int, int) {}
 void ScreenDisplay::convert(const uint8_t*, int, int) {}
 void ScreenDisplay::blit_dirty(int& rows) { rows = 0; }
 void ScreenDisplay::loop() {}

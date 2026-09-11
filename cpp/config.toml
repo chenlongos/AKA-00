@@ -85,3 +85,13 @@ fps_streaming = 5
 noise = 1
 # 解码降采样上限宽（与 [camera] stream_width 一致 → 与浏览器共用同一次解码）
 decode_max_w = 320
+
+# ── 熄屏待机图（摄像头关 / 屏停用时显示的画面，替代纯黑清屏）──
+# 路径：相对路径按 $AKA_HOME 解析（打包后在应用根目录）；留空 = 保持黑屏（旧行为）。
+# 联动：打开摄像头 → 清屏切实时画面；关闭摄像头 → 重新显示这张图。
+standby_image = "start_img.jpg"
+# true = 铺满整屏（320x480，推荐，待机图要好看）；false = 只铺摄像头显示区（1/scale 的居中区域）
+standby_full_screen = true
+# libjpeg 解码宽度上限：1500x1000 的图填 750 → 走 1/2 档（解码 750x500）再盒式缩到面板；
+# 填 0 = 原尺寸解码（更慢更占内存，板上只在切图时跑一次）。
+standby_decode_w = 750

@@ -333,6 +333,37 @@ screen_test camera [scale]  # 摄像头实时预览（默认 scale=2 半屏）
 
 **运行期：`GET /api/display/status`、`POST /api/display?enabled=&scale=&orient=&fps=&noise=`。**
 
+**熄屏待机图（`start_img.jpg`）**
+
+摄像头关着的时候屏上不再是黑的，而是显示一张待机图；打开摄像头立刻清屏切实时画面，
+关摄像头又回到这张图：
+
+| 时机 | 屏上内容 |
+|---|---|
+| 开机（`follow_camera=true`，摄像头默认关） | 待机图（`[display] standby_image`，默认 `start_img.jpg`） |
+| 打开摄像头（`POST /api/camera/open` / 前端开关） | 先清一次屏，再实时出图 |
+| 关闭摄像头（`POST /api/camera/close`） | 待机图（替代原来的黑屏） |
+| `POST /api/display?enabled=0` | 同上（停显示 → 待机图） |
+| 图片缺失 / 解码失败 / 无 `/dev/fb0` | 退化为原来的清黑，不影响服务启动 |
+
+- 图走**和摄像头画面完全同一套变换**（90° 旋转 + cover 缩放居中裁切 + `[display] orient`）。
+  本板 `orient=3` 是照着"摄像头画面正立"调出来的，所以待机图也正立 —— 两者方向一致才合理，
+  千万别只给待机图单独调方向。
+- 取样用**盒式平均**（照片缩小时比最近邻干净），只在切图那一次跑；摄像头热路径仍是原来的
+  最近邻查表，不受影响。
+- 资源占用：`standby_decode_w=750` 时 libjpeg 走 1/2 档（1500x1000 → 750x500），
+  再盒式缩到面板；一次性几十毫秒，只在切图时发生。
+
+| 配置键 | 默认 | 说明 |
+|---|---|---|
+| `[display] standby_image` | `start_img.jpg` | 相对路径按 `$AKA_HOME` 解析；留空 = 保持黑屏（旧行为） |
+| `[display] standby_full_screen` | `true` | 铺满整屏 320x480；`false` = 只铺摄像头显示区（1/scale 居中区域） |
+| `[display] standby_decode_w` | `750` | libjpeg 解码宽度上限；`0` = 原尺寸解码（更慢更占内存） |
+
+打包：带屏版本的部署目录会带上 `start_img.jpg`（不带屏版本不带，显示栈已裁掉）。
+开发机单测（不需要板子）：`make -C cpp/csrc test-standby`，覆盖旋转方向、orient 四个翻转、
+cover 裁切、盒式平均效果、越界写与异常输入，共 21 项断言。
+
 **开关联动**（默认 `[display] follow_camera = true`，屏跟随摄像头开关）
 
 | 动作 | 屏行为 |

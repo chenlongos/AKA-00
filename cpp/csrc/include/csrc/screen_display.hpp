@@ -54,11 +54,30 @@ public:
     /// 为真时显示线程降到 config.fps_streaming（0 = 暂停），让出 CPU 给浏览器。
     void set_streaming(bool on) { streaming_ = on; }
     bool streaming() const { return streaming_; }
-    /// 清屏（把 framebuffer 填黑）。stop() 内部会自动调用。
+    /// 清屏（把 framebuffer 填黑）。stop() 内部会自动调用（配了待机图时会画待机图）。
     void clear();
+
+    // ── 熄屏待机图（摄像头关时显示的画面）──────────────────────────────────
+    //
+    // 语义：摄像头关 / 屏停用 → 屏上显示这张图（而不是纯黑）；打开摄像头 → 清屏切
+    // 实时画面；再关摄像头 → 又回到这张图。图铺满整屏（config.standby_full_screen）
+    // 或只铺摄像头显示区。
+    //
+    // image_path 为空 → 用 config().standby_image；再空 → 退化为清黑。
+    /// 画待机图到 framebuffer（需先 open_fb；返回 false = 没配图/读不出/解码失败）
+    bool show_standby(const std::string& image_path = "");
+    /// 不启动显示线程，只画一次待机图（开机时摄像头还没开 → 屏上先显示它）
+    static bool show_standby_once(const std::string& image_path, const DisplayConfig& cfg);
     /// 不启动显示线程、只清一次屏：开机时摄像头未开 → 屏保持黑，
     /// 等摄像头打开（/api/camera/open）再由显示线程出图。
+    /// （配了待机图时优先用 show_standby_once()，清屏只作为兜底。）
     static bool clear_screen_once();
+
+    /// 待机图专用转换（纯计算，无 framebuffer 依赖 → 开发机可直接单测）：
+    /// 与 convert() 同一套几何（90° 顺时针旋转 + cover 缩放居中裁切 + orient 翻转），
+    /// 取样用**盒式平均**（照片缩小时比最近邻干净），只在切图时跑一次，不追求速度。
+    static void convert_box(const uint8_t* rgb, int w, int h, int out_w, int out_h, int orient,
+                            uint16_t* dst);
     /// /dev/fb0 是否已映射成功（有屏板）
     bool available() const {
 #if defined(__linux__)
@@ -89,6 +108,8 @@ private:
     void close_fb();
     void convert(const uint8_t* rgb, int w, int h);
     void blit_dirty(int& dirty_rows);
+    /// 把 RGB565 缓冲按行写进 framebuffer（带行步长与居中偏移，越界自动裁剪）
+    void blit_buffer(const uint16_t* src, int w, int h, int x0, int y0);
 
     DisplayConfig cfg_;
     std::atomic<bool> running_{false};

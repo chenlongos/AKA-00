@@ -186,6 +186,14 @@ Config Config::load() {
     cfg.display.fps_streaming = toml.geti("display", "fps_streaming", cfg.display.fps_streaming);
     cfg.display.noise = toml.geti("display", "noise", cfg.display.noise);
     cfg.display.decode_max_w = toml.geti("display", "decode_max_w", cfg.display.decode_max_w);
+    // 熄屏待机图（摄像头关时显示，替代黑屏）
+    cfg.display.standby_image = toml.get("display", "standby_image", cfg.display.standby_image);
+    {
+        std::string sv = toml.get("display", "standby_full_screen", "");
+        if (!sv.empty()) cfg.display.standby_full_screen = (sv == "true" || sv == "1" || sv == "yes");
+    }
+    cfg.display.standby_decode_w = toml.geti("display", "standby_decode_w", cfg.display.standby_decode_w);
+    if (cfg.display.standby_decode_w < 0) cfg.display.standby_decode_w = 0;
 
     // 环境变量覆盖（与 app/config.py 一致）
     if (const char* v = std::getenv("STATUS_REPORT_URL")) cfg.status_report_url = v;

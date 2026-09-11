@@ -57,8 +57,14 @@ int main() {
         } else if (ctx.camera_on) {
             capp::ensure_display(ctx);
         } else {
-            csrc::ScreenDisplay::clear_screen_once();
-            CAM_INFO("[display] 等摄像头打开后出图（当前屏保持黑）");
+            // 摄像头还没开 → 屏上显示「熄屏待机图」（原来是纯黑清屏）：
+            // 打开摄像头会自动清屏切实时画面，关闭摄像头又回到这张图。
+            std::string img = ctx.config.display.standby_image;
+            if (!img.empty() && img[0] != '/') img = ctx.app_dir + "/" + img;
+            if (!csrc::ScreenDisplay::show_standby_once(img, ctx.config.display)) {
+                csrc::ScreenDisplay::clear_screen_once();
+            }
+            CAM_INFO("[display] 等摄像头打开后出图（当前屏显示熄屏待机图 %s）", img.c_str());
         }
     }
 

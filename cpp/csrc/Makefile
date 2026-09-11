@@ -38,7 +38,18 @@ DEPS := $(OBJS:.o=.d)
 -include $(DEPS)
 
 .DEFAULT_GOAL := all
-.PHONY: all clean
+.PHONY: all clean test-standby
+
+# 开发机单测：熄屏待机图转换（纯计算，不需要板子/屏；非 Linux 分支也编得进来）
+TESTDIR := build-tests
+test-standby: $(TESTDIR)/test_standby
+	@$(TESTDIR)/test_standby
+
+$(TESTDIR)/test_standby: tests/test_standby.cpp src/screen_display.cpp | $(TESTDIR)
+	$(CXX) $(CXXFLAGS) -o $@ $^
+
+$(TESTDIR):
+	mkdir -p $(TESTDIR)
 
 all: $(LIB)
 
