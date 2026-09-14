@@ -550,31 +550,6 @@ bool ensure_display(AppContext& ctx) {
 
 void close_display(AppContext& ctx) { ctx.display.stop(); }
 
-csrc::Json display_status_json(AppContext& ctx) {
-    csrc::Json j;
-    const csrc::DisplayConfig& dc = ctx.display.config();
-    j["enabled"] = dc.enabled;
-    j["running"] = ctx.display.running();
-    j["available"] = ctx.display.available();   // /dev/fb0 映射成功
-    j["scale"] = dc.scale;
-    j["orient"] = dc.orient;
-    j["fps_limit"] = dc.fps;
-    j["noise"] = dc.noise;
-    csrc::ScreenDisplay::Stats st = ctx.display.stats();
-    j["fps"] = st.fps;
-    j["frames"] = (int64_t)st.frames;
-    j["dec_ms"] = st.dec_ms;
-    j["conv_ms"] = st.conv_ms;
-    j["blit_ms"] = st.blit_ms;
-    j["rows"] = st.rows;
-    j["total_rows"] = st.total_rows;
-    j["region_w"] = st.out_w;
-    j["region_h"] = st.out_h;
-    j["screen_w"] = st.fb_w;
-    j["screen_h"] = st.fb_h;
-    return j;
-}
-
 // ═══════════════════════ 状态上报 ═══════════════════════
 
 void report_status(AppContext& ctx, const std::string& action) {

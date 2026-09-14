@@ -88,7 +88,7 @@ public:
     }
     const DisplayConfig& config() const { return cfg_; }
 
-    /// 运行统计（供 /api/display/status 观测）
+    /// 运行统计（供日志/排障观测：CSRC_LOG_LEVEL=debug 时每秒一行；不对外暴露 HTTP 接口）
     struct Stats {
         uint64_t frames = 0;   // 累计上屏帧数
         int fps = 0;           // 最近 1 秒实际上屏帧率

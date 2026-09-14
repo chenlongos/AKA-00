@@ -18,4 +18,15 @@ APP_DIR="$(cd "$INIT_DIR/../.." && pwd)"
 
 export LD_LIBRARY_PATH="$APP_DIR/libs:${LD_LIBRARY_PATH:-}"
 
-exec ./tennis ./yolo_model.cvimodel 0
+# 模型：优选用 demo 目录里自带的（前端上传/下载模型会放这里），
+# 否则用应用根下模型库里的同名模型 models/<demo 目录名>.cvimodel。
+DEMO_NAME="$(basename "$INIT_DIR")"
+MODEL="./yolo_model.cvimodel"
+[ -f "$MODEL" ] || MODEL="$APP_DIR/models/$DEMO_NAME.cvimodel"
+if [ ! -f "$MODEL" ]; then
+    echo "[demo] 找不到模型：$MODEL" >&2
+    echo "[demo] 把模型放到 $APP_DIR/models/$DEMO_NAME.cvimodel 再启动" >&2
+    exit 1
+fi
+
+exec ./tennis "$MODEL" 0

@@ -657,43 +657,6 @@ void register_routes(Router& router, AppContext& ctx) {
         conn.close();
     });
 
-    // ── /api/display （板载 SPI 屏显示：摄像头画面 → /dev/fb0）──
-    // 运维/调试用接口，前端不涉及（屏状态对前端透明）。
-    router.add("GET", "/api/display/status", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
-        resp.set_json(display_status_json(ctx));
-    });
-
-    // 运行期控制：POST /api/display?enabled=0|1&scale=2&orient=3&fps=15&noise=1
-    // 改参数会重启显示线程（立即生效；不写回 config.toml）。
-    // 屏显示默认跟随摄像头开关；这里手动 enabled=1 时若摄像头未开会顺带打开它
-    // （要画面就得有摄像头），enabled=0 只停显示、不关摄像头。
-    router.add("POST", "/api/display", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
-        csrc::DisplayConfig dc = ctx.display.config();
-        bool restart = false;
-        std::string s;
-        if (!(s = req.query_param("scale")).empty())  { dc.scale = atoi(s.c_str());  restart = true; }
-        if (!(s = req.query_param("orient")).empty()) { dc.orient = atoi(s.c_str()); restart = true; }
-        if (!(s = req.query_param("fps")).empty())    { dc.fps = atoi(s.c_str());    restart = true; }
-        if (!(s = req.query_param("noise")).empty())  { dc.noise = atoi(s.c_str());  restart = true; }
-        bool want_on = dc.enabled;
-        std::string en = req.query_param("enabled");
-        if (!en.empty()) {
-            want_on = (en == "1" || en == "true" || en == "yes");
-            dc.enabled = want_on;
-        }
-        ctx.config.display = dc;   // 运行期覆盖
-
-        if (!want_on) {
-            close_display(ctx);
-        } else if (restart || !ctx.display.running()) {
-            close_display(ctx);     // 先停再起，保证新参数生效
-            ensure_display(ctx);
-        }
-        csrc::Json j = display_status_json(ctx);
-        j["ok"] = true;
-        resp.set_json(j);
-    });
-
     router.add("GET", "/api/camera/speed", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
         csrc::RobotStatus s = ctx.collector.get_status();
         Json j;

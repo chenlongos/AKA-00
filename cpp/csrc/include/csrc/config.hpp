@@ -79,7 +79,7 @@ struct DisplayConfig {
     ///   关闭摄像头（POST /api/camera/close）→ 屏清屏熄灭。
     /// false = 开机就常显（等价于旧行为，会顺带打开摄像头）。
     bool follow_camera = true;
-    int scale = 2;           // 显示区域 = 屏幕 1/scale（2 → 160x240 居中）；1 = 全屏
+    int scale = 1;           // 显示区域 = 屏幕 1/scale（1 = 全屏 320x480，默认）；2 = 半屏 160x240
     int orient = 3;          // 0无 1水平翻 2垂直翻 3=180°（本板实测 3 为正）
     int fps = 15;            // 显示帧率上限（建议与 camera.fps 一致）
     /// 浏览器有人在看 MJPEG 时的显示帧率（默认 5；0 = 暂停显示）。
@@ -98,7 +98,7 @@ struct DisplayConfig {
     bool standby_full_screen = true;
     /// 解码宽度上限（0 = 原尺寸解码）。1500x1000 的图取 750 → libjpeg 走 1/2 档
     /// （输出 750x500），再盒式缩放到面板；板上只在切图时跑一次，几十毫秒量级。
-    int standby_decode_w = 750;
+    int standby_decode_w = 480;   // start_img.jpg 是 480x320（面板同比例，旋转后 1:1）
 };
 
 struct Config {

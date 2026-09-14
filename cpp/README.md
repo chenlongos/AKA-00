@@ -273,7 +273,6 @@ capp 同时支持 HTTP 和 HTTPS：默认 `:80` 与 `:5443` 共存（与原 Pyth
 | `GET /api/motor/status` `GET /api/motor/direct?left=&right=&duration=` `GET /api/motor/raw_command?cmd=` | 电机 |
 | `GET/POST /api/arm/angles` `GET/POST /api/arm/angles/default` `POST /api/arm/angles/preview` | 机械臂 |
 | `GET /api/camera/status` `POST /api/camera/open|close` `GET /api/camera/stream|snapshot|speed|all_status` | 摄像头 |
-| `GET /api/display/status` `POST /api/display?enabled=&scale=&orient=&fps=&noise=` | 板载屏显示 |
 | `GET /api/demo/list|name` `POST /api/demo/init|stop|download_model_with_progress|upload_model` `GET /api/demo/download_progress/{id}` | demo |
 | `GET /api/ota/version|status|check|upgrade/progress` `POST /api/ota/upgrade|update` | OTA |
 | `GET /api/system/info|ip|heartbeat` | 系统 |
@@ -285,7 +284,8 @@ capp 同时支持 HTTP 和 HTTPS：默认 `:80` 与 `:5443` 共存（与原 Pyth
 ## 板载屏显示（摄像头 → /dev/fb0）
 
 `csrc::ScreenDisplay` 把摄像头画面实时显示到板载 SPI 屏（ST7796S 320x480 RGB565），
-随 capp 启动（`[display] enabled = true`），也可用 `POST /api/display` 运行期开关/调参。
+随 capp 启动（`[display] enabled = true`）。**屏没有任何 HTTP 接口**：开关与参数只在 `config.toml` 的 `[display]` 里配，
+改完重启 capp 生效；屏状态对前端透明。
 
 **硬件事实（板上实测，决定了参数选择）**
 
@@ -293,8 +293,8 @@ capp 同时支持 HTTP 和 HTTPS：默认 `:80` 与 `:5443` 共存（与原 Pyth
 |---|---|---|
 | SPI 时钟 | 出厂 **4MHz** → 实测稳定上限 **20MHz** | 设备树 `st7796s@0/spi-max-frequency`；4MHz 时 ~420KB/s（约 2fps），20MHz 时 ~2MB/s |
 | 24MHz 及以上 | ✗ 白屏 | 面板/走线信号完整性到顶；杜邦线转接会明显降低可跑频率 |
-| 全屏写 | 307KB/帧 | 20MHz 下受带宽限制约 8fps |
-| 半屏写（默认 scale=2） | 75KB/帧 | 可吃满摄像头 15fps |
+| 全屏写（**默认**） | 307KB/帧 | 写满整屏约 8fps（SPI 实际 23.44MHz ≈ 2.4MB/s 的物理上限） |
+| 半屏写（`scale=2`） | 75KB/帧 | 可吃满摄像头 15fps；嫌全屏掉帧就改回 2 |
 
 **实现要点**
 
@@ -325,13 +325,14 @@ screen_test camera [scale]  # 摄像头实时预览（默认 scale=2 半屏）
 | `[camera] width/height` | 640x360 | 须用原生可出流档；**320x240 是假档**（S_FMT 成功但不出帧） |
 | `[camera] exp_fix` | false | 固定曝光/AWB/增益：自动控制抖动会让整幅画面每帧一起变、脏行检测失效（暗光下画面会偏暗）。等价于 demo 的 `DEMO_EXP_FIX=1` |
 | `[display] enabled` | true | 随服务开屏（无 `/dev/fb0` 自动跳过） |
-| `[display] scale` | 2 | 显示区域 = 屏幕 1/scale（2 → 160x240，吃满摄像头帧率） |
+| `[display] scale` | **1（全屏 320x480）** | 显示区域 = 屏幕 1/scale；铺满用 cover 裁切（不拉伸变形，全屏会裁掉约 16% 上下边）；`2` = 半屏 160x240 |
 | `[display] orient` | 3 | 0无 1水平翻 2垂直翻 3=180°（本板实测 3 为正） |
-| `[display] fps` | 15 | 显示帧率上限（与 `[camera] fps` 对齐） |
+| `[display] fps` | **8** | 显示帧率上限：全屏一帧 307KB，SPI 实际 23.44MHz → 写满整屏上限约 8fps，再高只会让内核推送队列积压（延迟变大而非更流畅）；改回半屏可提到 15 |
 | `[display] noise` | 1 | 脏行容差：忽略每通道 N 个 LSB |
-| `[display] decode_max_w` | 320 | 解码降采样上限宽；与 `[camera] stream_width` 一致可命中共享缓存 |
+| `[display] decode_max_w` | **640（全屏）** | 解码降采样上限宽。全屏要铺满 320x480，按 640 解码才清晰（按 320 会被放大 1.78 倍发虚）；半屏时用 320 更省 CPU 且与浏览器共享同一次解码 |
 
-**运行期：`GET /api/display/status`、`POST /api/display?enabled=&scale=&orient=&fps=&noise=`。**
+**看屏状态**：用 `CSRC_LOG_LEVEL=debug` 启动 capp，日志每秒一行 `fps | dec | conv | blit | 脏行数`；
+启动时还有 `[display] ▶ 320x480 region …` 与 `首帧已上屏 …`（都是排障够用的信息，不需要额外接口）。
 
 **熄屏待机图（`start_img.jpg`）**
 
@@ -343,7 +344,7 @@ screen_test camera [scale]  # 摄像头实时预览（默认 scale=2 半屏）
 | 开机（`follow_camera=true`，摄像头默认关） | 待机图（`[display] standby_image`，默认 `start_img.jpg`） |
 | 打开摄像头（`POST /api/camera/open` / 前端开关） | 先清一次屏，再实时出图 |
 | 关闭摄像头（`POST /api/camera/close`） | 待机图（替代原来的黑屏） |
-| `POST /api/display?enabled=0` | 同上（停显示 → 待机图） |
+| `[display] enabled = false`（config，重启生效） | 屏不参与显示，摄像头画面只走 Web |
 | 图片缺失 / 解码失败 / 无 `/dev/fb0` | 退化为原来的清黑，不影响服务启动 |
 
 - 图走**和摄像头画面完全同一套变换**（90° 旋转 + cover 缩放居中裁切 + `[display] orient`）。
@@ -351,8 +352,9 @@ screen_test camera [scale]  # 摄像头实时预览（默认 scale=2 半屏）
   千万别只给待机图单独调方向。
 - 取样用**盒式平均**（照片缩小时比最近邻干净），只在切图那一次跑；摄像头热路径仍是原来的
   最近邻查表，不受影响。
-- 资源占用：`standby_decode_w=750` 时 libjpeg 走 1/2 档（1500x1000 → 750x500），
-  再盒式缩到面板；一次性几十毫秒，只在切图时发生。
+- 图与面板同比例最好：现用的 `start_img.jpg` 是 **480x320**（3:2），旋转后正好 320x480，
+  `standby_decode_w=480` 即原生 1:1 解码、不裁不补；换别的图时按它的宽度填（libjpeg 走 1/N 档），
+  一次几十毫秒，只在切图时发生。
 
 | 配置键 | 默认 | 说明 |
 |---|---|---|
@@ -371,8 +373,7 @@ cover 裁切、盒式平均效果、越界写与异常输入，共 21 项断言�
 | 开机（摄像头默认关） | 清一次屏、保持黑，不出图 |
 | 前端打开摄像头（`CameraToggle` / RC 页黑屏点击 → `POST /api/camera/open`） | 屏自动开始显示画面 |
 | 前端关闭摄像头（`POST /api/camera/close`） | 屏清屏熄灭（不留最后一帧） |
-| `GET /api/camera/status`、open/close 响应 | **不变**（屏状态对前端透明，仅 `/api/display/status` 可供运维查看） |
-| `POST /api/display?enabled=1` 手动开屏 | 摄像头未开时顺带打开它（要画面就得有摄像头） |
+| `GET /api/camera/status`、open/close 响应 | **不变**（屏状态对前端透明，不暴露任何屏接口） |
 | `[display] follow_camera = false` | 退化为开机常显（旧行为，会顺带打开摄像头） |
 
 **网页看摄像头不卡的推荐组合（实测结论：640 采集 + 直出）**
@@ -382,7 +383,7 @@ cover 裁切、盒式平均效果、越界写与异常输入，共 21 项断言�
 | `[camera] width/height` | `640x360`（**勿用 320x240**） | 摄像头**硬件压缩**出 640 MJPEG；320x240 是假档（不出帧） |
 | `[camera] stream_scale` | `false`（默认） | 浏览器**直通原帧**：零解码零编码（省 ~25ms/帧） |
 | `[camera] jpeg_quality` | 视带宽调（如 50） | 嫌带宽大就压摄像头侧质量，仍零 CPU |
-| `[display] fps_streaming` | `5`（0=暂停） | 有人看流时屏显示降帧，浏览器优先 |
+| `[display] fps_streaming` | **`3`**（0=暂停） | 有人看流时屏显示降帧，浏览器优先（全屏写屏很吃 CPU/带宽，所以比半屏时降得更狠） |
 | `[camera] exp_fix` | `true`（可选） | 画面稳定 → 脏行命中 → 屏写屏量大幅下降 |
 
 **为什么"640 + 直出"最流畅**：压缩是摄像头硬件做的，服务端一个像素都不碰 ——

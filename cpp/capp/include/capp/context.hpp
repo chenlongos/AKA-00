@@ -138,7 +138,6 @@ bool ensure_display(AppContext& ctx);
 /// 停止屏显示并释放 framebuffer
 void close_display(AppContext& ctx);
 /// 屏显示状态（JSON：running/available/fps/frames/区域尺寸等）
-csrc::Json display_status_json(AppContext& ctx);
 
 // ── 状态上报（对应 app/services/status_reporter.py）──
 
