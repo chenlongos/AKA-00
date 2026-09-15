@@ -468,7 +468,7 @@ bool ensure_camera(AppContext& ctx) {
     bool ok = ctx.camera.open(ctx.config.camera.width, ctx.config.camera.height,
                               ctx.config.camera.fps);
     ctx.camera_on = ok;
-    // 屏显示跟随摄像头：摄像头一开，屏就出图（follow_camera=false 时由开机流程常显）
+    // 屏显示跟随摄像头（固定行为）：摄像头一开，屏就出图
     if (ok && ctx.config.display.enabled) {
         if (!ctx.display.running()) {
             CAM_INFO("[display] 摄像头已开 → 屏开始显示");

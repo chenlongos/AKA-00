@@ -67,38 +67,16 @@ struct LoggingConfig {
 
 /// 板载 SPI 屏实时显示（/dev/fb0，ST7796S 320x480 RGB565）
 ///
-/// 板上实测：屏是 SPI 接口，写屏带宽是硬瓶颈——出厂 4MHz 时 ~420KB/s（约 2fps），
-/// 该板稳定上限 20MHz（~2MB/s，需改设备树 spi-max-frequency）。故默认半屏
-/// （scale=2 → 160x240，75KB/帧）以吃满摄像头帧率。显示线程与浏览器流共享同一份
-/// 解码结果（Camera::latest_rgb 缓存），开屏不会拖慢浏览器看摄像头画面。
+/// 板载屏显示（摄像头画面 → /dev/fb0）。默认值 = cpp/config.toml 里发出去的值；
+/// 每个字段的取舍理由写在 config.toml 的注释与 README 的"板载屏显示"章节，这里只留摘要。
 struct DisplayConfig {
-    bool enabled = true;     // 是否启用屏显示（无 /dev/fb0 时自动跳过）
-    /// 屏显示跟随摄像头开关（默认 true）：
-    ///   摄像头关（默认开机态）→ 屏保持黑，不出图；
-    ///   打开摄像头（前端开关 / POST /api/camera/open）→ 屏开始显示；
-    ///   关闭摄像头（POST /api/camera/close）→ 屏清屏熄灭。
-    /// false = 开机就常显（等价于旧行为，会顺带打开摄像头）。
-    bool follow_camera = true;
-    int scale = 1;           // 显示区域 = 屏幕 1/scale（1 = 全屏 320x480，默认）；2 = 半屏 160x240
-    int orient = 3;          // 0无 1水平翻 2垂直翻 3=180°（本板实测 3 为正）
-    int fps = 15;            // 显示帧率上限（建议与 camera.fps 一致）
-    /// 浏览器有人在看 MJPEG 时的显示帧率（默认 5；0 = 暂停显示）。
-    /// 单核 SoC 上"显示 + 浏览器流"会 CPU 饱和：显示每帧的 RGB565 转换 + SPI
-    /// 写屏约 20ms（15fps 下 ≈30% 单核），会显著拉低浏览器取流的帧率/延迟。
-    /// 有人看流时把屏幕降到该帧率，浏览器优先；没人看时恢复 fps。
-    int fps_streaming = 5;
-    int noise = 1;           // 脏行容差：忽略每通道 N 个 LSB（0=精确，越大越宽容）
-    int decode_max_w = 320;  // 解码降采样上限宽（与 camera.stream_width 一致可命中共享缓存）
-
-    // ── 熄屏待机图（摄像头关闭 / 屏停用时显示的画面，替代原来的纯黑清屏）──
-    /// 图片路径：空字符串 = 保持旧行为（黑屏）；相对路径按 $AKA_HOME 解析。
-    /// 开关联动：打开摄像头 → 清屏切实时画面；关闭摄像头 → 重新显示这张图。
-    std::string standby_image = "start_img.jpg";
-    /// 铺满整屏（true，默认）；false = 只铺摄像头显示区（屏幕 1/scale 的居中区域）
-    bool standby_full_screen = true;
-    /// 解码宽度上限（0 = 原尺寸解码）。1500x1000 的图取 750 → libjpeg 走 1/2 档
-    /// （输出 750x500），再盒式缩放到面板；板上只在切图时跑一次，几十毫秒量级。
-    int standby_decode_w = 480;   // start_img.jpg 是 480x320（面板同比例，旋转后 1:1）
+    bool enabled = true;        // 关掉则整个显示栈不启动（无 /dev/fb0 时也自动跳过）
+    int scale = 1;              // 显示区域 = 屏幕 1/scale（1=全屏 320x480；2=半屏）
+    int orient = 3;             // 0无 1水平翻 2垂直翻 3=180°（本板实测 3 为正）
+    int fps = 8;                // 显示帧率上限（全屏一帧 307KB，SPI 上限约 8fps）
+    int fps_streaming = 3;      // 浏览器在看流时的显示帧率（0=暂停；浏览器优先）
+    int decode_max_w = 640;     // 解码降采样上限宽（全屏 640 清晰；半屏可 320 省 CPU）
+    std::string standby_image = "start_img.jpg";  // 熄屏待机图（空=黑屏），铺满整屏
 };
 
 struct Config {

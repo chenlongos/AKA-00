@@ -530,7 +530,7 @@ void register_routes(Router& router, AppContext& ctx) {
     });
 
     // ── /api/camera ──
-    // 注：屏显示跟随摄像头开关（[display] follow_camera=true），但对前端透明 ——
+    // 注：屏显示跟随摄像头开关，但对前端透明 ——
     //     open 后台自动出图、close 后台自动清屏，接口不暴露屏状态。
     router.add("GET", "/api/camera/status", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
         Json j;

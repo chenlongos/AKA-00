@@ -30,17 +30,16 @@
 
 namespace {
 
-// 脏行容差掩码：忽略 RGB565 每通道最低 N 个 bit。
+// 脏行比较的容差掩码：忽略 RGB565 每通道最低 1 个 bit。
 // 实况视频帧间有传感器噪声（JPEG 量化还会放大），精确比较会把静止画面也判成
-// "全行都变"（板上实测 240/240 行全脏），掩掉低 bit 后静态行才真正不重写。
-inline uint16_t noise_mask(int n) {
-    switch (n) {
-        case 0:  return 0xFFFF;
-        case 2:  return 0xF3CC;   // R/G/B 各忽略 2 个 LSB
-        case 3:  return 0xF1C0;   // R/G/B 各忽略 3 个 LSB
-        default: return 0xF7DE;   // R/G/B 各忽略 1 个 LSB
-    }
-}
+// "全行都变"（板上实测 240/240 行全脏）；掩掉最低 1 bit 后静态行才真正不重写。
+// 实测下来只有一个可用值（1），所以做成常量而不是配置项。
+constexpr uint16_t kDirtyMask = 0xF7DE;
+
+// 待机图解码降采样上限宽：start_img.jpg 是 480x320（与面板同比例），按 480 解码
+// 旋转后正好 1:1 铺满 320x480，不再需要放大。原本是配置项 standby_decode_w，
+// 但只有这一个值有意义，所以和 kDirtyMask 一样做成常量。
+constexpr int kStandbyDecodeMaxW = 480;
 
 /// 开启显示引擎（demo2.c 要求 state=1 才显示；init.sh 也会做一次）
 void enable_display_engine() {
@@ -187,8 +186,6 @@ bool ScreenDisplay::start(const DisplayConfig& cfg) {
     if (cfg_.orient > 3) cfg_.orient = 3;
     if (cfg_.fps < 1) cfg_.fps = 1;
     if (cfg_.fps > 60) cfg_.fps = 60;
-    if (cfg_.noise < 0) cfg_.noise = 0;
-    if (cfg_.noise > 3) cfg_.noise = 3;
     if (cfg_.decode_max_w < 0) cfg_.decode_max_w = 0;
 
     enable_display_engine();
@@ -221,8 +218,8 @@ bool ScreenDisplay::start(const DisplayConfig& cfg) {
 
     running_ = true;
     thread_ = new std::thread([this] { loop(); });
-    CAM_INFO("[display] ▶ %dx%d region (1/%d screen), orient=%d, fps<=%d, noise=%d",
-             out_w_, out_h_, cfg_.scale, cfg_.orient, cfg_.fps, cfg_.noise);
+    CAM_INFO("[display] ▶ %dx%d region (1/%d screen), orient=%d, fps<=%d",
+             out_w_, out_h_, cfg_.scale, cfg_.orient, cfg_.fps);
     return true;
 }
 
@@ -303,7 +300,7 @@ void ScreenDisplay::convert(const uint8_t* rgb, int w, int h) {
 /// 行间必须按屏幕行宽 fb_w_ 跳，不能整块连续拷贝（否则图像在屏上斜着拼）。
 void ScreenDisplay::blit_dirty(int& dirty_rows) {
     dirty_rows = 0;
-    const uint16_t mask = noise_mask(cfg_.noise);
+    const uint16_t mask = kDirtyMask;
     for (int r = 0; r < out_h_; ++r) {
         const uint16_t* cur = buf_.data() + (size_t)r * out_w_;
         uint16_t* pv = prev_.data() + (size_t)r * out_w_;
@@ -441,7 +438,7 @@ bool ScreenDisplay::show_standby(const std::string& image_path) {
         resolve_standby_path(image_path.empty() ? cfg_.standby_image : image_path);
     if (path.empty()) return false;
 
-    // 读文件 → libjpeg 解码（standby_decode_w 走 1/N 降采样档）
+    // 读文件 → libjpeg 解码（按 kStandbyDecodeMaxW 走 1/N 降采样档）
     std::vector<uint8_t> jpg;
     if (FILE* f = std::fopen(path.c_str(), "rb")) {
         std::fseek(f, 0, SEEK_END);
@@ -463,28 +460,18 @@ bool ScreenDisplay::show_standby(const std::string& image_path) {
 
     int w = 0, h = 0;
     std::vector<uint8_t> rgb;
-    if (!Camera::jpeg_to_rgb(jpg.data(), jpg.size(), w, h, rgb, cfg_.standby_decode_w)) {
+    if (!Camera::jpeg_to_rgb(jpg.data(), jpg.size(), w, h, rgb, kStandbyDecodeMaxW)) {
         CAM_INFO("[standby] 待机图解码失败: %s（保持黑屏）", path.c_str());
         return false;
     }
 
-    // 目标区域：整屏（默认）或摄像头显示区（屏幕 1/scale 的居中区域）
-    int out_w = fb_w_, out_h = fb_h_, x0 = 0, y0 = 0;
-    if (!cfg_.standby_full_screen) {
-        const int sc = cfg_.scale > 0 ? cfg_.scale : 1;
-        out_w = fb_w_ / sc;
-        out_h = fb_h_ / sc;
-        if (out_w < 8) out_w = 8;
-        if (out_h < 8) out_h = 8;
-        x0 = (fb_w_ - out_w) / 2;
-        y0 = (fb_h_ - out_h) / 2;
-    }
-
+    // 待机图总是铺满整屏：它是"熄屏画面"，不该取决于摄像头显示区的 scale
+    const int out_w = fb_w_, out_h = fb_h_;
     std::vector<uint16_t> buf((size_t)out_w * out_h);
     convert_box(rgb.data(), w, h, out_w, out_h, cfg_.orient, buf.data());
-    blit_buffer(buf.data(), out_w, out_h, x0, y0);
-    CAM_INFO("[standby] 待机图已上屏: %s (%dx%d → %dx%d %s, orient=%d)", path.c_str(), w, h, out_w,
-             out_h, cfg_.standby_full_screen ? "整屏" : "显示区", cfg_.orient);
+    blit_buffer(buf.data(), out_w, out_h, 0, 0);
+    CAM_INFO("[standby] 待机图已上屏: %s (%dx%d → %dx%d 整屏, orient=%d)", path.c_str(), w, h,
+             out_w, out_h, cfg_.orient);
     return true;
 }
 

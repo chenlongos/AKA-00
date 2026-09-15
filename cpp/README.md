@@ -67,13 +67,15 @@ static/ (index.html + assets/)  --打包-->  板上 $AKA_HOME/static/
 cd cpp
 
 # ── 带屏版本（默认）──
-make                      # 全流程: libjpeg → mbedtls → csrc → capp(riscv64) → package
-make screen               # 同 make（显式）
-# → 产物: capp/bin/aka-capp、dist/AKA-00/、dist/aka-capp.tar.gz
+make                      # 全流程: libjpeg → mbedtls → csrc → capp(riscv64) → package → ota
+make screen               # 只打包（= package，不含安装器）
+make ota                  # 只生成自解压安装器（内部先 package）
+# → 产物只有两样: dist/AKA-00/（部署目录）与 dist/aka-00-server（自解压安装器）
+#   aka-00-server 同时用于首次部署（--init/--extract）与 OTA 升级（--update）
 
 # ── 不带屏版本（整个显示栈编译期裁掉）──
 make noscreen
-# → 产物: capp/bin/aka-capp-noscreen、dist-noscreen/AKA-00/、dist-noscreen/aka-capp-noscreen.tar.gz
+# → 产物: capp/bin/aka-capp-noscreen、dist-noscreen/AKA-00/（不带屏版本不生成安装器）
 
 make libjpeg              # 交叉编译 libjpeg（首次自动下载源码）
 make mbedtls              # 交叉编译 mbedTLS（首次自动下载源码，HTTPS 用）
@@ -89,7 +91,7 @@ make clean                # 清理全部构建产物
 | 编译宏 | `-DAKA_WITH_SCREEN=1` | `-DAKA_WITH_SCREEN=0` |
 | 二进制 | `bin/aka-capp` | `bin/aka-capp-noscreen` |
 | 构建目录 | `build-cross/` | `build-cross-noscreen/` |
-| 部署包 | `dist/aka-capp.tar.gz` | `dist-noscreen/aka-capp-noscreen.tar.gz` |
+| 部署产物 | `dist/AKA-00/` + `dist/aka-00-server` | `dist-noscreen/AKA-00/` |
 | 工具 | 含 `screen_test` | 不含 |
 | 屏显示 | 摄像头画面 → /dev/fb0 | **整个显示栈不参与编译**（二进制里无 `/dev/fb0`，`[display]` 配置被忽略） |
 
@@ -109,8 +111,9 @@ make clean                # 清理全部构建产物
 
 ## 部署（SG2002）
 
-`make package` 打包出 `cpp/dist/AKA-00/`（部署目录）+ `cpp/dist/aka-capp.tar.gz`
-（顶层 `AKA-00/` 目录，解压落到 `$AKA_HOME/`）。目标布局：
+`make -C cpp`（= package + ota）产出**两样东西**：`cpp/dist/AKA-00/`（部署目录，顶层就是
+`AKA-00/`，解压落到 `$AKA_HOME/`）与 `cpp/dist/aka-00-server`（自解压安装器，首次部署与
+OTA 升级共用）。目标布局：
 
 ```
 $AKA_HOME/
@@ -121,6 +124,7 @@ $AKA_HOME/
 ├── arm_angles_default.json   # 默认角度
 ├── speed_config.json         # 行驶速度配置
 ├── VERSION                   # 版本文件（OTA 用）
+├── models/                   # 模型库（仓库 models/ 整目录照搬）
 ├── demo/<demo>/init.sh       # demo 目录（含 init.sh 的才会打包）
 ├── init.sh                   # 启动（自愈循环）
 ├── stop.sh                   # 停止
@@ -130,9 +134,13 @@ $AKA_HOME/
 传到板子二选一：
 
 ```sh
-# 方式 A：tar.gz（推荐，保留权限位，解压直接落到 $AKA_HOME/）
-scp cpp/dist/aka-capp.tar.gz root@<板子IP>:~
-ssh root@<板子IP> "cd ~ && tar -xzf aka-capp.tar.gz"
+# 方式 A：自解压安装器（推荐；权限位自带，换包是"staging + 目录改名"，失败有 .old 回滚点）
+scp cpp/dist/aka-00-server root@<板子IP>:/tmp/
+ssh root@<板子IP> 'chmod +x /tmp/aka-00-server && /tmp/aka-00-server --update'
+#   ⚠ --update 默认**保留**板上的 config.toml / speed_config.json / arm_angles.json：
+#     想让本次带的默认配置（如 [display] scale=1 全屏）生效，要么
+#     AKA_OTA_RESET_CONFIG=1 /tmp/aka-00-server --update，要么部署后手改 config.toml。
+#   首次部署用 --init；只解包不重启用 --extract。
 
 # 方式 B：整目录（scp -r 不保留可执行位，但 init.sh 有兜底 chmod）
 scp -r cpp/dist/AKA-00 root@<板子IP>:~/AKA-00
@@ -303,7 +311,8 @@ capp 同时支持 HTTP 和 HTTPS：默认 `:80` 与 `:5443` 共存（与原 Pyth
   所以开屏后浏览器反而省掉自己那次整帧解码（640x360 MJPEG → 320 宽约 10ms/帧）。
   屏幕新增开销只有 RGB565 转换 + 脏行写屏（各几 ms）。
 - **脏行检测**：逐行比较，只重写内容变化的行（SPI 屏按行扫描，静态区域零流量）；
-  带噪声容差（`[display] noise`，忽略每通道 N 个 LSB），否则实况噪声会让"全行都变"。
+  比较时忽略 RGB565 每通道最低 1 bit（代码常量 `kDirtyMask`）—— 实况有传感器噪声，
+  精确比较会让静止画面也判成"全行都变"（板上实测 240/240 行全脏）。
 - **整数查表转换**：RGB8→RGB565 + 旋转 90° + cover 缩放预计算成查表，
   riscv64 上避免逐像素浮点（否则慢一个量级）。
 - **不干扰 Web 服务**：显示帧率上限 `[display] fps`，无新帧时零拷贝零解码，
@@ -328,7 +337,6 @@ screen_test camera [scale]  # 摄像头实时预览（默认 scale=2 半屏）
 | `[display] scale` | **1（全屏 320x480）** | 显示区域 = 屏幕 1/scale；铺满用 cover 裁切（不拉伸变形，全屏会裁掉约 16% 上下边）；`2` = 半屏 160x240 |
 | `[display] orient` | 3 | 0无 1水平翻 2垂直翻 3=180°（本板实测 3 为正） |
 | `[display] fps` | **8** | 显示帧率上限：全屏一帧 307KB，SPI 实际 23.44MHz → 写满整屏上限约 8fps，再高只会让内核推送队列积压（延迟变大而非更流畅）；改回半屏可提到 15 |
-| `[display] noise` | 1 | 脏行容差：忽略每通道 N 个 LSB |
 | `[display] decode_max_w` | **640（全屏）** | 解码降采样上限宽。全屏要铺满 320x480，按 640 解码才清晰（按 320 会被放大 1.78 倍发虚）；半屏时用 320 更省 CPU 且与浏览器共享同一次解码 |
 
 **看屏状态**：用 `CSRC_LOG_LEVEL=debug` 启动 capp，日志每秒一行 `fps | dec | conv | blit | 脏行数`；
@@ -341,7 +349,7 @@ screen_test camera [scale]  # 摄像头实时预览（默认 scale=2 半屏）
 
 | 时机 | 屏上内容 |
 |---|---|
-| 开机（`follow_camera=true`，摄像头默认关） | 待机图（`[display] standby_image`，默认 `start_img.jpg`） |
+| 开机（摄像头默认关） | 待机图（`[display] standby_image`，默认 `start_img.jpg`） |
 | 打开摄像头（`POST /api/camera/open` / 前端开关） | 先清一次屏，再实时出图 |
 | 关闭摄像头（`POST /api/camera/close`） | 待机图（替代原来的黑屏） |
 | `[display] enabled = false`（config，重启生效） | 屏不参与显示，摄像头画面只走 Web |
@@ -353,20 +361,21 @@ screen_test camera [scale]  # 摄像头实时预览（默认 scale=2 半屏）
 - 取样用**盒式平均**（照片缩小时比最近邻干净），只在切图那一次跑；摄像头热路径仍是原来的
   最近邻查表，不受影响。
 - 图与面板同比例最好：现用的 `start_img.jpg` 是 **480x320**（3:2），旋转后正好 320x480，
-  `standby_decode_w=480` 即原生 1:1 解码、不裁不补；换别的图时按它的宽度填（libjpeg 走 1/N 档），
+  解码走 libjpeg 1/N 档（上限是代码常量 kStandbyDecodeMaxW=1024，480 宽即原生 1:1 解码、不裁不补），
   一次几十毫秒，只在切图时发生。
 
 | 配置键 | 默认 | 说明 |
 |---|---|---|
-| `[display] standby_image` | `start_img.jpg` | 相对路径按 `$AKA_HOME` 解析；留空 = 保持黑屏（旧行为） |
-| `[display] standby_full_screen` | `true` | 铺满整屏 320x480；`false` = 只铺摄像头显示区（1/scale 居中区域） |
-| `[display] standby_decode_w` | `750` | libjpeg 解码宽度上限；`0` = 原尺寸解码（更慢更占内存） |
+| `[display] standby_image` | `start_img.jpg` | 相对路径按 `$AKA_HOME` 解析；留空 = 黑屏（旧行为） |
+
+待机图**总是铺满整屏**（不受 `[display] scale` 影响）；解码宽度上限是代码里的常量，
+不再作为配置项。
 
 打包：带屏版本的部署目录会带上 `start_img.jpg`（不带屏版本不带，显示栈已裁掉）。
 开发机单测（不需要板子）：`make -C cpp/csrc test-standby`，覆盖旋转方向、orient 四个翻转、
 cover 裁切、盒式平均效果、越界写与异常输入，共 21 项断言。
 
-**开关联动**（默认 `[display] follow_camera = true`，屏跟随摄像头开关）
+**开关联动**（屏跟随摄像头开关，固定行为、无开关配置项）
 
 | 动作 | 屏行为 |
 |---|---|
@@ -374,7 +383,6 @@ cover 裁切、盒式平均效果、越界写与异常输入，共 21 项断言�
 | 前端打开摄像头（`CameraToggle` / RC 页黑屏点击 → `POST /api/camera/open`） | 屏自动开始显示画面 |
 | 前端关闭摄像头（`POST /api/camera/close`） | 屏清屏熄灭（不留最后一帧） |
 | `GET /api/camera/status`、open/close 响应 | **不变**（屏状态对前端透明，不暴露任何屏接口） |
-| `[display] follow_camera = false` | 退化为开机常显（旧行为，会顺带打开摄像头） |
 
 **网页看摄像头不卡的推荐组合（实测结论：640 采集 + 直出）**
 

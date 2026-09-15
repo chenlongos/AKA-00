@@ -6,9 +6,8 @@
 # 前端不参与构建：直接用仓库根 static/（已构建产物）打包。
 #
 # ── 两个版本（编译期开关 AKA_WITH_SCREEN，构建目录/产物完全隔离，互不覆盖）──
-#   make / make screen     带屏版本：bin/aka-capp + dist/AKA-00/ + dist/aka-capp.tar.gz
-#   make noscreen          不带屏版本：bin/aka-capp-noscreen + dist-noscreen/ +
-#                                      dist/aka-capp-noscreen.tar.gz
+#   make / make screen     带屏版本：bin/aka-capp + dist/AKA-00/（+ make ota 时再出安装器）
+#   make noscreen          不带屏版本：bin/aka-capp-noscreen + dist-noscreen/AKA-00/
 #   （不带屏版本把整个显示栈（/dev/fb0）编译期裁掉：二进制更小、完全不碰 framebuffer，
 #     适合没有屏的机器；[display] 配置项在该版本中被忽略）
 #
@@ -38,21 +37,22 @@ MBEDTLS  := $(CPP)/third_party/mbedtls/lib/libmbedtls.a
 CSRC_LIB     := $(CPP)/csrc/build-cross/libcsrc.a
 CAPP_BIN     := $(CPP)/capp/bin/aka-capp
 DIST         := $(CPP)/dist/AKA-00
-TARBALL      := aka-capp.tar.gz
 OBJDIR       := build-cross
 
 # 不带屏版
 CSRC_LIB_NS  := $(CPP)/csrc/build-cross-noscreen/libcsrc.a
 CAPP_BIN_NS  := $(CPP)/capp/bin/aka-capp-noscreen
 DIST_NS      := $(CPP)/dist-noscreen/AKA-00
-TARBALL_NS   := aka-capp-noscreen.tar.gz
 OBJDIR_NS    := build-cross-noscreen
 
-.PHONY: all screen noscreen libjpeg mbedtls csrc capp tools package \
+.PHONY: all screen noscreen libjpeg mbedtls csrc capp tools package ota \
         csrc-noscreen capp-noscreen tools-noscreen package-noscreen demos clean FORCE
 
-all: screen
+# 默认：只产出两样东西 —— dist/AKA-00/（部署目录）与 dist/aka-00-server（自解压安装器）
+all: package ota
 screen: package
+ota: package
+	@$(ORB_RUN) "cd $(CPP) && sh scripts/build-ota.sh"
 noscreen: package-noscreen
 
 libjpeg: $(JPEG)
@@ -108,7 +108,7 @@ $(CAPP_BIN_NS): $(CSRC_LIB_NS) $(MBEDTLS) FORCE
 	$(ORB_RUN) "cd $(CPP)/capp && make -f Makefile.cross WITH_SCREEN=0"
 
 # ── 打包宏：$(1)=带屏标志(1/0) $(2)=capp 二进制 $(3)=部署目录 $(4)=工具构建目录
-#            $(5)=部署内二进制名 $(6)=tar 包名 ──
+#            $(5)=部署内二进制名 ──
 define PACKAGE_RECIPE
 	@set -e; \
 	DIST="$(3)"; \
@@ -128,6 +128,16 @@ define PACKAGE_RECIPE
 	if [ ! -f "$$DIST/config.toml" ]; then \
 	    echo "ERROR: 缺少配置源 $(CPP)/config.toml —— config.toml 必须由 cpp/ 提供（打包不再内置生成）" >&2; \
 	    exit 1; \
+	fi; \
+	echo ""; \
+	echo "── 模型库（models/ 整目录照搬）──"; \
+	mkdir -p "$$DIST/models"; \
+	if [ -d "$(ROOT)/models" ]; then cp -r "$(ROOT)/models/." "$$DIST/models/"; fi; \
+	nmodel=$$(find "$$DIST/models" -name '*.cvimodel' 2>/dev/null | wc -l | tr -d ' '); \
+	echo "  ✓ models/：$$nmodel 个 .cvimodel（$$(du -sh "$$DIST/models" 2>/dev/null | cut -f1)）"; \
+	if [ "$$nmodel" = "0" ]; then \
+	    echo "  ! models/ 里没有 .cvimodel —— 启动会报找不到模型；"; \
+	    echo "    把模型放进 $(ROOT)/models/ 再打包，或到板上 scp 进 /root/AKA-00/models/"; \
 	fi; \
 	if [ -d "$(ROOT)/demo" ]; then \
 	    for d in "$(ROOT)"/demo/*/; do [ -f "$$d/init.sh" ] && cp -r "$${d%/}" "$$DIST/demo/"; done; \
@@ -165,20 +175,18 @@ define PACKAGE_RECIPE
 	fi; \
 	echo ""; echo "  ✓ 部署目录: $$DIST"; du -sh "$$DIST" 2>/dev/null || true; \
 	echo ""; \
-	echo "  板子上: scp $$(basename $$(dirname "$$DIST"))/$(6) root@<板子IP>:/root/"; \
-	echo "          ssh root@<板子IP> \"cd /root && tar -xzf $(6)\""; \
-	echo "          → 解压落到 /root/AKA-00/，然后 AKA_HOME=/root/AKA-00 /root/AKA-00/init.sh"; \
-	cd "$$(dirname "$$DIST")" && tar -czf "$(6)" AKA-00; \
-	echo "  ✓ 打包: $$(dirname "$$DIST")/$(6)（顶层 AKA-00/，解压落到 /root/AKA-00/）"
+	echo "  部署到板子：make ota 生成 dist/aka-00-server，scp 过去后执行"; \
+	echo "      ./aka-00-server --update                          # 升级（保 config.toml 等现场文件）"; \
+	echo "      AKA_OTA_RESET_CONFIG=1 ./aka-00-server --update   # 连 config.toml 一起换新"
 endef
 
-# ── 打包：带屏版 → dist/AKA-00/ + dist/aka-capp.tar.gz ──
+# ── 打包：带屏版 → dist/AKA-00/（部署目录）──
 package: $(CAPP_BIN) tools demos
-	$(call PACKAGE_RECIPE,1,$(CAPP_BIN),$(DIST),$(OBJDIR),aka-capp,$(TARBALL))
+	$(call PACKAGE_RECIPE,1,$(CAPP_BIN),$(DIST),$(OBJDIR),aka-capp)
 
-# ── 打包：不带屏版 → dist-noscreen/AKA-00/ + dist-noscreen/aka-capp-noscreen.tar.gz ──
+# ── 打包：不带屏版 → dist-noscreen/AKA-00/ ──
 package-noscreen: $(CAPP_BIN_NS) tools-noscreen demos
-	$(call PACKAGE_RECIPE,0,$(CAPP_BIN_NS),$(DIST_NS),$(OBJDIR_NS),aka-capp-noscreen,$(TARBALL_NS))
+	$(call PACKAGE_RECIPE,0,$(CAPP_BIN_NS),$(DIST_NS),$(OBJDIR_NS),aka-capp-noscreen)
 
 clean:
 	$(ORB_RUN) "rm -rf $(CPP)/csrc/build-cross $(CPP)/csrc/build-cross-noscreen \
