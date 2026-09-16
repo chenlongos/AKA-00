@@ -306,6 +306,60 @@ curl "http://<ip>/api/detect?model=block"
 
 ---
 
+## 模型管理
+
+给外部调用方（平台）用：把模型送进部署目录的 `models/` —— 也就是 `/api/detect` 唯一认的那个模型库。
+
+### 上传模型（平台 → 小车，推荐）
+
+```
+POST /api/models/upload?name=<模型名>
+Content-Type: application/octet-stream
+（body = 模型文件的二进制内容）
+```
+
+```bash
+# raw body：平台直接推文件（推荐）
+curl --data-binary @tennis.cvimodel "http://<ip>/api/models/upload?name=tennis"
+
+# multipart：浏览器 / form 客户端也行
+curl -F "file=@tennis.cvimodel" "http://<ip>/api/models/upload?name=tennis"
+```
+
+| 参数 | 位置 | 必填 | 说明 |
+|------|------|------|------|
+| name | query | 是 | 模型名，落成 `$AKA_HOME/models/<name>.cvimodel`。只允许字母数字与 `_ - .`，不允许 `/` 与 `..` |
+| 文件 | body | 是 | 模型二进制（raw body，或 multipart 里名为 `file` 的字段） |
+
+```json
+{"ok": true, "name": "tennis", "path": "/root/AKA-00/models/tennis.cvimodel", "size": 3540016}
+```
+
+同步接口：文件收完、校验通过、写盘换入之后才返回（3.5MB 的模型在内网上是一瞬间的事，不需要进度查询）。
+
+> **为什么是"推"而不是"拉"**：小车在机器人的内网里（通常是热点/局域网），平台未必能被它反向访问；
+> 平台把文件直接推过来最省事。若你的场景恰好相反（小车能访问平台、平台进不来），用下面的拉取接口。
+
+**同名覆盖，且覆盖即生效**：`/api/detect` 每次请求都会 stat 模型文件，大小或 mtime 变了就重新加载
+—— 换新版本不用重启 capp（代价是那一次请求多等一次模型加载）。
+
+> 文件先落成 `.part`，校验通过后原子换入（`rename`）—— 传到一半、内容不对、中途断电都不会
+> 破坏正在用的那颗模型。
+>
+> 校验两道：文件头必须是 `CviModel`（挡住"上传了别的文件"）；大小上限 **32MB**
+> （请求体是整块读进内存的，板上可用内存约 50MB；模型实际约 3.5MB）。
+>
+> 校验只看文件头，所以「文件头对、内容是坏的」这种能被装上 —— 这时 `/api/detect` 会明确报
+> `注册模型失败（CVI_NN_RegisterModel rc=…）`，重新传一个正确的即可，不需要别的清理动作。
+
+| 失败 | HTTP | error 示例 |
+|------|------|-----------|
+| 没给 name | 400 | `name 参数必填（例：?name=tennis）` |
+| name 非法 | 400 | `name 非法（只允许字母数字与 _ - .）：../etc/passwd` |
+| 内容不是 cvimodel | 400 | `不是 cvimodel（文件头不是 CviModel）` |
+| 请求体为空 | 400 | `请求体为空（把模型文件放进 body）` |
+| 超过 32MB | 413 | `文件过大：34603008 字节，上限 32MB` |
+
 ## WiFi
 
 ### 扫描网络

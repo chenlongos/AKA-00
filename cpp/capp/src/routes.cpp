@@ -715,6 +715,47 @@ void register_routes(Router& router, AppContext& ctx) {
         resp.set_json(j, j.getb("ok") ? 200 : 500);
     });
 
+    // 模型上传：**平台把模型文件直接推给小车**（小车在内网，未必能反过来访问平台）。
+    // 名字走 query（?name=tennis），文件放请求体：
+    //   raw：     curl --data-binary @tennis.cvimodel "http://<ip>/api/models/upload?name=tennis"
+    //   multipart：curl -F "file=@tennis.cvimodel"  "http://<ip>/api/models/upload?name=tennis"
+    // 同步返回（3.5MB 的体很小，写完即回），同名覆盖、覆盖即生效。
+    router.add("POST", "/api/models/upload", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
+        const std::string name = req.query_param("name");
+        if (name.empty()) {
+            resp.set_error("name 参数必填（例：?name=tennis）", 400);
+            return;
+        }
+        if (!valid_model_name(name)) {
+            resp.set_error("name 非法（只允许字母数字与 _ - .）：" + name, 400);
+            return;
+        }
+        std::string content = req.body;
+        const std::string ct = req.header("content-type");
+        if (ct.find("multipart/form-data") != std::string::npos) {
+            std::string filename;   // 名字以 ?name= 为准，这里只取文件内容
+            if (!extract_multipart_file(req.body, ct, filename, content)) {
+                resp.set_error("multipart 解析失败（缺 file 字段？）", 400);
+                return;
+            }
+        }
+        // 超过服务器上限的体不会被读进来（req.body 是空的），单独给个明确的原因，
+        // 否则调用方只会看到含糊的"请求体为空"。
+        const std::string cl_hdr = req.header("content-length");
+        if (!cl_hdr.empty() && atoll(cl_hdr.c_str()) > kMaxRequestBody) {
+            resp.set_error("文件过大：" + cl_hdr + " 字节，上限 " +
+                               std::to_string(kMaxRequestBody / (1024 * 1024)) + "MB",
+                           413);
+            return;
+        }
+        if (content.empty()) {
+            resp.set_error("请求体为空（把模型文件放进 body）", 400);
+            return;
+        }
+        const Json r = save_model_upload(ctx, name, content);
+        resp.set_json(r, r.getb("ok") ? 200 : 400);
+    });
+
     // ── /api/demo ──
     router.add("GET", "/api/demo/list", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
         Json demos;

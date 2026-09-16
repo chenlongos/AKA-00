@@ -49,6 +49,10 @@ struct AppContext {
     // YoloDetector 非线程安全，而且别和 demo/*/tennis 同时跑（互相抢 TPU）。
     std::mutex detect_mu;
     std::string detect_model;                      // 当前已加载的模型名（空 = 没加载）
+    // 加载时模型文件的 mtime / 大小。同名模型被重新下载覆盖后，下一个请求就换新的
+    // —— 否则"覆盖"对已经加载着的模型是空的（要重启 capp 才生效）。
+    long detect_mtime = 0;
+    long long detect_size = 0;
     std::unique_ptr<csrc::YoloDetector> detector;  // 首次请求时才加载
 
     bool camera_on = false;
@@ -144,6 +148,11 @@ bool build_stream_jpeg_rgb(AppContext& ctx, const csrc::Camera::RgbFrame& rgb,
 /// 模型名是否合法：只允许 [A-Za-z0-9_.-]。
 /// 必须校验 —— 名字会拼进文件路径，否则 `?model=../../etc/passwd` 就是任意文件读取。
 bool valid_model_name(const std::string& name);
+
+/// 把上传上来的模型内容写进 `$AKA_HOME/models/<name>.cvimodel`（**同名覆盖**）。
+/// 给"平台推模型"用：content 就是请求体。落地前校验（`CviModel` 魔数 + 大小上限）
+/// 并原子换入，坏包不会覆盖掉正在用的模型。返回 `{ok, name, path, size}` 或 `{ok:false, error}`。
+csrc::Json save_model_upload(AppContext& ctx, const std::string& name, const std::string& content);
 
 /// 取当前摄像头帧跑一次推理。
 /// 成功：{"ok":true,"count":N,"boxes":[{"x1","y1","x2","y2"}...]}（原图像素坐标）

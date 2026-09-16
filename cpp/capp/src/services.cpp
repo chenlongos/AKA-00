@@ -5,12 +5,17 @@
 
 #include "capp/context.hpp"
 
+#include "capp/http_server.hpp"   // kMaxRequestBody（上传体上限，服务器与这里共用一个值）
+
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <sstream>
+#include <sys/stat.h>
 #include <thread>
 
 #include "csrc/http_client.hpp"
@@ -535,6 +540,82 @@ bool build_stream_jpeg_rgb(AppContext& ctx, const csrc::Camera::RgbFrame& rgb,
 
 // ═══════════════════════ 单帧推理服务 ═══════════════════════
 
+namespace {
+
+/// 校验临时文件（CviModel 魔数 + 大小上限）后原子换入最终路径；失败时删掉临时文件并填 err。
+bool install_model_file(const std::string& tmp_path, const std::string& final_path,
+                        long long max_bytes, long long& size_out, std::string& err) {
+    std::ifstream f(tmp_path, std::ios::binary);
+    if (!f) {
+        err = "临时文件打不开";
+        return false;
+    }
+    char magic[8] = {0};
+    f.read(magic, sizeof magic);
+    f.seekg(0, std::ios::end);
+    const long long sz = (long long)f.tellg();
+    f.close();
+    if (sz < (long long)sizeof magic || std::string(magic, sizeof magic) != "CviModel") {
+        err = "不是 cvimodel（文件头不是 CviModel）";
+        std::remove(tmp_path.c_str());
+        return false;
+    }
+    if (sz > max_bytes) {
+        err = "模型过大：" + std::to_string(sz / (1024 * 1024)) + "MB，上限 " +
+              std::to_string(max_bytes / (1024 * 1024)) + "MB";
+        std::remove(tmp_path.c_str());
+        return false;
+    }
+    if (std::rename(tmp_path.c_str(), final_path.c_str()) != 0) {
+        err = std::string("换入失败：") + std::strerror(errno);
+        std::remove(tmp_path.c_str());
+        return false;
+    }
+    size_out = sz;
+    return true;
+}
+
+}  // namespace
+
+csrc::Json save_model_upload(AppContext& ctx, const std::string& name, const std::string& content) {
+    csrc::Json j;
+    const std::string dir = ctx.app_dir + "/models";
+    const std::string final_path = dir + "/" + name + ".cvimodel";
+    const std::string tmp_path = final_path + ".part";   // 先落 .part 再原子换入
+    mkdir(dir.c_str(), 0755);
+
+    {
+        std::ofstream f(tmp_path, std::ios::binary | std::ios::trunc);
+        if (!f) {
+            j["ok"] = false;
+            j["error"] = "临时文件写不开：" + tmp_path;
+            return j;
+        }
+        f.write(content.data(), (std::streamsize)content.size());
+        f.close();
+        if (!f) {
+            std::remove(tmp_path.c_str());
+            j["ok"] = false;
+            j["error"] = "写临时文件失败（磁盘满？）";
+            return j;
+        }
+    }
+
+    long long sz = 0;
+    std::string err;
+    if (!install_model_file(tmp_path, final_path, capp::kMaxRequestBody, sz, err)) {
+        j["ok"] = false;
+        j["error"] = err;
+        return j;
+    }
+    CAM_INFO("[models] 模型已上传 %s（%lld KB）", final_path.c_str(), sz / 1024);
+    j["ok"] = true;
+    j["name"] = name;
+    j["path"] = final_path;
+    j["size"] = csrc::Json((int64_t)sz);
+    return j;
+}
+
 bool valid_model_name(const std::string& name) {
     if (name.empty() || name.size() > 64) return false;
     if (name == "." || name == "..") return false;
@@ -555,9 +636,14 @@ csrc::Json detect_once(AppContext& ctx, const std::string& model_name) {
     std::lock_guard<std::mutex> lk(ctx.detect_mu);
 
     if (!ctx.detector) ctx.detector.reset(new csrc::YoloDetector());
-    if (!ctx.detector->loaded() || ctx.detect_model != model_name) {
-        // 模型只有一个来源：$AKA_HOME/models/<名字>.cvimodel
-        const std::string path = ctx.app_dir + "/models/" + model_name + ".cvimodel";
+    // 模型只有一个来源：$AKA_HOME/models/<名字>.cvimodel
+    const std::string path = ctx.app_dir + "/models/" + model_name + ".cvimodel";
+    // 文件被换过（重新下载覆盖）也要重载 —— 一次 stat 的开销，换"覆盖即生效"。
+    struct stat st {};
+    const bool have = (stat(path.c_str(), &st) == 0);
+    const bool changed = have && (st.st_mtime != ctx.detect_mtime ||
+                                  (long long)st.st_size != ctx.detect_size);
+    if (!ctx.detector->loaded() || ctx.detect_model != model_name || changed) {
         std::string err;
         if (!ctx.detector->load(path, err)) {
             ctx.detect_model.clear();
@@ -566,6 +652,8 @@ csrc::Json detect_once(AppContext& ctx, const std::string& model_name) {
             return j;
         }
         ctx.detect_model = model_name;
+        ctx.detect_mtime = have ? st.st_mtime : 0;
+        ctx.detect_size = have ? (long long)st.st_size : 0;
     }
 
     if (!ensure_camera(ctx)) {
