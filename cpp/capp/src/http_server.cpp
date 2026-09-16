@@ -376,7 +376,12 @@ bool Router::serve_static(const HttpRequest& req, HttpResponse& resp) {
 // ═══════════════════════ HttpServer ═══════════════════════
 
 bool HttpServer::listen(int port) {
-    listen_fd_ = socket(AF_INET, SOCK_STREAM, 0);
+    // SOCK_CLOEXEC：监听 socket 不能被子进程继承。
+    // 板上踩过：capp 会 fork/exec 去拉 wpa_supplicant（ensure_wpa_env），子进程
+    // 继承了监听 socket 后 daemon 化（-B）长期持有 —— capp 一旦重启，端口仍被那个
+    // 无关进程占着，新实例 bind 失败退出，init.sh 每 2 秒重启一次变成死循环，
+    // 表现是"整个服务再也起不来，只能重启板子"。
+    listen_fd_ = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (listen_fd_ < 0) {
         CAM_ERROR("[http] socket: %s", std::strerror(errno));
         return false;
@@ -478,8 +483,8 @@ bool HttpServer::listen_tls(int port, const std::string& cert_path, const std::s
         return false;
     }
 
-    // bind + listen（与 listen() 同模式）
-    tls_listen_fd_ = socket(AF_INET, SOCK_STREAM, 0);
+    // bind + listen（与 listen() 同模式；SOCK_CLOEXEC 的原因见 listen() 里的注释）
+    tls_listen_fd_ = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (tls_listen_fd_ < 0) {
         CAM_ERROR("[tls] socket: %s", std::strerror(errno));
         mbedtls_ctr_drbg_free(drbg); delete drbg;
@@ -562,6 +567,9 @@ void HttpServer::run() {
                 CAM_WARN("[http] accept: %s", std::strerror(errno));
                 continue;
             }
+            // 连接 fd 同样不要漏给子进程（否则 fork 出去的 daemon 会替客户端
+            // 一直握着这条连接，对端收不到 RST）
+            fcntl(fd, F_SETFD, FD_CLOEXEC);
             bool is_tls = (pfds[i].fd == tls_listen_fd_);
             std::thread([this, fd, is_tls] { handle_connection(fd, is_tls); }).detach();
         }
