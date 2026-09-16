@@ -24,6 +24,10 @@
 
 namespace capp {
 
+/// 请求体上限。body 是**整块读进内存**的，板上可用内存只有 ~50MB，所以取 32MB。
+/// （原先是 1MB —— 结果模型文件（3.5MB）的上传会被静默丢体，接口只看到空 body。）
+constexpr long long kMaxRequestBody = 32LL * 1024 * 1024;
+
 struct AppContext;  // 定义见 context.hpp
 
 struct ClientConn {

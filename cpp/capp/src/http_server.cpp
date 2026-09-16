@@ -647,7 +647,14 @@ bool HttpServer::read_request(ClientConn& conn, HttpRequest& req) {
     long long cl = 0;
     auto it = req.headers.find("content-length");
     if (it != req.headers.end()) cl = atoll(it->second.c_str());
-    if (cl > 0 && cl <= (1 << 20)) {
+    // curl 等客户端对 >1KB 的体会先发 `Expect: 100-continue`，等这个握手才发体 ——
+    // 不回它就一直等（现象是路由收到空 body）。必须先回 100 Continue 再读。
+    auto exp = req.headers.find("expect");
+    if (cl > 0 && exp != req.headers.end() &&
+        exp->second.find("100-continue") != std::string::npos) {
+        conn.write_all("HTTP/1.1 100 Continue\r\n\r\n");
+    }
+    if (cl > 0 && cl <= kMaxRequestBody) {
         req.body = buf.substr(hdr_end + 4);
         while ((long long)req.body.size() < cl) {
             size_t got = 0;
@@ -670,6 +677,7 @@ void HttpServer::send_response(ClientConn& conn, const HttpResponse& resp, const
             case 403: status_text = "Forbidden"; break;
             case 404: status_text = "Not Found"; break;
             case 408: status_text = "Request Timeout"; break;
+            case 413: status_text = "Payload Too Large"; break;
             case 409: status_text = "Conflict"; break;
             case 500: status_text = "Internal Server Error"; break;
             case 502: status_text = "Bad Gateway"; break;
