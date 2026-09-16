@@ -20,12 +20,26 @@ SCREEN_SUFFIX := -noscreen
 SCREEN_DEF    := -DAKA_WITH_SCREEN=0
 endif
 
+# ── TPU 推理（cviruntime）──
+#   WITH_TPU=1（默认）→ 编入 YoloDetector（真实现），需要板子的 TPU SDK
+#   WITH_TPU=0         → 只留桩（与开发机一致）
+# SDK 不在仓库里（也不 vendor 头文件），靠这个变量指过去；换机器只改这一个路径。
+WITH_TPU    ?= 1
+TPU_SDK_DIR ?= /home/junbo_dai/cvitek_tpu_sdk
+ifeq ($(WITH_TPU),1)
+TPU_DEF := -DAKA_WITH_TPU=1
+TPU_INC := -I$(TPU_SDK_DIR)/include
+else
+TPU_DEF := -DAKA_WITH_TPU=0
+TPU_INC :=
+endif
+
 # 注意用 := 覆盖环境变量（orb 登录 shell 常导出 CXX=g++ 之类，会污染交叉编译）
 CXX      := /home/junbo_dai/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-g++
 AR       := /home/junbo_dai/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-ar
 JPEG_DIR ?= ../third_party/jpeg
 CXXFLAGS := -std=c++17 -O3 -Wall -Wextra -mcpu=c906fdv -MMD -MP -mabi=lp64d \
-            $(SCREEN_DEF) -Iinclude -I$(JPEG_DIR)/include
+            $(SCREEN_DEF) $(TPU_DEF) -Iinclude $(TPU_INC) -I$(JPEG_DIR)/include
 ARFLAGS   = rcs
 
 OBJDIR   := build-cross$(SCREEN_SUFFIX)
@@ -54,7 +68,15 @@ $(OBJDIR)/%: tools/%.cpp $(LIB)
 $(OBJDIR):
 	mkdir -p $(OBJDIR)
 
-$(OBJDIR)/%.o: src/%.cpp | $(OBJDIR)
+# 切换 WITH_TPU 时必须强制重编：make 只看 mtime，不认编译选项 —— 不加这层，
+# 从 WITH_TPU=0 切到 1 会被告知 "Nothing to be done"，拿到的是上次的旧产物。
+TPU_STAMP := $(OBJDIR)/.tpu-$(WITH_TPU)
+$(TPU_STAMP):
+	@mkdir -p $(OBJDIR)
+	@rm -f $(OBJDIR)/.tpu-*
+	@touch $@
+
+$(OBJDIR)/%.o: src/%.cpp $(TPU_STAMP) | $(OBJDIR)
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 $(LIB): $(OBJS)

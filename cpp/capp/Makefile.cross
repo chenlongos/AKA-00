@@ -22,6 +22,22 @@ SCREEN_SUFFIX := -noscreen
 SCREEN_DEF    := -DAKA_WITH_SCREEN=0
 endif
 
+# ── TPU 推理（cviruntime）──
+#   WITH_TPU=1（默认）→ 链板子 TPU SDK 的**静态库**，capp 仍是单个静态二进制
+#                        （不用改 init.sh 的 LD_LIBRARY_PATH、不用随包发 .so）
+#   WITH_TPU=0         → 不链（csrc 那边同时切到桩，否则 csrc 会引用未定义的符号）
+# 注意：SDK 只有 libcviruntime.so 的话静态链接会失败，这里用的是 SDK 里的
+# -static.a 版本；真的静态链不过时的退路是改成 -lcviruntime + rpath 指向 libs/。
+WITH_TPU    ?= 1
+TPU_SDK_DIR ?= /home/junbo_dai/cvitek_tpu_sdk
+ifeq ($(WITH_TPU),1)
+TPU_LDFLAGS := -L$(TPU_SDK_DIR)/lib \
+               -Wl,--start-group -lcviruntime-static -lcvikernel-static -lcvimath-static -lz \
+               -Wl,--end-group
+else
+TPU_LDFLAGS :=
+endif
+
 # 注意用 := 覆盖环境变量（orb 登录 shell 常导出 CXX=g++ 之类，会污染交叉编译）
 CXX      := /home/junbo_dai/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-g++
 CSRC     := ../csrc
@@ -33,7 +49,7 @@ CSRC_LIB := $(CSRC)/build-cross$(SCREEN_SUFFIX)/libcsrc.a
 CXXFLAGS := -std=c++17 -O3 -Wall -Wextra -mcpu=c906fdv -MMD -MP -mabi=lp64d \
             $(SCREEN_DEF) \
             -Iinclude -I$(CSRC)/include -I$(JPEG_DIR)/include -I$(MBEDTLS_DIR)/include
-LDFLAGS  := -static -L$(JPEG_DIR)/lib -L$(MBEDTLS_DIR)/lib
+LDFLAGS  := -static -L$(JPEG_DIR)/lib -L$(MBEDTLS_DIR)/lib $(TPU_LDFLAGS)
 
 OBJDIR := build-cross$(SCREEN_SUFFIX)
 SRCS := $(wildcard src/*.cpp)
@@ -53,7 +69,8 @@ $(OBJDIR)/%.o: src/%.cpp | $(OBJDIR)
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 $(CSRC_LIB):
-	$(MAKE) -f Makefile.cross -C $(CSRC) WITH_SCREEN=$(WITH_SCREEN)
+	$(MAKE) -f Makefile.cross -C $(CSRC) WITH_SCREEN=$(WITH_SCREEN) WITH_TPU=$(WITH_TPU) \
+	    TPU_SDK_DIR=$(TPU_SDK_DIR)
 
 $(TARGET): $(OBJS) $(CSRC_LIB)
 	$(CXX) $(CXXFLAGS) -o $@ $(OBJS) $(CSRC_LIB) \

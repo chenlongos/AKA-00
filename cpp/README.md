@@ -281,6 +281,7 @@ capp 同时支持 HTTP 和 HTTPS：默认 `:80` 与 `:5443` 共存（与原 Pyth
 | `GET /api/motor/status` `GET /api/motor/direct?left=&right=&duration=` `GET /api/motor/raw_command?cmd=` | 电机 |
 | `GET/POST /api/arm/angles` `GET/POST /api/arm/angles/default` `POST /api/arm/angles/preview` | 机械臂 |
 | `GET /api/camera/status` `POST /api/camera/open|close` `GET /api/camera/stream|snapshot|speed|all_status` | 摄像头 |
+| `GET /api/detect?model=<名字>` | 单帧推理：取当前帧跑一次模型，只回框的四个角（原图像素坐标）。模型必填、裸名字映射 `models/<名字>.cvimodel` |
 | `GET /api/demo/list|name` `POST /api/demo/init|stop|download_model_with_progress|upload_model` `GET /api/demo/download_progress/{id}` | demo |
 | `GET /api/ota/version|status|check|upgrade/progress` `POST /api/ota/upgrade|update` | OTA |
 | `GET /api/system/info|ip|heartbeat` | 系统 |

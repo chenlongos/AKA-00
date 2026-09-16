@@ -693,6 +693,28 @@ void register_routes(Router& router, AppContext& ctx) {
         resp.set_json(j);
     });
 
+    // 单帧推理：取当前帧跑一次模型，只回框的四个角（原图像素坐标）。
+    // 模型必填（裸名字 → $AKA_HOME/models/<名字>.cvimodel），先不做阈值等 query 覆盖。
+    router.add("GET", "/api/detect", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
+        const std::string model = req.query_param("model");
+        if (model.empty()) {
+            Json j;
+            j["ok"] = false;
+            j["error"] = "缺少 model 参数（例：/api/detect?model=tennis）";
+            resp.set_json(j, 400);
+            return;
+        }
+        if (!valid_model_name(model)) {
+            Json j;
+            j["ok"] = false;
+            j["error"] = "model 名字非法（只允许字母数字与 _ - .）：" + model;
+            resp.set_json(j, 400);
+            return;
+        }
+        const Json j = detect_once(ctx, model);
+        resp.set_json(j, j.getb("ok") ? 200 : 500);
+    });
+
     // ── /api/demo ──
     router.add("GET", "/api/demo/list", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
         Json demos;

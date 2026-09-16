@@ -533,6 +533,83 @@ bool build_stream_jpeg_rgb(AppContext& ctx, const csrc::Camera::RgbFrame& rgb,
     return csrc::Camera::rgb_to_jpeg(box.data(), ow, oh, q, out);
 }
 
+// ═══════════════════════ 单帧推理服务 ═══════════════════════
+
+bool valid_model_name(const std::string& name) {
+    if (name.empty() || name.size() > 64) return false;
+    if (name == "." || name == "..") return false;
+    for (char ch : name) {
+        const char c = (char)ch;
+        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                        (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+csrc::Json detect_once(AppContext& ctx, const std::string& model_name) {
+    csrc::Json j;
+
+    // 锁罩住"换模型 + 推理"整段：TPU 是单实例，YoloDetector 非线程安全；
+    // 半路换模型或两个请求并发进来都会出问题。
+    std::lock_guard<std::mutex> lk(ctx.detect_mu);
+
+    if (!ctx.detector) ctx.detector.reset(new csrc::YoloDetector());
+    if (!ctx.detector->loaded() || ctx.detect_model != model_name) {
+        // 模型只有一个来源：$AKA_HOME/models/<名字>.cvimodel
+        const std::string path = ctx.app_dir + "/models/" + model_name + ".cvimodel";
+        std::string err;
+        if (!ctx.detector->load(path, err)) {
+            ctx.detect_model.clear();
+            j["ok"] = false;
+            j["error"] = err;
+            return j;
+        }
+        ctx.detect_model = model_name;
+    }
+
+    if (!ensure_camera(ctx)) {
+        j["ok"] = false;
+        j["error"] = "camera not available";
+        return j;
+    }
+    // 取帧用**原生采集宽度**（camera.width），不是浏览器的 stream_width。
+    // stream_width 是为了省浏览器带宽而降采样的（默认 320），拿它喂 640x480 的模型
+    // 等于先把画面砍掉一半再放大回去（白丢分辨率）；更要命的是返回的框就落在那张
+    // 320 宽帧的坐标系里，而 /api/camera/snapshot 给的是原生 640 宽帧 —— 两者差一倍，
+    // 调用方把框画到快照上就会整体跑偏（实测框跑到画面左上角的背景上）。
+    // 用 camera.width 还能和板载屏显示的 decode_max_w 同档，共用同一次解码。
+    csrc::Camera::RgbFrame rgb;
+    if (!ctx.camera.latest_rgb(ctx.config.camera.width, rgb) || rgb.data.empty()) {
+        j["ok"] = false;
+        j["error"] = "no frame";
+        return j;
+    }
+
+    csrc::DecodeOptions opt;   // conf=0.25 / iou=0.45（先不做 query 覆盖）
+    std::vector<csrc::Detection> dets;
+    std::string err;
+    if (!ctx.detector->detect(rgb.data.data(), rgb.w, rgb.h, opt, dets, err)) {
+        j["ok"] = false;
+        j["error"] = err;
+        return j;
+    }
+
+    csrc::Json boxes(csrc::Json::Type::Array);
+    for (const auto& d : dets) {
+        csrc::Json b;
+        b["x1"] = csrc::Json((double)d.box.x1);
+        b["y1"] = csrc::Json((double)d.box.y1);
+        b["x2"] = csrc::Json((double)d.box.x2);
+        b["y2"] = csrc::Json((double)d.box.y2);
+        boxes.push_back(b);
+    }
+    j["ok"] = true;
+    j["count"] = csrc::Json((int64_t)dets.size());
+    j["boxes"] = boxes;
+    return j;
+}
+
 // ═══════════════════════ 板载屏显示服务 ═══════════════════════
 
 // 启动屏显示（幂等）。摄像头未开时按需打开（屏要画面就得有摄像头）——

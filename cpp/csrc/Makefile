@@ -25,6 +25,12 @@ SCREEN_DEF    := -DAKA_WITH_SCREEN=0
 endif
 CXXFLAGS += $(SCREEN_DEF)
 
+# TPU 推理（cviruntime / YoloDetector）：
+#   开发机默认 0 —— 没有 SDK 头文件，走 yolo_detector.cpp 的桩分支（接口一样，
+#   调用返回"本构建未编入 TPU 支持"）。板上交叉编译默认 1（见 Makefile.cross）。
+WITH_TPU ?= 0
+CXXFLAGS += -DAKA_WITH_TPU=$(WITH_TPU)
+
 # 摄像头 JPEG（Linux 主机需要 jpeglib.h；macOS 走 stub，无需）
 JPEG_DIR ?= ../third_party/jpeg
 JPEG_INC := $(if $(wildcard $(JPEG_DIR)/include/jpeglib.h),-I$(JPEG_DIR)/include,)

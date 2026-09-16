@@ -29,6 +29,11 @@ SCREEN_DEF    := -DAKA_WITH_SCREEN=0
 endif
 CXXFLAGS += $(SCREEN_DEF)
 
+# TPU 推理：开发机没有 SDK，默认 0（走桩）——与 Makefile.cross 的默认值相反，
+# 显式写出来是为了不被环境里的 WITH_TPU 污染（orb 登录 shell 会带环境变量）。
+WITH_TPU ?= 0
+CXXFLAGS += -DAKA_WITH_TPU=$(WITH_TPU)
+
 TARGET  := bin/aka-capp-dev$(SCREEN_SUFFIX)
 CSRC_LIB := $(CSRC)/build$(SCREEN_SUFFIX)/libcsrc.a
 
@@ -65,7 +70,7 @@ $(OBJDIR)/%.o: src/%.cpp | $(OBJDIR)
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 $(CSRC_LIB):
-	$(MAKE) -C $(CSRC) WITH_SCREEN=$(WITH_SCREEN)
+	$(MAKE) -C $(CSRC) WITH_SCREEN=$(WITH_SCREEN) WITH_TPU=$(WITH_TPU)
 
 $(TARGET): $(OBJS) $(CSRC_LIB)
 	$(CXX) $(CXXFLAGS) -o $@ $(OBJS) $(CSRC_LIB) \

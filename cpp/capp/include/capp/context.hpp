@@ -29,6 +29,7 @@
 #include "csrc/motor_pair.hpp"
 #include "csrc/screen_display.hpp"
 #include "csrc/state.hpp"
+#include "csrc/yolo_detector.hpp"
 
 namespace capp {
 
@@ -42,6 +43,13 @@ struct AppContext {
     csrc::Camera& camera = csrc::Camera::get_instance();
     /// 板载 SPI 屏显示（摄像头画面 → /dev/fb0）
     csrc::ScreenDisplay display;
+
+    // 单帧推理（GET /api/detect）：懒加载的模型 + 一把锁。
+    // 同步跑（每请求一次推理），锁把"换模型 + 推理"整段罩住 —— TPU 是单实例、
+    // YoloDetector 非线程安全，而且别和 demo/*/tennis 同时跑（互相抢 TPU）。
+    std::mutex detect_mu;
+    std::string detect_model;                      // 当前已加载的模型名（空 = 没加载）
+    std::unique_ptr<csrc::YoloDetector> detector;  // 首次请求时才加载
 
     bool camera_on = false;
 
@@ -130,6 +138,17 @@ bool build_stream_jpeg(AppContext& ctx, const csrc::Camera::Frame& f, std::vecto
 /// 流帧 → JPEG 字节（用共享解码结果版本）：屏幕显示与浏览器流共用一次解码。
 bool build_stream_jpeg_rgb(AppContext& ctx, const csrc::Camera::RgbFrame& rgb,
                            std::vector<uint8_t>& out);
+
+// ── 单帧推理服务（GET /api/detect）──
+
+/// 模型名是否合法：只允许 [A-Za-z0-9_.-]。
+/// 必须校验 —— 名字会拼进文件路径，否则 `?model=../../etc/passwd` 就是任意文件读取。
+bool valid_model_name(const std::string& name);
+
+/// 取当前摄像头帧跑一次推理。
+/// 成功：{"ok":true,"count":N,"boxes":[{"x1","y1","x2","y2"}...]}（原图像素坐标）
+/// 失败：{"ok":false,"error":"..."}（HTTP 码由路由决定）
+csrc::Json detect_once(AppContext& ctx, const std::string& model_name);
 
 // ── 板载屏显示服务 ──
 
