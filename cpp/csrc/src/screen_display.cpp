@@ -123,7 +123,8 @@ void ScreenDisplay::convert_box(const uint8_t* rgb, int w, int h, int out_w, int
 #if defined(__linux__)
 
 bool ScreenDisplay::open_fb() {
-    fb_fd_ = ::open("/dev/fb0", O_RDWR);
+    // O_CLOEXEC：同上，framebuffer fd 也不该被子进程继承
+    fb_fd_ = ::open("/dev/fb0", O_RDWR | O_CLOEXEC);
     if (fb_fd_ < 0) {
         CAM_INFO("[display] no /dev/fb0 (%s) — screen disabled", std::strerror(errno));
         return false;

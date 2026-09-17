@@ -36,7 +36,8 @@ static speed_t baud_to_speed(int baud) {
 
 bool SerialPort::open(const std::string& port, int baudrate, double timeout_sec) {
     close();
-    fd_ = ::open(port.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
+    // O_CLOEXEC：别让串口 fd 被 fork/exec 的子进程继承（见 camera.cpp 同处注释）
+    fd_ = ::open(port.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
     if (fd_ < 0) {
         err_ = "open " + port + ": " + std::strerror(errno);
         CAM_WARN("serial open %s failed: %s", port.c_str(), std::strerror(errno));

@@ -48,7 +48,11 @@ Camera::~Camera() { close(); }
 
 bool Camera::open_device(int width, int height, int fps) {
     const char* device = "/dev/video0";
-    fd_ = ::open(device, O_RDWR | O_NONBLOCK);
+    // O_CLOEXEC：设备 fd 不能被 fork/exec 出去。capp 会拉起 wpa_supplicant（ensure_wpa_env）、
+    // curl（https 下载）、OTA 脚本……子进程一旦继承，摄像头这种**独占设备**就再也打不开
+    // （板上实测：wpa_supplicant 持有 /dev/video0，/api/camera/open 一直失败）；
+    // 串口更隐蔽 —— 能被重复打开，但两个进程写同一条串口会互相打乱。
+    fd_ = ::open(device, O_RDWR | O_NONBLOCK | O_CLOEXEC);
     if (fd_ < 0) {
         CAM_ERROR("V4L2: open %s failed: %s", device, std::strerror(errno));
         return false;
