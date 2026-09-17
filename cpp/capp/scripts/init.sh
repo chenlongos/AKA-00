@@ -13,14 +13,20 @@ BIN="$AKA_HOME/aka-capp"
 LOCK_FILE="/tmp/aka-ota-lock"
 PID_FILE="/var/run/aka-capp.pid"
 
-# 防止重复实例（init.sh + 手动启动）
-if [ -f "$PID_FILE" ]; then
-    _old=$(cat "$PID_FILE")
-    if kill -0 "$_old" 2>/dev/null; then
-        echo "[init] already running (pid $_old), exiting"
+# 防止重复实例：**必须查 init.sh 自己的 pid，不能查 capp 的**。
+# 原来查 /var/run/aka-capp.pid（capp 的 pid）：只要在"capp 刚好没在跑"的瞬间起第二个
+# init.sh（例如部署时先 kill capp 再起脚本），检查就通不过拦截 —— 于是两个守护循环并存，
+# 各自拉起一个 capp，第二个抢不到 :80 → "bind failed → 退出 → 2 秒后重启"的循环
+# （实测踩到两次）。查自己的 pid 就与 capp 在不在跑无关了。
+INIT_PID_FILE="/var/run/aka-init.pid"
+if [ -f "$INIT_PID_FILE" ]; then
+    _old=$(cat "$INIT_PID_FILE" 2>/dev/null)
+    if [ -n "$_old" ] && kill -0 "$_old" 2>/dev/null; then
+        echo "[init] 已有 init.sh 在跑 (pid $_old)，退出"
         exit 0
     fi
 fi
+echo $$ > "$INIT_PID_FILE" 
 
 if [ ! -x "$BIN" ]; then
     # 兜底：scp/tar/zip 传输可能丢可执行位

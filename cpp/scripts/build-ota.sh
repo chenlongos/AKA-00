@@ -110,8 +110,12 @@ swap_in() {
 stop_service() {
     # 先杀 capp，再杀守护脚本 init.sh（它是 while 循环，不停会 2 秒后把旧 capp 拉起）
     killall aka-capp 2>/dev/null || true
-    pkill -f 'AKA-00/init.sh' 2>/dev/null || true
-    pkill -f "$AKA_HOME/init.sh" 2>/dev/null || true
+    # 本板 busybox 没有 pkill（原来那两条 pkill -f 一直静默失败，从而停不掉旧守护，
+    # 换包期间旧 init.sh 会把旧 capp 拉起来打架）—— 用 pidof + kill。
+    for _p in $(pidof init.sh 2>/dev/null); do kill "$_p" 2>/dev/null || true; done
+    for _p in $(ps 2>/dev/null | grep "[A]KA-00/init.sh" | awk '{print $1}'); do
+        kill "$_p" 2>/dev/null || true
+    done
     sleep 1
     killall -9 aka-capp 2>/dev/null || true
 }
