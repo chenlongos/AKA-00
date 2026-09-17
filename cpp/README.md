@@ -37,7 +37,12 @@ cpp/
 │   │   ├── services.cpp      控制服务 / 摄像头服务 / 云端状态上报
 │   │   ├── routes.cpp        全部路由（control/motor/arm/camera/demo/ota/system/wifi/config）
 │   │   └── websocket.cpp / http_server.cpp
-│   └── scripts/              build-libjpeg.sh（交叉 libjpeg）/ init.sh / stop.sh
+│   └── Makefile / Makefile.cross（本机 dev / 交叉编译）
+├── board/                    ← 板上目录的实体文件（打包时原样收进 dist/AKA-00/，见下）
+│   ├── config.toml  init.sh  stop.sh  init_ap_web.sh  https_init.sh
+│   ├── arm_angles*.json  speed_config.json  VERSION  start_img.jpg
+│   └── demo/                 流程脚本（*.lua）+ 模型（models/）+ 参数（configs/）
+├── scripts/                  build-libjpeg.sh / build-mbedtls.sh / build-lua.sh / build-ota.sh
 └── README.md
 ```
 
@@ -107,7 +112,25 @@ make clean                # 清理全部构建产物
 - `capp` 目标带 FORCE：每次重跑交叉编译（内部增量，秒级），防止 `bin/aka-capp`
   被本机 host 构建误覆盖成非 RISC-V 二进制
 - 本机开发调试构建用 `cd capp && make`，输出 `bin/aka-capp-dev`（macOS/Linux 版），
-  与交叉产物 `bin/aka-capp` 互不干扰
+  与交叉产物 `bin/aka-capp` 互不干扰。跑的时候要指 AKA_HOME（配置/静态文件都在部署目录里）：
+  `AKA_HOME=cpp/board ./cpp/capp/bin/aka-capp-dev`
+
+### 部署内容 = `cpp/board/`（实体文件）
+
+板上要什么由**实体文件**说了算：`cpp/board/` 就是 `$AKA_HOME/` 的镜像 ——
+`config.toml`、`init.sh`/`stop.sh`/`init_ap_web.sh`、`https_init.sh`、
+`arm_angles*.json`、`speed_config.json`、`VERSION`、`start_img.jpg`、
+以及 `demo/`（脚本 + 模型 + 参数）全部躺在那儿。想改板上哪个文件就直接改那里的实体文件，
+不用碰构建脚本。
+
+`make package` 只做三件事：
+
+1. 把 `cpp/board/` 原样收进 `dist/AKA-00/`；
+2. 补三样**构建产物**：`capp/bin/aka-capp`、仓库根的 `static/`、`csrc/<builddir>/` 下的 `tools/`；
+3. 不带屏版把 `start_img.jpg` 删掉（显示栈整个不存在）。
+
+所以"这个文件到底哪来的"这类问题，答案只有两种：要么在 `cpp/board/` 里，
+要么是编出来的（二进制 / 前端产物 / 板测工具）。
 
 ## 部署（SG2002）
 
@@ -124,13 +147,18 @@ $AKA_HOME/
 ├── arm_angles_default.json   # 默认角度
 ├── speed_config.json         # 行驶速度配置
 ├── VERSION                   # 版本文件（OTA 用）
-├── models/                   # 模型库（仓库 models/ 整目录照搬）
-├── scripts/*.lua             # 流程脚本（仓库 scripts/ 整目录照搬；/api/script/run 跑的就是它们）
-├── scripts/chase.lua         # 流程脚本（demo 就是"拿某个模型跑一遍它"）
+├── demo/                     # demo 相关全在这一个目录下（仓库 demo/ 整目录照搬）
+│   ├── tennis.lua            #   流程脚本（一个 demo 一个，平铺；demo 名=模型名=脚本名）
+│   ├── block.lua             #   （同上，各自写死自己的模型，互不影响）
+│   ├── models/*.cvimodel     #   模型库（= demo 列表来源，demo 名就是模型名）
+│   └── configs/<模型名>.json  #   运行参数（一个模型一个文件，**只在界面保存过之后才有**）
 ├── init.sh                   # 启动（自愈循环）
 ├── stop.sh                   # 停止
 └── init_ap_web.sh            # AP 热点 + 开机自启配置（开机广播 AP，访问 192.168.4.1）
 ```
+
+> 这个目录里的东西（除 `aka-capp`、`static/`、`tools/` 三样构建产物外）**都在
+> `cpp/board/` 有对应的实体文件**，见下面「部署内容 = `cpp/board/`」一节。
 
 传到板子二选一：
 
@@ -213,7 +241,7 @@ baudrate = 115200
 
 [web]
 port = 80
-https_port = 5443          # 0 = 关闭 HTTPS
+https_port = 443           # 0 = 关闭 HTTPS
 https_cert = "cert.pem"    # 相对 $AKA_HOME 或绝对路径
 https_key  = "key.pem"
 
@@ -260,14 +288,17 @@ level = "info"
 
 ### HTTPS（`web.https_port`）
 
-capp 同时支持 HTTP 和 HTTPS：默认 `:80` 与 `:5443` 共存（与原 Python `run.py` 行为一致，
-前端开 `https://<板子IP>:5443` 自动升级 `wss://`）。TLS 终止走 mbedTLS（嵌入式库，
+capp 同时支持 HTTP 和 HTTPS：默认 `:80` 与 `:443` 共存。443 是浏览器默认端口，所以
+前端直接开 `https://<板子IP>/` 即可（前端用 `location.host` 拼 `wss://`，不带端口就是 443，
+不用手输端口）。TLS 终止走 mbedTLS（嵌入式库，
 ~300KB；首次 `make` 自动经 `cpp/scripts/build-mbedtls.sh` 交叉编译到
 `third_party/mbedtls/`，链接进 `bin/aka-capp`）。
 
-- 证书：capp **不**自己生成。`capp/scripts/init.sh` 启动前会调用打包里的
-  `https_init.sh`（仓库根脚本），缺一即用 `openssl req -x509 -newkey rsa:4096 ...`
-  生成自签 `cert.pem`/`key.pem` 到 `$AKA_HOME/`（10 年有效期）。
+- 证书：capp **不**自己生成。`init.sh`（`cpp/board/init.sh`）启动前会调用同目录的
+  `https_init.sh`，缺一即用 `openssl req -x509 -newkey ec ...`
+  （prime256v1，1 秒；原 RSA-4096 实测要 64 秒且卡在 capp 启动前）生成自签
+  `cert.pem`/`key.pem` 到 `$AKA_HOME/`（10 年有效期）。
+  证书属于现场数据：OTA 换包时由 `build-ota.sh` 的 `KEEP_FILES` 保留，不会每次重签。
 - 自签证书客户端会告警；AP 模式下手机连热点后浏览器点"高级 → 继续访问"即可。
   正式运营把 `cert.pem`/`key.pem` 换成 CA 签发的即可，无需改代码。
 - `https_port = 0` 即关闭 HTTPS（HTTP 仍可用）；cert/key 缺失时 TLS 监听静默
@@ -281,10 +312,10 @@ capp 同时支持 HTTP 和 HTTPS：默认 `:80` 与 `:5443` 共存（与原 Pyth
 | `GET /api/motor/status` `GET /api/motor/direct?left=&right=&duration=` `GET /api/motor/raw_command?cmd=` | 电机 |
 | `GET/POST /api/arm/angles` `GET/POST /api/arm/angles/default` `POST /api/arm/angles/preview` | 机械臂 |
 | `GET /api/camera/status` `POST /api/camera/open|close` `GET /api/camera/stream|snapshot|speed|all_status` | 摄像头 |
-| `GET /api/detect?model=<名字>` | 单帧推理：取当前帧跑一次模型，只回框的四个角（原图像素坐标）。模型必填、裸名字映射 `models/<名字>.cvimodel` |
-| `POST /api/models/upload?name=<名字>` | 模型上传：平台把模型文件推到 `models/`（body 为文件；同名覆盖、覆盖即生效） |
-| `POST /api/script/run` `GET /api/script/status` `POST /api/script/stop` | 跑 Lua 流程脚本（`scripts/*.lua`，如 chase=追物抓取）。安全兜底（限速/超时/被接管/掉线/内存）在宿主里 |
-| `GET /api/demo/list|name|config` `POST /api/demo/init|stop|config` | demo（config = 跑 demo 的参数，每个 demo 一份） |
+| `GET /api/detect?model=<名字>` | 单帧推理：取当前帧跑一次模型，只回框的四个角（原图像素坐标）。模型必填、裸名字映射 `demo/models/<名字>.cvimodel` |
+| `POST /api/models/upload?name=<名字>` | 模型上传：平台把模型文件推到 `demo/models/`（body 为文件；同名覆盖、覆盖即生效） |
+| `POST /api/script/run` `GET /api/script/status` `POST /api/script/stop` | 跑 Lua 流程脚本（`demo/*.lua`，如 tennis=追网球抓取）。安全兜底（限速/超时/被接管/掉线/内存）在宿主里 |
+| `GET /api/demo/list|name|config` `POST /api/demo/init|stop|config` | demo（config = 跑 demo 的参数，一个模型一份 `demo/configs/<名字>.json`） |
 | `GET /api/ota/version|status|check|upgrade/progress` `POST /api/ota/upgrade|update` | OTA |
 | `GET /api/system/info|ip|heartbeat` | 系统 |
 | `GET /api/wifi/ip|status|scan` `POST /api/wifi/connect` | WiFi |

@@ -42,7 +42,7 @@ baudrate = 115200
 
 [web]
 port = 80
-https_port = 5443
+https_port = 443
 https_cert = "cert.pem"
 https_key = "key.pem"
 

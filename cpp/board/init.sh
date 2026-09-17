@@ -55,8 +55,13 @@ fi
 export AKA_HOME="$AKA_HOME"
 
 # HTTPS 自签名证书：capp 只读取 cert.pem/key.pem，缺一就重生成（一次性）。
-if [ -x "$APP_DIR/https_init.sh" ]; then
-    "$APP_DIR/https_init.sh" || echo "[init] https_init.sh failed (will retry next boot)"
+# 注意路径是 $AKA_HOME 不是 $APP_DIR —— 这个脚本里从来没有 APP_DIR 这个变量
+# （Python 版 init 的遗留），写成 APP_DIR 时这行恒假，于是 https_init.sh **一次都没跑过**，
+# 证书永远不生成，capp 只能退化成"TLS listener disabled"，HTTPS/wss 全不可用。
+if [ -x "$AKA_HOME/https_init.sh" ]; then
+    "$AKA_HOME/https_init.sh" || echo "[init] https_init.sh failed (will retry next boot)"
+else
+    echo "[init] 缺 $AKA_HOME/https_init.sh，HTTPS 证书无法自动生成"
 fi
 
 # WiFi 已连接时兜底删除 eth0 默认路由：

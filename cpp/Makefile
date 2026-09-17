@@ -5,6 +5,11 @@
 # `orb run -p` 转发交叉编译（产物落在共享目录，两边路径一致）。
 # 前端不参与构建：直接用仓库根 static/（已构建产物）打包。
 #
+# 打包（package）只做三件事：把 cpp/board/（= 板上目录 $AKA_HOME/ 的实体文件镜像）
+# 原样收进 dist/AKA-00/，补三样构建产物（capp 二进制 / static / tools），
+# 不带屏版再删掉 start_img.jpg。**板上要什么就改 cpp/board/ 里的实体文件**，
+# 这里不再有逐文件的拷贝清单。
+#
 # ── 两个版本（编译期开关 AKA_WITH_SCREEN，构建目录/产物完全隔离，互不覆盖）──
 #   make / make screen     带屏版本：bin/aka-capp + dist/AKA-00/（+ make ota 时再出安装器）
 #   make noscreen          不带屏版本：bin/aka-capp-noscreen + dist-noscreen/AKA-00/
@@ -113,74 +118,33 @@ $(CAPP_BIN): $(CSRC_LIB) $(MBEDTLS) $(LUA) FORCE
 $(CAPP_BIN_NS): $(CSRC_LIB_NS) $(MBEDTLS) $(LUA) FORCE
 	$(ORB_RUN) "cd $(CPP)/capp && make -f Makefile.cross WITH_SCREEN=0"
 
-# ── 打包宏：$(1)=带屏标志(1/0) $(2)=capp 二进制 $(3)=部署目录 $(4)=工具构建目录
-#            $(5)=部署内二进制名 ──
+# ── 打包 ──
+# 板上要什么是**实体文件**说了算：`cpp/board/` 就是 `$AKA_HOME/` 的镜像，
+# 想改 init.sh、config.toml、demo/*.lua 就直接改那里的文件，不用碰构建脚本。
+# 这里只做三件事：① 把 board/ 原样收过来 ② 补三样构建产物（aka-capp / static / tools）
+# ③ 不带屏版把 start_img.jpg 拿掉（显示栈整个不存在，留着没意义）。
+#
+# 参数：$(1)=带屏标志(1/0)  $(2)=capp 二进制  $(3)=部署目录  $(4)=csrc 构建目录
+#       $(5)=部署内的二进制名（不带屏版叫 aka-capp-noscreen）
 define PACKAGE_RECIPE
 	@set -e; \
 	DIST="$(3)"; \
-	rm -rf "$$DIST"; mkdir -p "$$DIST"; \
-	echo "── 组装部署目录 → $$DIST （$(if $(filter 1,$(1)),带屏,不带屏) 版本）──"; \
-	cp "$(2)" "$$DIST/$(5)"; chmod 755 "$$DIST/$(5)"; \
-	if [ -f "$(ROOT)/static/index.html" ]; then cp -r "$(ROOT)/static" "$$DIST/static"; fi; \
-	[ -f "$(CPP)/config.toml" ] && cp "$(CPP)/config.toml" "$$DIST/config.toml"; \
-	[ -f "$(ROOT)/arm_angles.json" ] && cp "$(ROOT)/arm_angles.json" "$$DIST/"; \
-	[ -f "$(ROOT)/arm_angles_default.json" ] && cp "$(ROOT)/arm_angles_default.json" "$$DIST/"; \
-	[ -f "$(ROOT)/speed_config.json" ] && cp "$(ROOT)/speed_config.json" "$$DIST/"; \
-	[ -f "$(ROOT)/VERSION" ] && cp "$(ROOT)/VERSION" "$$DIST/"; \
-	if [ "$(1)" = "1" ] && [ -f "$(ROOT)/start_img.jpg" ]; then \
-	    cp "$(ROOT)/start_img.jpg" "$$DIST/"; \
-	    echo "  ✓ 熄屏待机图 start_img.jpg 已打包"; \
-	fi; \
-	if [ ! -f "$$DIST/config.toml" ]; then \
-	    echo "ERROR: 缺少配置源 $(CPP)/config.toml —— config.toml 必须由 cpp/ 提供（打包不再内置生成）" >&2; \
-	    exit 1; \
-	fi; \
-	echo ""; \
-	echo "── 模型库（models/ 整目录照搬）──"; \
-	mkdir -p "$$DIST/models"; \
-	if [ -d "$(ROOT)/models" ]; then cp -r "$(ROOT)/models/." "$$DIST/models/"; fi; \
-	nmodel=$$(find "$$DIST/models" -name '*.cvimodel' 2>/dev/null | wc -l | tr -d ' '); \
-	echo "  ✓ models/：$$nmodel 个 .cvimodel（$$(du -sh "$$DIST/models" 2>/dev/null | cut -f1)）"; \
-	if [ "$$nmodel" = "0" ]; then \
-	    echo "  ! models/ 里没有 .cvimodel —— 启动会报找不到模型；"; \
-	    echo "    把模型放进 $(ROOT)/models/ 再打包，或到板上 scp 进 /root/AKA-00/models/"; \
-	fi; \
-	echo ""; \
-	echo "── 流程脚本（scripts/*.lua 整目录照搬）──"; \
-	mkdir -p "$$DIST/scripts"; \
-	if [ -d "$(ROOT)/scripts" ]; then cp -r "$(ROOT)/scripts/." "$$DIST/scripts/"; fi; \
-	nlua=$$(ls "$$DIST/scripts"/*.lua 2>/dev/null | wc -l | tr -d ' '); \
-	echo "  ✓ scripts/：$$nlua 个 .lua（GET /api/script/run 跑的就是它们）"; \
-	if [ "$$nlua" = "0" ]; then \
-	    echo "  ! scripts/ 里没有 .lua —— /api/script/run 会报『脚本打不开』"; \
-	fi; \
-	cp "$(CPP)/capp/scripts/init.sh" "$$DIST/init.sh"; \
-	cp "$(CPP)/capp/scripts/stop.sh" "$$DIST/stop.sh"; \
-	cp "$(CPP)/capp/scripts/init_ap_web.sh" "$$DIST/init_ap_web.sh"; \
-	if [ -f "$(ROOT)/https_init.sh" ]; then \
-	    cp "$(ROOT)/https_init.sh" "$$DIST/https_init.sh"; \
-	    chmod 755 "$$DIST/https_init.sh"; \
-	fi; \
-	chmod 755 "$$DIST/init.sh" "$$DIST/stop.sh" "$$DIST/init_ap_web.sh"; \
-	if [ -f "$(CPP)/csrc/$(4)/tt_pid_test" ]; then \
-	    mkdir -p "$$DIST/tools"; \
-	    cp "$(CPP)/csrc/$(4)/tt_pid_test" "$$DIST/tools/"; \
-	    chmod 755 "$$DIST/tools/tt_pid_test"; \
-	    cp "$(CPP)/csrc/tools/ws_joystick_test.py" "$$DIST/tools/"; \
-	    if [ -f "$(CPP)/csrc/$(4)/cam_probe" ]; then \
-	        cp "$(CPP)/csrc/$(4)/cam_probe" "$$DIST/tools/"; \
-	        chmod 755 "$$DIST/tools/cam_probe"; \
-	    fi; \
-	    if [ "$(1)" = "1" ] && [ -f "$(CPP)/csrc/$(4)/screen_test" ]; then \
-	        cp "$(CPP)/csrc/$(4)/screen_test" "$$DIST/tools/"; \
-	        chmod 755 "$$DIST/tools/screen_test"; \
-	    fi; \
-	    if [ -f "$(DEMO_DIR)/demo_camera" ]; then \
-	        cp "$(DEMO_DIR)/demo_camera" "$(DEMO_DIR)/demo_image" "$$DIST/tools/"; \
-	        chmod 755 "$$DIST/tools/demo_camera" "$$DIST/tools/demo_image"; \
-	    fi; \
-	fi; \
-	echo ""; echo "  ✓ 部署目录: $$DIST"; du -sh "$$DIST" 2>/dev/null || true; \
+	rm -rf "$$DIST"; \
+	cp -r "$(CPP)/board" "$$DIST"; \
+	cp "$(2)" "$$DIST/$(5)"; \
+	chmod 755 "$$DIST/$(5)" "$$DIST"/*.sh; \
+	[ -f "$(ROOT)/static/index.html" ] && cp -r "$(ROOT)/static" "$$DIST/static"; \
+	if [ "$(1)" = "0" ]; then rm -f "$$DIST/start_img.jpg"; fi; \
+	mkdir -p "$$DIST/tools"; \
+	for t in tt_pid_test cam_probe screen_test; do \
+	    [ -f "$(CPP)/csrc/$(4)/$$t" ] && cp "$(CPP)/csrc/$(4)/$$t" "$$DIST/tools/" || true; \
+	done; \
+	[ -f "$(CPP)/csrc/tools/ws_joystick_test.py" ] && cp "$(CPP)/csrc/tools/ws_joystick_test.py" "$$DIST/tools/" || true; \
+	[ -f "$(DEMO_DIR)/demo_camera" ] && cp "$(DEMO_DIR)/demo_camera" "$(DEMO_DIR)/demo_image" "$$DIST/tools/" || true; \
+	chmod 755 "$$DIST/tools"/* 2>/dev/null || true; \
+	echo "── 部署目录 $${DIST}（$(if $(filter 1,$(1)),带屏,不带屏)）──"; \
+	echo "   demo/：$$(ls "$$DIST/demo"/*.lua 2>/dev/null | wc -l | tr -d ' ') 个脚本、$$(find "$$DIST/demo/models" -name '*.cvimodel' 2>/dev/null | wc -l | tr -d ' ') 个模型、$$(ls "$$DIST/demo/configs"/*.json 2>/dev/null | wc -l | tr -d ' ') 份参数"; \
+	du -sh "$$DIST"; \
 	echo ""; \
 	echo "  部署到板子：make ota 生成 dist/aka-00-server，scp 过去后执行"; \
 	echo "      ./aka-00-server --update                          # 升级（保 config.toml 等现场文件）"; \

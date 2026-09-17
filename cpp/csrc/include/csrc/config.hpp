@@ -47,7 +47,7 @@ struct ArmConfig {
 
 struct WebConfig {
     int port = 80;
-    int https_port = 5443;        // 0 = HTTPS disabled
+    int https_port = 443;         // 0 = HTTPS disabled（443 让 https://<ip>/ 直接可用、wss 同端口）
     std::string https_cert = "cert.pem";   // 相对 $AKA_HOME 或绝对路径
     std::string https_key  = "key.pem";
 };
