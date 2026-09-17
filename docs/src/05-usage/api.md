@@ -238,7 +238,7 @@ GET /api/detect?model=<模型名>
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| model | string | 是 | 模型名，对应 `$AKA_HOME/models/<模型名>.cvimodel`（如 `tennis`、`block`）。只允许字母数字与 `_ - .`，不允许 `/` 与 `..` |
+| model | string | 是 | 模型名，对应 `$AKA_HOME/demo/models/<模型名>.cvimodel`（如 `tennis`、`block`）。只允许字母数字与 `_ - .`，不允许 `/` 与 `..` |
 
 > 摄像头没开会自动打开（与 `/api/camera/snapshot` 行为一致）；但**刚打开时可能还没出帧**，
 > 这时返回 `{"ok":false,"error":"no frame"}`，隔一下重试即可。
@@ -274,13 +274,13 @@ GET /api/detect?model=<模型名>
 |------|------|-----------|
 | 没给 model | 400 | `缺少 model 参数（例：/api/detect?model=tennis）` |
 | model 名字非法 | 400 | `model 名字非法（只允许字母数字与 _ - .）：../etc/passwd` |
-| 模型不存在 / 加载失败 | 500 | `注册模型失败（CVI_NN_RegisterModel rc=…）：/root/AKA-00/models/xxx.cvimodel` |
+| 模型不存在 / 加载失败 | 500 | `注册模型失败（CVI_NN_RegisterModel rc=…）：/root/AKA-00/demo/models/xxx.cvimodel` |
 | 摄像头不可用 / 暂无帧 | 500 | `camera not available` / `no frame` |
 
 ### 示例
 
 ```bash
-# 检测网球（模型 = $AKA_HOME/models/tennis.cvimodel）
+# 检测网球（模型 = $AKA_HOME/demo/models/tennis.cvimodel）
 curl "http://<ip>/api/detect?model=tennis"
 
 # 换另一颗模型
@@ -293,13 +293,13 @@ curl "http://<ip>/api/detect?model=block"
 
 ### 说明
 
-- **模型只有一个来源**：部署目录下的 `models/`（`make package` 整目录照搬）。裸名字只在
+- **模型只有一个来源**：部署目录下的 `demo/models/`（`make package` 整目录照搬）。裸名字只在
   库里查，不存在就报错，没有隐式回退。
 - 接口是**同步**的：每个请求现场取帧 → 推理 → 返回。模型首次请求时加载，之后常驻；
   只有 `?model=` 变了才重新加载。
 - **TPU 是单实例**：`/api/detect` 与流程脚本共用同一个检测器（各自串行），
   但别在脚本跑的时候另起一个吃 TPU 的进程。
-- 换自己的模型时对一下规格。本仓库 `models/tennis.cvimodel` 板上实测：输入
+- 换自己的模型时对一下规格。本仓库 `demo/models/tennis.cvimodel` 板上实测：输入
   `640x480`、`YUV420_PLANAR`、8 位量化；输出 `[1,5,6300,1]` FP32、单类别
   （`6300 = 80×60 + 40×30 + 20×15`，即三个 stride 的网格点数之和）。
   输入尺寸与格式都从模型张量里读，不写配置 —— 模型吃什么就喂什么。
@@ -308,7 +308,7 @@ curl "http://<ip>/api/detect?model=block"
 
 ## 模型管理
 
-给外部调用方（平台）用：把模型送进部署目录的 `models/` —— 也就是 `/api/detect` 唯一认的那个模型库。
+给外部调用方（平台）用：把模型送进部署目录的 `demo/models/` —— 也就是 `/api/detect` 唯一认的那个模型库。
 
 ### 上传模型（平台 → 小车，推荐）
 
@@ -328,11 +328,11 @@ curl -F "file=@tennis.cvimodel" "http://<ip>/api/models/upload?name=tennis"
 
 | 参数 | 位置 | 必填 | 说明 |
 |------|------|------|------|
-| name | query | 是 | 模型名，落成 `$AKA_HOME/models/<name>.cvimodel`。只允许字母数字与 `_ - .`，不允许 `/` 与 `..` |
+| name | query | 是 | 模型名，落成 `$AKA_HOME/demo/models/<name>.cvimodel`。只允许字母数字与 `_ - .`，不允许 `/` 与 `..` |
 | 文件 | body | 是 | 模型二进制（raw body，或 multipart 里名为 `file` 的字段） |
 
 ```json
-{"ok": true, "name": "tennis", "path": "/root/AKA-00/models/tennis.cvimodel", "size": 3540016}
+{"ok": true, "name": "tennis", "path": "/root/AKA-00/demo/models/tennis.cvimodel", "size": 3540016}
 ```
 
 同步接口：文件收完、校验通过、写盘换入之后才返回（3.5MB 的模型在内网上是一瞬间的事，不需要进度查询）。
@@ -363,35 +363,41 @@ curl -F "file=@tennis.cvimodel" "http://<ip>/api/models/upload?name=tennis"
 
 ## Demo（本地演示）
 
-板上的 demo 就是"拿某个模型跑一遍抓取流程"。列表里有什么，取决于 `models/` 里有什么
+板上的 demo 就是"拿某个模型跑一遍抓取流程"。列表里有什么，取决于 `demo/models/` 里有什么
 （demo 名 = 模型名），模型由平台推上来（见上）。
 
 ```
-GET  /api/demo/list           → {"demos":[{"name":"tennis","kind":"model","script":"chase"}, ...]}
-POST /api/demo/init  {"name":"tennis"}   → 跑 scripts/chase.lua，参数取下面那份配置
+GET  /api/demo/list           → {"demos":[{"name":"tennis","kind":"model","script":"tennis"}, ...]}
+POST /api/demo/init  {"name":"tennis"}   → 跑 demo/tennis.lua，参数取下面那份配置
 POST /api/demo/stop                        → 停（等于 /api/script/stop）
 ```
 
-### 运行参数（每个 demo 一份）
+### 运行参数（一个模型一份）
 
-跑 demo 时传给脚本的参数，存在 `$AKA_HOME/demo_config.json`（重启后仍在）。
+跑 demo 时传给脚本的参数，存在 `$AKA_HOME/demo/configs/<模型名>.json` ——
+**一个模型一个文件，而且只在这张卡片上点过"保存"之后才存在**；没有文件就是内置默认值
+（`target_size=300`、`speed=25`、`turn_speed=25`、`max_seconds=60`）。
 界面上在 Demo 页每个 demo 卡片里编辑；接口是：
 
 ```
 GET  /api/demo/config?name=tennis
-     → {"name":"tennis","target_size":300,"speed":25,"max_seconds":60}
-POST /api/demo/config  {"name":"tennis","target_size":220,"speed":30,"max_seconds":45}
+     → {"name":"tennis","target_size":300,"speed":50,"turn_speed":25,"max_seconds":60}
+POST /api/demo/config  {"name":"tennis","target_size":220,"speed":30,"turn_speed":30,"max_seconds":45}
 ```
 
 | 字段 | 含义 |
 |------|------|
 | target_size | 目标框宽（原图像素）——框宽达到它就认为到位并抓取 |
-| speed | 驱动速度百分比（宿主还会再 clamp 到 ≤35） |
+| speed | 直线速度百分比（宿主还会再 clamp 到 ≤70） |
+| turn_speed | 转弯速度百分比（同样 clamp 到 ≤70）—— 和直线分开：转弯要的占空比不同 |
 | max_seconds | 单次运行的总时长上限（宿主强制，到点打断并停车） |
 
-> 每个 demo 各存一份：不同的模型本来就需要不同的框宽/速度，互不干扰。
 > 这些值就是脚本里 `params()` 读到的东西 —— 想给脚本加参数时，在这里加字段、
 > 在脚本里读即可（见下一节）。
+>
+> **仓库是这份参数的唯一真源**：板上界面调好并保存的值，会在下一次 OTA 升级时被包里
+> 带的那份覆盖。要正式改参数，就把值抄回仓库的 `demo/configs/<模型名>.json` 再部署
+> （`demo/models/` 相反：平台运行时推上来的模型升级时会保留）。
 
 ---
 
@@ -399,14 +405,14 @@ POST /api/demo/config  {"name":"tennis","target_size":220,"speed":30,"max_second
 
 "看 → 对准 → 靠近 → 抓"这类**流程**天生要反复调参。写在 C++ 里，改一个数就得交叉编译 +
 部署 + 重启（一轮几分钟）；写在脚本里就是改一行存盘重跑。所以 capp 内置了一个 Lua 宿主：
-**原语在 C++（快、稳），流程在 `$AKA_HOME/scripts/*.lua`（好改）**。
+**原语在 C++（快、稳），流程在 `$AKA_HOME/demo/*.lua`（好改）**。
 
 ```
-POST /api/script/run     {"script":"chase", "max_seconds":30,
+POST /api/script/run     {"script":"tennis", "max_seconds":30,
                           "params":{"model":"tennis","target_size":300,"speed":20}}
-     → {"ok":true,"state":"running","script":"chase","max_seconds":30}
+     → {"ok":true,"state":"running","script":"tennis","max_seconds":30}
 GET  /api/script/status
-     → {"state":"running","script":"chase","message":"","calls":42,"action":"forward",
+     → {"state":"running","script":"tennis","message":"","calls":42,"action":"forward",
         "notes":{"box_w":"212","offset":"-33"}}
 POST /api/script/stop
      → {"ok":true,"state":"aborted"}（立刻刹车，不等脚本配合）
@@ -414,7 +420,7 @@ POST /api/script/stop
 
 | 字段 | 说明 |
 |------|------|
-| script | 脚本名，读 `$AKA_HOME/scripts/<名字>.lua`。只允许字母数字与 `_ - .` |
+| script | 脚本名，读 `$AKA_HOME/demo/<名字>.lua`。只允许字母数字与 `_ - .` |
 | params | 传给脚本的参数（脚本用 `params()` 读），任意扁平/嵌套表 |
 | max_seconds | **宿主强制**的总时长上限，默认 30，夹到 5~300 |
 
@@ -431,7 +437,7 @@ POST /api/script/stop
 | 原语 | 说明 |
 |------|------|
 | `detect(model)` | 取一帧跑一次推理 → `{frame_w=640, boxes={{x1,y1,x2,y2,w,h,cx,cy,area},...}}`；硬失败返回 `nil, err`（"这一拍还没出帧"返回空列表，不是错误） |
-| `forward(s)` `back(s)` `turn_left(s)` `turn_right(s)` `drive(l,r)` | 驱动；`s`/`l,r` 是百分比，**宿主一律 clamp 到 ±35** |
+| `forward(s)` `back(s)` `turn_left(s)` `turn_right(s)` `drive(l,r)` | 驱动；`s`/`l,r` 是百分比，**宿主一律 clamp 到 ±70** |
 | `standby()` `brake()` | 速度归零 / 刹车 |
 | `sleep_ms(ms)` | 等待（切段睡，随时可被打断） |
 | `grab()` `release()` | 夹爪（ZP10S 下是"伸下去→夹→抬起"约 3.5s 的整段序列） |
@@ -452,7 +458,7 @@ POST /api/script/stop
 
 | 约束 | 由谁强制 |
 |------|---------|
-| 速度上限 ±35% | 宿主 clamp 每个驱动原语的参数 |
+| 速度上限 ±70% | 宿主 clamp 每个驱动原语的参数 |
 | 总时长 | `max_seconds` + **看门狗**（每 2000 条 Lua 指令查一次，`while true do end` 也掐得住） |
 | 被人的指令取代 | 脚本一驱动，宿主就记下指令代际号；摇杆/`/api/control` 一进来代际号就变，脚本立刻被中断并交出控制权 |
 | stop / 服务退出 / 底盘掉线 | 同上，立刻中断 |
@@ -460,13 +466,13 @@ POST /api/script/stop
 | 脚本吞掉中断 | **不给 pcall/xpcall** —— 脚本没法把宿主的打断 catch 住 |
 | 退出时电机 | 宿主兜底刹车（脚本自己忘了停也一样） |
 
-### 示例：`scripts/chase.lua`（追到目标并抓起来）
+### 示例：`demo/tennis.lua`（追到目标并抓起来）
 
 ```bash
 curl -X POST http://<ip>/api/camera/open
 curl "http://<ip>/api/detect?model=tennis"      # 先看框多大，据此定 target_size
 curl -X POST -H 'Content-Type: application/json' \
-  -d '{"script":"chase","max_seconds":30,"params":{"model":"tennis","target_size":300,"speed":20}}' \
+  -d '{"script":"tennis","max_seconds":30,"params":{"target_size":300,"speed":20}}' \
   http://<ip>/api/script/run
 curl http://<ip>/api/script/status              # 边跑边看 action/notes
 curl -X POST http://<ip>/api/script/stop        # 随时打断

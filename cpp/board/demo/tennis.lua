@@ -1,14 +1,19 @@
--- chase.lua — 追到目标并抓起来
+-- tennis.lua — 追网球并抓起来（demo "tennis" 专用）
+--
+-- **一个 demo 一个脚本**：脚本名 = demo 名 = 模型名，三样东西按同一个名字对齐
+-- （模型 demo/models/tennis.cvimodel、本脚本、参数 demo/configs/tennis.json）。
+-- 好处是每个 demo 的判据可以各自调，改这里不影响别的 demo —— 想给方块单开一套
+-- 就动 block.lua，两边互不干扰。
 --
 -- 用法:
+--   POST /api/demo/init {"name":"tennis"}     ← 界面上的"开始"走这条
 --   POST /api/script/run
---   {"script":"chase", "max_seconds":30,
---    "params":{"model":"tennis", "target_size":300, "speed":20}}
+--   {"script":"tennis", "max_seconds":30, "params":{"target_size":300, "speed":20}}
 --
--- 参数（都从 params() 里读）:
---   model        必填，模型名（$AKA_HOME/models/<名字>.cvimodel）
+-- 参数（从 params() 里读，界面 Demo 页每个卡片可调、存在 demo/configs/tennis.json）:
 --   target_size  必填，目标框宽（原图像素）；框宽达到它就认为到位
---   speed        驱动速度百分比，默认 20（宿主还会再 clamp 到 ≤35）
+--   speed        直线速度百分比，默认 20（宿主还会再 clamp 到 ≤70）
+--   turn_speed   转弯速度百分比，默认跟直线一样
 --
 -- 这套判据与参数照搬隔壁仓库 aka0/tennis.cpp（那个预编译 demo 二进制的源码，
 -- 实机调过参）：面积最大的框当目标 → 偏出居中带先原地转（脉冲时长与偏离成正比）
@@ -20,13 +25,16 @@
 -- 安全：这里没有、也不可能有"解除限速"的办法 —— 速度、总时长、内存、以及
 -- "人的指令一进来就必须交还控制权"全在宿主（capp/script.cpp）里强制。
 
+-- 模型写死在这里（不再从 params.model 读）：脚本与模型一一对应，写死就不会拼错、
+-- 也不会出现"拿着 A 的脚本去找 B 的模型"。params 里照旧带着 model 字段（兼容
+-- /api/script/run 的老用法），但这里不信它。
+local model = "tennis"
+
 local p = params() or {}
-local model = p.model
 local target = tonumber(p.target_size)
 local speed = tonumber(p.speed) or 20                 -- 直线速度
 local turn_speed = tonumber(p.turn_speed) or speed    -- 转弯速度（没配就跟直线一样）
 
-if not model then fail("params.model 必填") end
 if not target or target <= 0 then fail("params.target_size 必须是正数（目标框宽，像素）") end
 
 -- 判据常量（改这里就是调参，不用重编）
@@ -50,7 +58,10 @@ local FINE_PULSE_MAX = 500     -- 精调转向的脉冲上限（够大但没对�
 local LOST_MS       = 1500     -- 连续多久看不到目标就收工
 local LOOP_GAP_MS   = 30       -- 每步之间喘口气，让相机出新帧
 
-log("开始：模型=%s 目标框宽=%dpx 直线速度=%d%% 转弯速度=%d%%", model, target, speed, turn_speed)
+-- 注意：算出来的值都可能带小数（框宽/偏移尤其），%d 遇到浮点会直接报错把脚本弄死 ——
+-- 显示用的数一律 math.floor 一下（这正是"叠框"那行踩过的坑）。
+log("开始：模型=%s 目标框宽=%dpx 直线速度=%d%% 转弯速度=%d%%",
+    model, math.floor(target), math.floor(speed), math.floor(turn_speed))
 
 local last_seen = elapsed_ms()
 
@@ -88,8 +99,9 @@ while true do
         if w >= target and math.abs(align_err) <= ALIGN_MARGIN then
             -- 够大 + 对准夹爪 → 停稳 → 抓
             brake()
-            log("到位：框宽 %dpx（目标 %d）偏移 %d（夹爪位 %d，误差 %d）→ 抓取", w, target,
-                offset, GRAB_OFFSET, align_err)
+            log("到位：框宽 %dpx（目标 %d）偏移 %d（夹爪位 %d，误差 %d）→ 抓取",
+                math.floor(w), math.floor(target), math.floor(offset), GRAB_OFFSET,
+                math.floor(align_err))
             grab()
             sleep_ms(4000)        -- 等 ZP10S 那套"伸下去→夹→抬起"走完（约 3.5s）
             return "已抓取（是否夹到请看实物：夹爪没有反馈）"
@@ -104,7 +116,8 @@ while true do
             -- 距离够了但没对准夹爪：小脉冲精调（别转过头）
             local pulse = math.floor(TURN_PULSE_K * math.abs(align_err))
             pulse = math.max(TURN_PULSE_MIN, math.min(FINE_PULSE_MAX, pulse))
-            log("精调：偏移 %d → 对准 %d（误差 %d，脉冲 %dms）", offset, GRAB_OFFSET, align_err, pulse)
+            log("精调：偏移 %d → 对准 %d（误差 %d，脉冲 %dms）",
+                math.floor(offset), GRAB_OFFSET, math.floor(align_err), pulse)
             if align_err < 0 then turn_left(turn_speed) else turn_right(turn_speed) end
             sleep_ms(pulse)
             standby()

@@ -42,9 +42,16 @@ using HttpResult = csrc::HttpResult;
 // ═══════════════════════ 小工具 ═══════════════════════
 
 // ── demo 参数（跑 demo 时传给脚本的 params）──
-// 每个 demo（= 模型名）各存一份：不同的模型本来就需要不同的框宽/速度。
-// 存 $AKA_HOME/demo_config.json —— 与 speed_config.json 同一套做法，重启后仍在。
-std::string demo_config_path(AppContext& ctx) { return ctx.app_dir + "/demo_config.json"; }
+// **一个模型一个文件**：$AKA_HOME/demo/configs/<模型名>.json，内容就是那四个字段本身
+// （跟 GET/POST 的 payload 同一个形状）。原来是一个共享 json 按模型名分 key —— 2 个模型
+// 1 条流程却要存两份几乎一样的配置，删模型还会在共享文件里留孤儿 key。
+// 文件**只在这张卡片上点过"保存"之后才存在**；没有文件 = 用下面的内置默认值。
+// 布局与"仓库是唯一真源"的取舍见 cpp/README.md 的部署布局一节。
+std::string demo_config_dir(AppContext& ctx) { return ctx.app_dir + "/demo/configs"; }
+
+std::string demo_config_path(AppContext& ctx, const std::string& name) {
+    return demo_config_dir(ctx) + "/" + name + ".json";
+}
 
 constexpr int kDemoTargetSizeDefault = 300;
 constexpr int kDemoSpeedDefault = 25;        // 直线速度（%）
@@ -57,37 +64,30 @@ csrc::Json load_demo_params(AppContext& ctx, const std::string& name) {
     out["speed"] = csrc::Json((int64_t)kDemoSpeedDefault);
     out["turn_speed"] = csrc::Json((int64_t)kDemoTurnSpeedDefault);
     out["max_seconds"] = csrc::Json((int64_t)kDemoMaxSecondsDefault);
-    std::ifstream f(demo_config_path(ctx));
-    if (!f) return out;
+    if (!valid_model_name(name)) return out;   // 名字要拼进路径：`?name=../x` 必须挡在这里
+    std::ifstream f(demo_config_path(ctx, name));
+    if (!f) return out;                        // 没保存过 → 默认值
     std::stringstream ss;
     ss << f.rdbuf();
-    csrc::Json all;
-    if (!csrc::Json::parse(ss.str(), all) || !all.is_object()) return out;
-    const csrc::Json* one = all.get(name);
-    if (!one || !one->is_object()) return out;
-    out["target_size"] = csrc::Json(one->geti("target_size", kDemoTargetSizeDefault));
-    out["speed"] = csrc::Json(one->geti("speed", kDemoSpeedDefault));
-    out["turn_speed"] = csrc::Json(one->geti("turn_speed", kDemoTurnSpeedDefault));
-    out["max_seconds"] = csrc::Json(one->geti("max_seconds", kDemoMaxSecondsDefault));
+    csrc::Json one;
+    if (!csrc::Json::parse(ss.str(), one) || !one.is_object()) return out;
+    out["target_size"] = csrc::Json(one.geti("target_size", kDemoTargetSizeDefault));
+    out["speed"] = csrc::Json(one.geti("speed", kDemoSpeedDefault));
+    out["turn_speed"] = csrc::Json(one.geti("turn_speed", kDemoTurnSpeedDefault));
+    out["max_seconds"] = csrc::Json(one.geti("max_seconds", kDemoMaxSecondsDefault));
     return out;
 }
 
 bool save_demo_params(AppContext& ctx, const std::string& name, const csrc::Json& params) {
-    csrc::Json all;
-    {
-        std::ifstream f(demo_config_path(ctx));
-        if (f) {
-            std::stringstream ss;
-            ss << f.rdbuf();
-            csrc::Json parsed;
-            if (csrc::Json::parse(ss.str(), parsed) && parsed.is_object()) all = parsed;
-        }
-    }
-    all[name] = params;                       // 只动这一份，其它 demo 的不受影响
-    std::ofstream f(demo_config_path(ctx));
+    if (!valid_model_name(name)) return false;
+    // demo/configs/ 可能还不存在（板上第一次保存时），而 ofstream 不会建目录 ——
+    // 以前那句"写入失败"就是这么来的
+    if (!csrc::ensure_dir(demo_config_dir(ctx))) return false;
+    std::ofstream f(demo_config_path(ctx, name));
     if (!f) return false;
-    f << all.dump(false);
-    return true;
+    f << params.dump(false);
+    f.close();
+    return (bool)f;
 }
 
 std::string speed_config_path(AppContext& ctx) {
@@ -285,8 +285,8 @@ bool extract_multipart_file(const std::string& body, const std::string& content_
 }
 
 // ── demo: 扫描含 init.sh 的子目录 ──
-// 板上"能跑的 demo" = models/ 里有哪个模型（demo 名就是模型名，跑同一条 chase 流程）。
-// 原来这里扫的是 demo/ 目录（预编译二进制 + init.sh），那套已被 Lua 脚本取代。
+// 板上"能跑的 demo" = demo/models/ 里有哪个模型（demo 名就是模型名，跑同名的那份脚本）。
+// 原来这里扫的是预编译二进制目录（每个 demo 一个 init.sh），那套已被 Lua 脚本取代。
 struct DemoInfo {
     std::string name;
     std::string path;
@@ -294,7 +294,7 @@ struct DemoInfo {
 
 std::vector<DemoInfo> list_demos(AppContext& ctx) {
     std::vector<DemoInfo> out;
-    const std::string dir = ctx.app_dir + "/models";
+    const std::string dir = model_dir(ctx);
     const std::string suffix = ".cvimodel";
     DIR* d = opendir(dir.c_str());
     if (!d) return out;
@@ -725,7 +725,7 @@ void register_routes(Router& router, AppContext& ctx) {
     });
 
     // 单帧推理：取当前帧跑一次模型，只回框的四个角（原图像素坐标）。
-    // 模型必填（裸名字 → $AKA_HOME/models/<名字>.cvimodel），先不做阈值等 query 覆盖。
+    // 模型必填（裸名字 → $AKA_HOME/demo/models/<名字>.cvimodel），先不做阈值等 query 覆盖。
     router.add("GET", "/api/detect", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
         const std::string model = req.query_param("model");
         if (model.empty()) {
@@ -787,7 +787,7 @@ void register_routes(Router& router, AppContext& ctx) {
         resp.set_json(r, r.getb("ok") ? 200 : 400);
     });
 
-    // ── 流程脚本（scripts/*.lua）──
+    // ── 流程脚本（demo/*.lua）──
     // 把"看→对准→靠近→抓"这类要反复调参的流程写成脚本，改一行存盘重跑，不用重编部署。
     // 安全兜底（限速/总超时/被人的指令取代/底盘掉线/内存与卡死）全在宿主里，脚本绕不过去。
     router.add("POST", "/api/script/run", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
@@ -798,7 +798,7 @@ void register_routes(Router& router, AppContext& ctx) {
         }
         const std::string name = payload.gets("script");
         if (name.empty()) {
-            resp.set_error("script 必填（例：chase）", 400);
+            resp.set_error("script 必填（例：tennis）", 400);
             return;
         }
         const Json* params = payload.get("params");
@@ -845,7 +845,7 @@ void register_routes(Router& router, AppContext& ctx) {
 
     // ── /api/demo ──（**薄封装**：demo 现在就是"拿某个模型跑一遍 Lua 抓取流程"）
     // 路径与字段保持不变，前端 DemoPage 一行都不用改；行为则从预编译二进制变成了可改的脚本：
-    // 调追物就改 scripts/chase.lua，改完 scp 上去即可，不用重编不用重启。
+    // 调某个 demo 就改它自己那份 demo/<名字>.lua，改完 scp 上去即可，不用重编不用重启。
     router.add("GET", "/api/demo/list", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
         Json demos;
         for (auto& d : list_demos(ctx)) {
@@ -853,7 +853,9 @@ void register_routes(Router& router, AppContext& ctx) {
             item["name"] = d.name;
             item["path"] = d.path;
             item["kind"] = "model";     // 原来是 binary（预编译 demo），现在是"脚本 + 模型"
-            item["script"] = "chase";
+            // 一个 demo 一个脚本：脚本名 = demo 名 = 模型名。没有同名脚本的模型照样
+            // 列出来（平台刚推上来、还没来得及写流程），但 script 留空 —— 点开会明确报错。
+            item["script"] = script_file_exists(ctx, d.name) ? d.name : "";
             demos.push_back(item);
         }
         Json j;
@@ -874,15 +876,23 @@ void register_routes(Router& router, AppContext& ctx) {
             resp.set_error("name is required", 400);
             return;
         }
-        // 跑同一条 chase 流程，模型就是 demo 名；参数取"这个 demo 存下来的那份"
-        // （在界面的 demo 页设置），请求里显式传的字段优先。
+        if (!valid_model_name(name)) {   // 名字会拼进脚本/配置路径
+            resp.set_error("name 非法（只允许字母数字与 _ - .）：" + name, 400);
+            return;
+        }
+        // 一个 demo 一个脚本：跑 demo/<name>.lua，模型写死在那份脚本里。参数取
+        // "这个 demo 存下来的那份"（界面 demo 页设置），请求里显式传的字段优先。
+        if (!script_file_exists(ctx, name)) {
+            resp.set_error("这个 demo 还没有流程脚本：demo/" + name + ".lua", 400);
+            return;
+        }
         Json params = load_demo_params(ctx, name);
-        params["model"] = name;
+        params["model"] = name;   // 兼容：脚本自己写死了模型，但它照旧能读到
         if (payload.get("target_size")) params["target_size"] = Json(payload.geti("target_size", kDemoTargetSizeDefault));
         if (payload.get("speed")) params["speed"] = Json(payload.geti("speed", kDemoSpeedDefault));
         if (payload.get("turn_speed")) params["turn_speed"] = Json(payload.geti("turn_speed", kDemoTurnSpeedDefault));
         if (payload.get("max_seconds")) params["max_seconds"] = Json(payload.geti("max_seconds", kDemoMaxSecondsDefault));
-        const Json r = script_run(ctx, "chase", params, (int)params.geti("max_seconds", kDemoMaxSecondsDefault));
+        const Json r = script_run(ctx, name, params, (int)params.geti("max_seconds", kDemoMaxSecondsDefault));
 
         if (!r.getb("ok")) {
             const Json st = script_status(ctx);
@@ -897,7 +907,7 @@ void register_routes(Router& router, AppContext& ctx) {
         Json j;
         j["status"] = "started";
         j["name"] = name;
-        j["script"] = "chase";
+        j["script"] = name;
         j["pid"] = Json((int64_t)getpid());   // 兼容字段：跑 demo 的进程就是 capp 自己
         j["pgid"] = Json((int64_t)getpid());
         resp.set_json(j);
@@ -908,6 +918,11 @@ void register_routes(Router& router, AppContext& ctx) {
         const std::string name = req.query_param("name");
         if (name.empty()) {
             resp.set_error("name 必填（?name=tennis）", 400);
+            return;
+        }
+        // 与 POST 同一个口径：名字要拼进路径，非法就明确报错，别悄悄回默认值
+        if (!valid_model_name(name)) {
+            resp.set_error("name 非法（只允许字母数字与 _ - .）：" + name, 400);
             return;
         }
         Json j = load_demo_params(ctx, name);
@@ -937,7 +952,7 @@ void register_routes(Router& router, AppContext& ctx) {
         params["turn_speed"] = Json((int64_t)payload.geti("turn_speed", kDemoTurnSpeedDefault));
         params["max_seconds"] = Json((int64_t)payload.geti("max_seconds", kDemoMaxSecondsDefault));
         if (!save_demo_params(ctx, name, params)) {
-            resp.set_error("写入 demo_config.json 失败", 500);
+            resp.set_error("写入 demo/configs/" + name + ".json 失败", 500);
             return;
         }
         Json j = params;
