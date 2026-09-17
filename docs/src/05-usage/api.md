@@ -297,8 +297,8 @@ curl "http://<ip>/api/detect?model=block"
   库里查，不存在就报错，没有隐式回退。
 - 接口是**同步**的：每个请求现场取帧 → 推理 → 返回。模型首次请求时加载，之后常驻；
   只有 `?model=` 变了才重新加载。
-- **TPU 是单实例**：不要和 `demo/<名字>/init.sh` 同时跑（它 `exec` 的 `tennis` 二进制
-  同样吃 TPU），会互相抢。
+- **TPU 是单实例**：`/api/detect` 与流程脚本共用同一个检测器（各自串行），
+  但别在脚本跑的时候另起一个吃 TPU 的进程。
 - 换自己的模型时对一下规格。本仓库 `models/tennis.cvimodel` 板上实测：输入
   `640x480`、`YUV420_PLANAR`、8 位量化；输出 `[1,5,6300,1]` FP32、单类别
   （`6300 = 80×60 + 40×30 + 20×15`，即三个 stride 的网格点数之和）。
@@ -359,6 +359,95 @@ curl -F "file=@tennis.cvimodel" "http://<ip>/api/models/upload?name=tennis"
 | 内容不是 cvimodel | 400 | `不是 cvimodel（文件头不是 CviModel）` |
 | 请求体为空 | 400 | `请求体为空（把模型文件放进 body）` |
 | 超过 32MB | 413 | `文件过大：34603008 字节，上限 32MB` |
+
+## 流程脚本（Lua）
+
+"看 → 对准 → 靠近 → 抓"这类**流程**天生要反复调参。写在 C++ 里，改一个数就得交叉编译 +
+部署 + 重启（一轮几分钟）；写在脚本里就是改一行存盘重跑。所以 capp 内置了一个 Lua 宿主：
+**原语在 C++（快、稳），流程在 `$AKA_HOME/scripts/*.lua`（好改）**。
+
+```
+POST /api/script/run     {"script":"chase", "max_seconds":30,
+                          "params":{"model":"tennis","target_size":300,"speed":20}}
+     → {"ok":true,"state":"running","script":"chase","max_seconds":30}
+GET  /api/script/status
+     → {"state":"running","script":"chase","message":"","calls":42,"action":"forward",
+        "notes":{"box_w":"212","offset":"-33"}}
+POST /api/script/stop
+     → {"ok":true,"state":"aborted"}（立刻刹车，不等脚本配合）
+```
+
+| 字段 | 说明 |
+|------|------|
+| script | 脚本名，读 `$AKA_HOME/scripts/<名字>.lua`。只允许字母数字与 `_ - .` |
+| params | 传给脚本的参数（脚本用 `params()` 读），任意扁平/嵌套表 |
+| max_seconds | **宿主强制**的总时长上限，默认 30，夹到 5~300 |
+
+| state | 含义 |
+|-------|------|
+| `idle` | 没在跑 |
+| `running` | 正在跑 |
+| `done` | 脚本正常结束（`message` 是脚本的返回值） |
+| `failed` | 失败：脚本 `fail()`、推理/相机出错、脚本语法错、超时、底盘掉线 |
+| `aborted` | 被停止：`/api/script/stop`、人的运动指令接管、服务退出 |
+
+### 脚本能用的原语（全部只有这些）
+
+| 原语 | 说明 |
+|------|------|
+| `detect(model)` | 取一帧跑一次推理 → `{frame_w=640, boxes={{x1,y1,x2,y2,w,h,cx,cy,area},...}}`；硬失败返回 `nil, err`（"这一拍还没出帧"返回空列表，不是错误） |
+| `forward(s)` `back(s)` `turn_left(s)` `turn_right(s)` `drive(l,r)` | 驱动；`s`/`l,r` 是百分比，**宿主一律 clamp 到 ±35** |
+| `standby()` `brake()` | 速度归零 / 刹车 |
+| `sleep_ms(ms)` | 等待（切段睡，随时可被打断） |
+| `grab()` `release()` | 夹爪（ZP10S 下是"伸下去→夹→抬起"约 3.5s 的整段序列） |
+| `elapsed_ms()` | 本脚本已跑的毫秒数 |
+| `motor_connected()` | 底盘是否真在线（掉线时驱动是空操作，脚本可据此提前收手） |
+| `abort_requested()` | 是否收到 stop（脚本可选择优雅收尾） |
+| `note(k, v)` | 往 `/api/script/status` 的 `notes` 里发布一个可观测字段（调参用） |
+| `log(fmt, ...)` | 写日志（`print` 也是它） |
+| `fail(msg)` | 脚本主动判定失败 |
+| `params()` | 启动时传进来的参数表 |
+
+数学/字符串/table 标准库可用；**没有** io / os / package / coroutine / debug，也**没有 pcall**
+（见下）。
+
+### 安全边界（宿主强制，脚本绕不过去）
+
+这是会真开电机的功能，所以下面这些都不在脚本手里：
+
+| 约束 | 由谁强制 |
+|------|---------|
+| 速度上限 ±35% | 宿主 clamp 每个驱动原语的参数 |
+| 总时长 | `max_seconds` + **看门狗**（每 2000 条 Lua 指令查一次，`while true do end` 也掐得住） |
+| 被人的指令取代 | 脚本一驱动，宿主就记下指令代际号；摇杆/`/api/control` 一进来代际号就变，脚本立刻被中断并交出控制权 |
+| stop / 服务退出 / 底盘掉线 | 同上，立刻中断 |
+| 内存 | Lua VM 用带预算的分配器（4MB），脚本狂建 table 也吃不光板子内存 |
+| 脚本吞掉中断 | **不给 pcall/xpcall** —— 脚本没法把宿主的打断 catch 住 |
+| 退出时电机 | 宿主兜底刹车（脚本自己忘了停也一样） |
+
+### 示例：`scripts/chase.lua`（追到目标并抓起来）
+
+```bash
+curl -X POST http://<ip>/api/camera/open
+curl "http://<ip>/api/detect?model=tennis"      # 先看框多大，据此定 target_size
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"script":"chase","max_seconds":30,"params":{"model":"tennis","target_size":300,"speed":20}}' \
+  http://<ip>/api/script/run
+curl http://<ip>/api/script/status              # 边跑边看 action/notes
+curl -X POST http://<ip>/api/script/stop        # 随时打断
+```
+
+判据与参数照搬隔壁仓库 `aka0/tennis.cpp`(那个预编译 demo 的源码，实机调过参)：取面积最大的框当
+目标 → 偏出画面中心 ±80px 就先原地转（脉冲时长与偏离成正比，25~200ms 之间）→ 对准但框还不够大
+就前进 150ms → 框宽达到 `target_size` 且居中就停稳、闭合夹爪。丢目标 1.5s 内没找回就收工。
+
+与那套 demo 的三处**有意差异**：① 用框宽像素判定（本项目口径）而不是框面积占比；② 不做
+"抓前左转 3 次"的爪子偏置补偿（实测夹空再加）；③ 丢目标即收工，不做没有超时的原地找球。
+
+> 夹爪（ZP10S）**没有位置反馈**，"夹到没有"无法确认 —— 脚本只能报告"抓取序列已执行完"。
+> 另外 **TPU 是单实例**：跑脚本时别同时跑 `demo/*/init.sh`（宿主会直接拒绝启动）。
+
+---
 
 ## WiFi
 

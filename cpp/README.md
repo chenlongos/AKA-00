@@ -125,7 +125,8 @@ $AKA_HOME/
 ├── speed_config.json         # 行驶速度配置
 ├── VERSION                   # 版本文件（OTA 用）
 ├── models/                   # 模型库（仓库 models/ 整目录照搬）
-├── demo/<demo>/init.sh       # demo 目录（含 init.sh 的才会打包）
+├── scripts/*.lua             # 流程脚本（仓库 scripts/ 整目录照搬；/api/script/run 跑的就是它们）
+├── scripts/chase.lua         # 流程脚本（demo 就是"拿某个模型跑一遍它"）
 ├── init.sh                   # 启动（自愈循环）
 ├── stop.sh                   # 停止
 └── init_ap_web.sh            # AP 热点 + 开机自启配置（开机广播 AP，访问 192.168.4.1）
@@ -185,7 +186,6 @@ $HOME/AKA-00/init_ap_web.sh            # = install + 立即启动
 |---|---|---|
 | `AKA_HOME` | 应用根目录（config.toml/static/VERSION/demo 等相对它） | `.` |
 | `ARM_ANGLES_PATH` | 机械臂角度文件路径 | `$AKA_HOME/arm_angles.json` |
-| `DEMO_BASE_DIR` | demo 目录 | `$AKA_HOME/demo` |
 | `CSRC_LOG_LEVEL` | 日志级别 error/warn/info/debug | info |
 | `STATUS_REPORT_URL` / `STATUS_REPORT_INTERVAL` | 云端状态上报地址 / 间隔秒 | config.toml / 300 |
 | `OTA_CHECK_URL` | OTA 检查地址 | config.toml |
@@ -283,6 +283,7 @@ capp 同时支持 HTTP 和 HTTPS：默认 `:80` 与 `:5443` 共存（与原 Pyth
 | `GET /api/camera/status` `POST /api/camera/open|close` `GET /api/camera/stream|snapshot|speed|all_status` | 摄像头 |
 | `GET /api/detect?model=<名字>` | 单帧推理：取当前帧跑一次模型，只回框的四个角（原图像素坐标）。模型必填、裸名字映射 `models/<名字>.cvimodel` |
 | `POST /api/models/upload?name=<名字>` | 模型上传：平台把模型文件推到 `models/`（body 为文件；同名覆盖、覆盖即生效） |
+| `POST /api/script/run` `GET /api/script/status` `POST /api/script/stop` | 跑 Lua 流程脚本（`scripts/*.lua`，如 chase=追物抓取）。安全兜底（限速/超时/被接管/掉线/内存）在宿主里 |
 | `GET /api/demo/list|name` `POST /api/demo/init|stop|download_model_with_progress|upload_model` `GET /api/demo/download_progress/{id}` | demo |
 | `GET /api/ota/version|status|check|upgrade/progress` `POST /api/ota/upgrade|update` | OTA |
 | `GET /api/system/info|ip|heartbeat` | 系统 |
