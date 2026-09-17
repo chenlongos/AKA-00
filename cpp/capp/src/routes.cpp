@@ -6,6 +6,7 @@
 #include "capp/http_server.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -249,38 +250,140 @@ void write_restart_script(const std::string& firmware_path) {
     system("/bin/sh /tmp/aka-ota-install.sh >/dev/null 2>&1 &");
 }
 
-// multipart/form-data 文件提取（upload_model / OTA update 用）
-// 返回文件内容；filename 由 Content-Disposition 提取
-bool extract_multipart_file(const std::string& body, const std::string& content_type,
-                            std::string& filename, std::string& content) {
+// multipart/form-data 解析（upload_model / OTA update / 训练平台直传模型 用）
+//
+// 一个 part 的三样东西：字段名 name、文件名 filename（文件字段才有）、内容 content。
+// 注意**不能只取第一个 part**：训练平台的表单是 file + name 两个字段，先来哪个不确定。
+struct MultipartPart {
+    std::string name;
+    std::string filename;
+    std::string content;
+};
+
+std::vector<MultipartPart> parse_multipart(const std::string& body,
+                                           const std::string& content_type) {
+    std::vector<MultipartPart> out;
     size_t bpos = content_type.find("boundary=");
-    if (bpos == std::string::npos) return false;
+    if (bpos == std::string::npos) return out;
     std::string boundary = content_type.substr(bpos + 9);
-    // 去引号
     if (boundary.size() >= 2 && boundary.front() == '"' && boundary.back() == '"') {
         boundary = boundary.substr(1, boundary.size() - 2);
     }
-    std::string delim = "--" + boundary;
-    size_t part_start = body.find(delim);
-    if (part_start == std::string::npos) return false;
-    part_start += delim.size();
-    // 跳过第一段头
-    size_t hdr_end = body.find("\r\n\r\n", part_start);
-    if (hdr_end == std::string::npos) return false;
-    std::string part_headers = body.substr(part_start, hdr_end - part_start);
+    const size_t semi = boundary.find(';');   // 有的客户端会写 boundary=xxx; charset=...
+    if (semi != std::string::npos) boundary = boundary.substr(0, semi);
+    if (boundary.empty()) return out;
 
-    // 提取 filename
-    size_t fn = part_headers.find("filename=\"");
-    if (fn != std::string::npos) {
-        fn += 10;
-        size_t fn_end = part_headers.find('"', fn);
-        if (fn_end != std::string::npos) filename = part_headers.substr(fn, fn_end - fn);
+    const std::string delim = "--" + boundary;
+    size_t cursor = 0;
+    while (true) {
+        const size_t b = body.find(delim, cursor);
+        if (b == std::string::npos) break;
+        size_t after = b + delim.size();
+        if (body.compare(after, 2, "--") == 0) break;      // 收尾的 --boundary--
+        if (body.compare(after, 2, "\r\n") == 0) after += 2;
+        const size_t hdr_end = body.find("\r\n\r\n", after);
+        if (hdr_end == std::string::npos) break;
+        const std::string headers = body.substr(after, hdr_end - after);
+        const size_t data_start = hdr_end + 4;
+        const size_t next = body.find(delim, data_start);
+        size_t data_end = (next == std::string::npos) ? body.size() : next;
+        if (data_end >= 2 && body.compare(data_end - 2, 2, "\r\n") == 0) data_end -= 2;
+
+        MultipartPart p;
+        const size_t nm = headers.find("name=\"");
+        if (nm != std::string::npos) {
+            const size_t e = headers.find('"', nm + 6);
+            if (e != std::string::npos) p.name = headers.substr(nm + 6, e - (nm + 6));
+        }
+        const size_t fn = headers.find("filename=\"");
+        if (fn != std::string::npos) {
+            const size_t e = headers.find('"', fn + 10);
+            if (e != std::string::npos) p.filename = headers.substr(fn + 10, e - (fn + 10));
+        }
+        p.content = body.substr(data_start, data_end - data_start);
+        out.push_back(std::move(p));
+        if (next == std::string::npos) break;
+        cursor = data_end;
     }
-    // 内容到下一个 --boundary
-    size_t data_start = hdr_end + 4;
-    size_t data_end = body.find("\r\n--" + boundary, data_start);
-    if (data_end == std::string::npos) data_end = body.size();
-    content = body.substr(data_start, data_end - data_start);
+    return out;
+}
+
+/// 取第一个 part 当文件（老的调用方：平台推模型、OTA 传固件，都不关心字段名）
+bool extract_multipart_file(const std::string& body, const std::string& content_type,
+                            std::string& filename, std::string& content) {
+    const std::vector<MultipartPart> parts = parse_multipart(body, content_type);
+    if (parts.empty()) return false;
+    if (!parts[0].filename.empty()) filename = parts[0].filename;
+    content = parts[0].content;
+    return true;
+}
+
+/// 扩展名是不是 .cvimodel（大小写不敏感）
+bool has_cvimodel_ext(const std::string& filename) {
+    if (filename.size() < 9) return false;
+    std::string tail = filename.substr(filename.size() - 9);
+    for (char& c : tail) c = (char)tolower((unsigned char)c);
+    return tail == ".cvimodel";
+}
+
+/// 去掉首尾空白（multipart 文本字段带不带换行看客户端，不能想当然）
+std::string trim_ws(const std::string& s) {
+    size_t b = s.find_first_not_of(" \t\r\n");
+    if (b == std::string::npos) return "";
+    size_t e = s.find_last_not_of(" \t\r\n");
+    return s.substr(b, e - b + 1);
+}
+
+/// 给新槽位生成一份脚本：拿 demo/_template.lua，把 __MODEL__ 换成槽位名。
+/// **已存在就不动** —— 那份脚本可能已经手调过（对准偏置、脉冲时长），重传模型不该把它冲掉。
+/// 返回：true=这次新建了；false=本来就有（err 里说明模板缺失等异常，调用方不因此失败）
+bool make_demo_script_from_template(AppContext& ctx, const std::string& name, std::string& err) {
+    const std::string target = demo_script_path(ctx, name);
+    if (script_file_exists(ctx, name)) return false;
+    const std::string tpl_path = ctx.app_dir + "/demo/_template.lua";
+    std::ifstream f(tpl_path);
+    if (!f) {
+        err = "模板缺失：" + tpl_path;
+        return false;
+    }
+    std::stringstream ss;
+    ss << f.rdbuf();
+    std::string src = ss.str();
+    // 先删掉模板专用的注释块（`-- [[TEMPLATE-ONLY` … `-- ]]`）——那段话放在生成出来的
+    // 脚本里是错的（它会说"这个文件别改，只用来生成脚本"）。
+    const std::string tpl_beg = "-- [[TEMPLATE-ONLY";
+    const std::string tpl_end = "-- ]]";
+    const size_t tb = src.find(tpl_beg);
+    if (tb != std::string::npos) {
+        const size_t te = src.find(tpl_end, tb);
+        if (te != std::string::npos) {
+            const size_t nl = src.find('\n', te);
+            src.erase(tb, (nl == std::string::npos ? src.size() : nl + 1) - tb);
+        }
+    }
+    const std::string ph = "__MODEL__";
+    size_t pos = 0;
+    int replaced = 0;
+    while ((pos = src.find(ph, pos)) != std::string::npos) {
+        src.replace(pos, ph.size(), name);
+        pos += name.size();
+        replaced++;
+    }
+    if (replaced == 0) {
+        err = "模板里没有 __MODEL__ 占位符：" + tpl_path;
+        return false;
+    }
+    std::ofstream out(target, std::ios::trunc);
+    if (!out) {
+        err = "脚本写不开：" + target;
+        return false;
+    }
+    out << src;
+    out.close();
+    if (!out) {
+        err = "写脚本失败（磁盘满？）：" + target;
+        return false;
+    }
     return true;
 }
 
@@ -785,6 +888,78 @@ void register_routes(Router& router, AppContext& ctx) {
         }
         const Json r = save_model_upload(ctx, name, content);
         resp.set_json(r, r.getb("ok") ? 200 : 400);
+    });
+
+    // ── 训练平台直传模型（浏览器 → 小车，同一局域网；yolotrain.chenlongrobot.com）──
+    //
+    // 与上面 `/api/models/upload` 的区别：那个是"平台/curl 推模型"（名字走 query，body 就是
+    // 文件裸内容，响应 {ok,name,path,size}）；这个是**浏览器表单直传**（multipart 两个字段
+    // file+name，响应 {status,name,size}），而且会**顺手给新槽位生成一份脚本** ——
+    // 不然模型传上来了，Demo 页点开始只会报"还没有流程脚本"。
+    //
+    // CORS 与 OPTIONS 预检不在这里处理：http_server 在路由之前就统一应答了（所有响应也
+    // 自动带 Access-Control-Allow-Origin: *），浏览器跨域直传本来就要求那样。
+    router.add("POST", "/api/model/upload", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
+        auto fail = [&resp](const std::string& msg) {
+            Json e;
+            e["status"] = "error";
+            e["message"] = msg;
+            resp.set_json(e, 400);
+        };
+
+        const std::string ct = req.header("content-type");
+        std::string filename, content, name;
+        if (ct.find("multipart/form-data") != std::string::npos) {
+            for (const auto& p : parse_multipart(req.body, ct)) {
+                // 字段名以表单为准；两个字段谁先到不确定，所以是遍历而不是取第一个 part
+                if (p.name == "file") {
+                    filename = p.filename;
+                    content = p.content;
+                } else if (p.name == "name") {
+                    name = trim_ws(p.content);
+                }
+            }
+        }
+        if (name.empty()) name = trim_ws(req.query_param("name"));   // ?name= 兜底
+
+        // 逐条按契约校验，失败一律 400 + {status:"error", message}
+        if (content.empty()) {
+            fail("invalid file");
+            return;
+        }
+        if (!has_cvimodel_ext(filename)) {   // 后缀不对 = 发错文件了（平台固定发 model.cvimodel）
+            fail("invalid file");
+            return;
+        }
+        if (name.empty()) {
+            fail("invalid name");
+            return;
+        }
+        if (!valid_model_name(name)) {   // 名字要拼进路径：`../../etc/passwd` 挡在这里
+            fail("invalid name");
+            return;
+        }
+
+        const Json r = save_model_upload(ctx, name, content);
+        if (!r.getb("ok")) {
+            fail(r.gets("error"));   // 魔数不对 / 过大 / 换入失败 —— 原因比"invalid file"有用
+            return;
+        }
+        std::string script_err;
+        const bool created = make_demo_script_from_template(ctx, name, script_err);
+        if (!created && !script_err.empty()) {
+            CAM_WARN("[models] %s 的脚本没生成：%s", name.c_str(), script_err.c_str());
+        }
+
+        Json j;
+        j["status"] = "ok";
+        j["name"] = name;
+        j["size"] = Json((int64_t)r.geti("size", 0));
+        j["path"] = r.gets("path");
+        // 方便平台侧显示"模型传完了，脚本也备好了"；已存在的脚本不会被覆盖
+        j["script"] = script_file_exists(ctx, name) ? demo_script_path(ctx, name) : "";
+        j["script_created"] = created;
+        resp.set_json(j);
     });
 
     // ── 流程脚本（demo/*.lua）──

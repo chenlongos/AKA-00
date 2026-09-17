@@ -748,10 +748,11 @@ void HttpServer::handle_connection(int fd, bool is_tls) {
         return;
     }
 
-    // CORS 预检
+    // CORS 预检：回 200（不是 204）—— 训练平台直传模型那份契约写的就是 200，
+    // 虽然浏览器预检不看状态码，但按契约来省得对方以为哪里不对。
     if (req.method == "OPTIONS") {
         HttpResponse resp;
-        resp.status = 204;
+        resp.status = 200;
         resp.headers["Access-Control-Allow-Origin"] = "*";
         resp.headers["Access-Control-Allow-Methods"] = "GET,POST,PUT,PATCH,DELETE,OPTIONS";
         resp.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization";

@@ -361,6 +361,50 @@ curl -F "file=@tennis.cvimodel" "http://<ip>/api/models/upload?name=tennis"
 | 请求体为空 | 400 | `请求体为空（把模型文件放进 body）` |
 | 超过 32MB | 413 | `文件过大：34603008 字节，上限 32MB` |
 
+### 训练平台直传（浏览器 → 小车）
+
+训练平台（`yolotrain.chenlongrobot.com`）训练完，浏览器把模型**直传小车**（同一局域网），
+车端不做任何运行切换，只落盘 —— 后续验证人工做。与上面那个接口的区别：名字在表单里
+（走 query 的旧接口是给 curl / 云端推模型用的），响应字段是 `status/name/size`，
+而且**会顺手给新槽位生成一份流程脚本**。
+
+```
+POST /api/model/upload
+Content-Type: multipart/form-data
+
+file = <模型二进制，文件名固定 model.cvimodel>    （必填）
+name = <槽位名，如 orange>                        （必填）
+```
+
+```bash
+curl -F "file=@model.cvimodel" -F "name=orange" "http://<ip>/api/model/upload"
+```
+
+成功：
+
+```json
+{"status":"ok","name":"orange","size":12865136,
+ "path":"/root/AKA-00/demo/models/orange.cvimodel",
+ "script":"/root/AKA-00/demo/orange.lua","script_created":true}
+```
+
+（`script` / `path` 是方便平台侧显示用的，不属于契约字段，忽略即可。）
+
+| 失败 | HTTP | 响应 |
+|------|------|------|
+| file 为空 / 后缀不是 `.cvimodel` | 400 | `{"status":"error","message":"invalid file"}` |
+| name 为空 / 含 `/`、`..` 等 | 400 | `{"status":"error","message":"invalid name"}` |
+| 文件头不是 CviModel / 超过 32MB | 400 / 413 | `{"status":"error","message":"不是 cvimodel（文件头不是 CviModel）"}` |
+
+落盘与副作用：
+
+- 模型 → `demo/models/<name>.cvimodel`（**同名覆盖**，原子换入，坏包不会顶掉正在用的）
+- 脚本 → `demo/<name>.lua`：拿 `demo/_template.lua` 把 `__MODEL__` 换成槽位名生成一份。
+  **已存在则不动** —— 那份脚本可能已经手调过，重传模型不该把它冲掉。
+  生成之后这个槽位在 Demo 页就能直接跑（模型 + 脚本 + 参数三样同名齐了）。
+- CORS 与 `OPTIONS` 预检由服务器统一处理（所有响应带 `Access-Control-Allow-Origin: *`，
+  预检回 200），浏览器跨域直传不需要额外配置。
+
 ## Demo（本地演示）
 
 板上的 demo 就是"拿某个模型跑一遍抓取流程"。列表里有什么，取决于 `demo/models/` 里有什么
