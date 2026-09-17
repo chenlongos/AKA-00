@@ -76,12 +76,27 @@ wpa_cli -p /var/run/wpa_supplicant -i ${AP_IFACE} terminate 2>/dev/null
 killall hostapd dnsmasq udhcpd 2>/dev/null
 sleep 1
 
+# 起 AP 前把接口上的遗留地址清掉（dhcpcd 之前给的链路本地/DHCP 地址）——
+# 否则 AP 静态地址与它并存，接口上就有两个 IP。
+dhcpcd -k ${AP_IFACE} 2>/dev/null
+ip addr flush dev ${AP_IFACE} 2>/dev/null
 ifconfig ${AP_IFACE} ${AP_IP} netmask ${NETMASK} up
 dnsmasq --conf-file=/etc/dnsmasq.ap.conf --pid-file=/var/run/dnsmasq.ap.pid &
 hostapd -B /etc/hostapd.conf
 exit 0
 EOF
 chmod 755 /etc/init.d/S98apstart
+
+# ── dhcpcd 别管 AP 接口 ──
+# AP 接口是**静态地址**（${AP_IP}），但系统里的 dhcpcd 会照样去给它要一个 DHCP 地址：
+# AP 模式下上游没有 DHCP 服务器，于是落一个 169.254.x 链路本地地址 —— 接口上就有两个 IP
+# （实测 wlan0: 192.168.4.1 + 169.254.79.27），界面上显示哪个都不对。
+# 这里把 AP 接口从 dhcpcd 的管理范围里摘出去；STA 接口（${STA_IFACE}）保持由 dhcpcd 管，
+# 手动 `ip link set ${STA_IFACE} up` + wpa_supplicant 能拿到一个 IP 就是靠它。
+if ! grep -qE "^[[:space:]]*denyinterfaces.*\b${AP_IFACE}\b" /etc/dhcpcd.conf 2>/dev/null; then
+    echo "denyinterfaces ${AP_IFACE}" >> /etc/dhcpcd.conf
+    echo "   /etc/dhcpcd.conf += denyinterfaces ${AP_IFACE}"
+fi
 
 # ── 5. 开机脚本 S99webstart：建/起 wlan1 → 后台启动 capp ──
 cat > /etc/init.d/S99webstart <<EOF
@@ -146,6 +161,8 @@ echo "── 立即启动 AP（${AP_IFACE} 当前 STA 连接将被断开）─�
 wpa_cli -p /var/run/wpa_supplicant -i ${AP_IFACE} terminate 2>/dev/null
 killall hostapd dnsmasq udhcpd 2>/dev/null
 sleep 1
+dhcpcd -k ${AP_IFACE} 2>/dev/null      # 释放 dhcpcd 可能持有的租约
+ip addr flush dev ${AP_IFACE} 2>/dev/null   # 清掉遗留的链路本地/DHCP 地址，只留 AP 静态地址
 ifconfig ${AP_IFACE} ${AP_IP} netmask ${NETMASK} up
 dnsmasq --conf-file=/etc/dnsmasq.ap.conf --pid-file=/var/run/dnsmasq.ap.pid &
 hostapd -B /etc/hostapd.conf
