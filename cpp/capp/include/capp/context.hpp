@@ -212,6 +212,14 @@ csrc::Json detect_once(AppContext& ctx, const std::string& model_name);
 
 // ── 板载屏显示服务 ──
 
+/// 屏显示开关（运行时）：关掉会立刻停屏，打开会在摄像头已开时立刻起屏。
+/// 只改内存里的 config.display.enabled —— **不写回 config.toml**：
+/// 参数文件是用户现场改的，重启后回到文件里的值（避免"重启后屏莫名其妙黑了"）。
+/// 顺带说明为什么需要它：全屏写屏很吃那颗单核 CPU（实测 /api/detect 从 120ms 涨到
+/// 340ms），要在追物/检测时让出 CPU 就把它关掉。
+csrc::Json display_config(AppContext& ctx);
+csrc::Json set_display_enabled(AppContext& ctx, bool enabled);
+
 /// 启动屏显示（按 config.display；无 /dev/fb0 时返回 false 但不影响其它服务）
 bool ensure_display(AppContext& ctx);
 /// 停止屏显示并释放 framebuffer

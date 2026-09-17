@@ -10,6 +10,7 @@
 
 #include "csrc/yolo_detector.hpp"
 
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 
@@ -302,18 +303,30 @@ bool YoloDetector::detect(const uint8_t* rgb, int w, int h, const DecodeOptions&
         return false;
     }
 
+    // 分段计时（DBG 级）：判断"慢在哪一段"用。开 CSRC_LOG_LEVEL=debug 就能看到。
+    auto t0 = std::chrono::steady_clock::now();
+    auto ms_since = [](std::chrono::steady_clock::time_point& t) {
+        const auto now = std::chrono::steady_clock::now();
+        const double ms = std::chrono::duration<double, std::milli>(now - t).count();
+        t = now;
+        return ms;
+    };
+
     // 正变换与后面的反变换共用这一个 lb_（两处各算一遍缩放/填充会整体偏移）
     lb_ = make_letterbox(w, h, in_spec_.w, in_spec_.h);
     if (!letterbox_into_rgb(rgb, w, h, lb_, lb_buf_.data())) {
         err = "letterbox 失败";
         return false;
     }
+    const double lb_ms = ms_since(t0);
 
     uint8_t* in_ptr = (uint8_t*)CVI_NN_TensorPtr((CVI_TENSOR*)input_);
     if (!fill_input_rgb(lb_buf_.data(), in_spec_, in_pitch_, in_ptr, err)) return false;
+    const double fill_ms = ms_since(t0);
 
     const CVI_RC rc = CVI_NN_Forward((CVI_MODEL_HANDLE)model_, (CVI_TENSOR*)input_, in_num_,
                                      (CVI_TENSOR*)output_, out_num_);
+    const double fwd_ms = ms_since(t0);
     if (rc != 0) {
         err = "推理失败（CVI_NN_Forward rc=" + std::to_string(rc) + "）";
         return false;
@@ -322,6 +335,9 @@ bool YoloDetector::detect(const uint8_t* rgb, int w, int h, const DecodeOptions&
     read_output();
     decode(scratch_.data(), out_channels_, out_anchors_, out_channel_major_, lb_, opt, out);
     out = nms(std::move(out), opt.iou, opt.max_det);
+    const double post_ms = ms_since(t0);
+    CAM_DEBUG("[detect/timing] letterbox=%.1fms fill=%.1fms forward=%.1fms post=%.1fms  (帧 %dx%d → 输入 %dx%d)",
+              lb_ms, fill_ms, fwd_ms, post_ms, w, h, in_spec_.w, in_spec_.h);
     return true;
 }
 

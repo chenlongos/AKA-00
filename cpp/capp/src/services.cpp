@@ -745,7 +745,14 @@ bool detect_boxes(AppContext& ctx, const std::string& model_name, const csrc::De
         return false;
     }
     frame_w = rgb.w;
-    return ctx.detector->detect(rgb.data.data(), rgb.w, rgb.h, opt, out, err);
+    // 取帧（含解码，走 Camera::latest_rgb 的共享缓存）单独计一下：
+    // 慢在"取帧"还是"推理"，决定了该优化哪条路。
+    const auto t_det0 = std::chrono::steady_clock::now();
+    const bool ok = ctx.detector->detect(rgb.data.data(), rgb.w, rgb.h, opt, out, err);
+    const double det_ms = std::chrono::duration<double, std::milli>(
+                              std::chrono::steady_clock::now() - t_det0).count();
+    CAM_DEBUG("[detect/frame] 取帧(含解码) 已完成，detect() 耗时 %.1fms", det_ms);
+    return ok;
 }
 
 csrc::Json detect_once(AppContext& ctx, const std::string& model_name) {
@@ -791,6 +798,39 @@ bool ensure_display(AppContext& ctx) {
 }
 
 void close_display(AppContext& ctx) { ctx.display.stop(); }
+
+csrc::Json display_config(AppContext& ctx) {
+    csrc::Json j;
+    j["enabled"] = ctx.config.display.enabled;      // 配置/当前开关状态
+    j["running"] = ctx.display.running();           // 显示线程是否真在跑
+    j["available"] = ctx.display.available();       // 有没有 /dev/fb0
+    j["scale"] = csrc::Json((int64_t)ctx.config.display.scale);
+    j["fps"] = csrc::Json((int64_t)ctx.config.display.fps);
+    if (ctx.display.running()) {
+        const csrc::ScreenDisplay::Stats st = ctx.display.stats();
+        j["region_w"] = csrc::Json((int64_t)st.out_w);
+        j["region_h"] = csrc::Json((int64_t)st.out_h);
+        j["frames"] = csrc::Json((int64_t)st.frames);
+    }
+    return j;
+}
+
+csrc::Json set_display_enabled(AppContext& ctx, bool enabled) {
+    ctx.config.display.enabled = enabled;
+    csrc::Json j;
+    if (!enabled) {
+        close_display(ctx);      // 立刻停屏（关摄像头路径也会调，幂等）
+        CAM_INFO("[display] 运行时关闭屏显示");
+    } else {
+        // 打开：摄像头已开才会真的起屏（起不来不算错误，如实回报 running=false）
+        ensure_display(ctx);
+        CAM_INFO("[display] 运行时打开屏显示 (running=%d)", (int)ctx.display.running());
+    }
+    j["ok"] = true;
+    j["enabled"] = ctx.config.display.enabled;
+    j["running"] = ctx.display.running();
+    return j;
+}
 
 // ═══════════════════════ 状态上报 ═══════════════════════
 

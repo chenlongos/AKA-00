@@ -766,6 +766,34 @@ void register_routes(Router& router, AppContext& ctx) {
         resp.set_json(script_stop(ctx));
     });
 
+    // ── 屏显示开关 ──
+    // 为什么要有：全屏写屏很吃那颗单核 CPU（实测 /api/detect 从 120ms 涨到 340ms），
+    // 要在跑检测/追物时让出 CPU 就把它关掉；想看屏就再打开。
+    // 只改运行时状态，不写 config.toml（重启后回到文件里的值）。
+    router.add("GET", "/api/display/status", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
+        resp.set_json(display_config(ctx));
+    });
+
+    router.add("POST", "/api/display/enabled", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
+        const Json payload = req.json();
+        if (!payload.is_object()) {
+            resp.set_error("json body is required", 400);
+            return;
+        }
+        // 也接受 ?enabled=0/1（前端表单有时更顺手）
+        const std::string q = req.query_param("enabled");
+        bool enabled;
+        if (!q.empty()) {
+            enabled = (q == "1" || q == "true" || q == "yes");
+        } else if (payload.get("enabled")) {
+            enabled = payload.getb("enabled", true);
+        } else {
+            resp.set_error("enabled 必填（true/false）", 400);
+            return;
+        }
+        resp.set_json(set_display_enabled(ctx, enabled));
+    });
+
     // ── /api/demo ──（**薄封装**：demo 现在就是"拿某个模型跑一遍 Lua 抓取流程"）
     // 路径与字段保持不变，前端 DemoPage 一行都不用改；行为则从预编译二进制变成了可改的脚本：
     // 调追物就改 scripts/chase.lua，改完 scp 上去即可，不用重编不用重启。

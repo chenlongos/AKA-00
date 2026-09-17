@@ -41,6 +41,15 @@ export const arm = {
 
 
 // 摄像头
+export const display = {
+    status: () => fetch("/api/display/status").then(r => r.json()),
+    setEnabled: (enabled: boolean) => fetch("/api/display/enabled", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({enabled}),
+    }).then(r => r.json()),
+};
+
 export const camera = {
     status: () => fetch("/api/camera/status").then(r => r.json()),
     open: () => fetch("/api/camera/open", {method: "POST"}).then(r => r.json()),
@@ -73,7 +82,7 @@ export const demo = {
     }).then(r => r.json()),
 };
 
-export const api = { system, motor, arm, camera, demo };
+export const api = { system, motor, arm, camera, demo, display };
 
 export type MotorStatus = { left: number; right: number };
 

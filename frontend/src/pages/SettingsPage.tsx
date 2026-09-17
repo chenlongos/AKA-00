@@ -3,6 +3,7 @@ import {useNavigate} from "react-router-dom";
 import Page from "../components/Page";
 import Card from "../components/Card";
 import {S} from "../styles";
+import {api} from "../api";
 import {useViewportScale} from "../hooks/useViewportScale";
 
 const SettingsPage = () => {
@@ -16,6 +17,24 @@ const SettingsPage = () => {
             .then(d => setDevInfo({ip: d.ip || "未知", mac: d.mac || "未知"}))
             .catch(() => setDevInfo({ip: "获取失败", mac: "获取失败"}));
     }, []);
+
+    // 屏幕显示开关：全屏写屏很吃那颗单核 CPU（实测 /api/detect 从 120ms 涨到 340ms），
+    // 想让它跑得快就关掉；只是运行时开关，重启后回到 config.toml 的值。
+    const [screenOn, setScreenOn] = useState<boolean | null>(null);
+    const [screenBusy, setScreenBusy] = useState(false);
+
+    useEffect(() => {
+        api.display.status().then(d => setScreenOn(!!d.enabled)).catch(() => setScreenOn(null));
+    }, []);
+
+    const toggleScreen = () => {
+        if (screenBusy || screenOn === null) return;
+        setScreenBusy(true);
+        api.display.setEnabled(!screenOn)
+            .then(d => { if (typeof d.enabled === "boolean") setScreenOn(d.enabled); })
+            .catch(() => {})
+            .finally(() => setScreenBusy(false));
+    };
 
     const items = [
         {icon: "📶", title: "WiFi 配置", desc: "扫描并连接无线网络", path: "/wifi"},
@@ -48,6 +67,38 @@ const SettingsPage = () => {
                         </div>
                     </Card>
                 ))}
+
+                {/* 屏幕显示开关 */}
+                <Card marginBottom={10}>
+                    <div style={{display: "flex", alignItems: "center", gap: scalePx(12), padding: `${scalePx(4)} 0`}}>
+                        <span style={{fontSize: scalePx(24)}}>🖥️</span>
+                        <div style={{flex: 1}}>
+                            <div style={{fontSize: scalePx(15), fontWeight: 600, color: "var(--color-text)"}}>
+                                屏幕显示
+                            </div>
+                            <div style={{...S.muted, marginTop: 2}}>
+                                关掉可让检测/追物更快（写屏会占用单核 CPU）
+                            </div>
+                        </div>
+                        <div
+                            onClick={toggleScreen}
+                            style={{
+                                width: scalePx(44), height: scalePx(24), borderRadius: scalePx(12),
+                                background: screenOn ? "var(--color-success)" : "var(--color-bg-elevated)",
+                                cursor: (screenBusy || screenOn === null) ? "wait" : "pointer",
+                                opacity: (screenBusy || screenOn === null) ? 0.6 : 1,
+                                position: "relative", transition: "background 0.2s, opacity 0.15s", flexShrink: 0,
+                            }}
+                        >
+                            <div style={{
+                                position: "absolute", top: "50%", transform: "translateY(-50%)",
+                                left: screenOn ? scalePx(24) : scalePx(3),
+                                width: scalePx(18), height: scalePx(18), borderRadius: "50%", background: "white",
+                                transition: "left 0.2s ease", boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                            }}/>
+                        </div>
+                    </div>
+                </Card>
 
                 {/* 设备信息 */}
                 <Card marginBottom={10}>
