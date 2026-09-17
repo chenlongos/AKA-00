@@ -1331,8 +1331,25 @@ void register_routes(Router& router, AppContext& ctx) {
             std::string status = csrc::exec_output(
                 "wpa_cli -p /var/run/wpa_supplicant -i wlan1 status 2>/dev/null");
             if (status.find("wpa_state=COMPLETED") != std::string::npos) {
-                system("udhcpc -i wlan1 -n -q -T 3 >/dev/null 2>&1");
-                std::string ip = csrc::iface_ip("wlan1");
+                // **不要在这里自己起 DHCP 客户端**。这台板子的 dhcpcd 本来就在管 wlan1：
+                // 手动 `ip link set wlan1 up` + wpa_supplicant 时只有一个 IP，正是因为
+                // 只有 dhcpcd 在配。capp 再起一个 udhcpc → 两个客户端各要一个地址，
+                // 接口上就挂两个 IP（板上实测：dhcpcd 的 .64 + udhcpc 的 .2），
+                // 界面显示哪个都不对、用户也不知道哪个能用。
+                // 所以这里只等 dhcpcd 关联后自己来配（和手动路径完全一致）。
+                std::string ip;
+                for (int i = 0; i < 20; i++) {          // 最多等 6s
+                    ip = csrc::iface_ip("wlan1");
+                    if (!ip.empty()) break;
+                    usleep(300000);
+                }
+                if (ip.empty()) {
+                    // 兜底：系统没在跑 dhcpcd（或被配置排除）时，自己拿一次
+                    system("udhcpc -i wlan1 -n -q -T 3 >/dev/null 2>&1");
+                    ip = csrc::iface_ip("wlan1");
+                }
+                // 兜底路径可能留下旧地址（udhcpc 只 add 不 del），清一下只留最新的
+                ip = csrc::iface_keep_latest_ip("wlan1");
                 ok = true;
                 msg = ip.empty() ? "获取中..." : ip;
                 break;

@@ -119,6 +119,17 @@ static std::vector<std::string> iface_ip_list(const std::string& ifname) {
     return out;
 }
 
+std::string iface_keep_latest_ip(const std::string& ifname) {
+    auto addrs = iface_ip_list(ifname);
+    if (addrs.empty()) return "";
+    const std::string keep = addrs.back();   // udhcpc 新加的排在最后
+    for (size_t i = 0; i + 1 < addrs.size(); i++) {
+        if (addrs[i] == keep) continue;
+        exec_output("ip addr del " + addrs[i] + "/24 dev " + ifname + " 2>/dev/null");
+    }
+    return keep;
+}
+
 std::string detect_local_ip() {
     // 1. wlan1 的 DHCP dynamic 地址（STA 场景：DHCP 完成后的正确 IP，如 .195）
     std::string dyn = iface_dynamic_ip("wlan1");
