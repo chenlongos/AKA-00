@@ -5,7 +5,7 @@
 //   - 状态采集: StateCollector（csrc 单例）
 //   - 控制服务: 定时停线程 / 夹爪锁
 //   - demo: 就是"拿某个模型跑一遍 Lua 流程"（薄封装，见 routes.cpp）
-//   - 脚本: Lua 流程宿主（scripts/*.lua）
+//   - 脚本: Lua 流程宿主（$AKA_HOME/demo/*.lua）
 //   - ota: 升级任务
 //   - 云端上报: 命令日志
 //
@@ -18,6 +18,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <pthread.h>   // script_tid 是 pthread_t：自己 include，别指望 <thread> 间接带进来
 #include <string>
 #include <thread>
 #include <vector>
@@ -48,10 +49,15 @@ struct AppContext {
     // 单帧推理（GET /api/detect）：懒加载的模型 + 一把锁。
     // 同步跑（每请求一次推理），锁把"换模型 + 推理"整段罩住 —— TPU 是单实例、
     // YoloDetector 非线程安全；脚本并发由 script_running 串行（同一时刻只有一个流程）。
-    // Lua 流程脚本（scripts/*.lua）—— 状态由工作线程写、接口读，都用 script_mu 保护；
+    // Lua 流程脚本（demo/*.lua）—— 状态由工作线程写、接口读，都用 script_mu 保护；
     // script_abort 是给"立即停"用的（原子，免得停止请求要等锁）。
     std::mutex script_mu;
-    std::thread* script_thread = nullptr;
+    /// 脚本工作线程（pthread 而不是 std::thread：**要显式指定栈大小**）。
+    /// musl 的 std::thread 默认栈只有 128KB（glibc 是 8MB），而脚本线程的调用链是
+    /// Lua VM → 原语 → 取帧 → libjpeg 解码（jpeg_decompress_struct 本身就十几 KB），
+    /// 栈溢出会踩到相邻内存 —— 实测表现为在 jpeg_idct_* 里收到 badaddr≈0x46 的段错误。
+    pthread_t script_tid{};
+    bool script_tid_valid = false;
     std::atomic<bool> script_abort{false};
     bool script_running = false;
     std::string script_state = "idle";   // idle|running|done|failed|aborted
@@ -179,20 +185,39 @@ bool build_stream_jpeg_rgb(AppContext& ctx, const csrc::Camera::RgbFrame& rgb,
 /// 必须校验 —— 名字会拼进文件路径，否则 `?model=../../etc/passwd` 就是任意文件读取。
 bool valid_model_name(const std::string& name);
 
-/// 把上传上来的模型内容写进 `$AKA_HOME/models/<name>.cvimodel`（**同名覆盖**）。
+// ── demo 资源路径（全部在 `$AKA_HOME/demo/` 下，见 cpp/README.md 的部署布局）──
+//
+//   demo/<名字>.lua          流程脚本（平铺，不分子目录；一个 demo 一个，名字与模型对齐）
+//   demo/models/*.cvimodel   模型库（= demo 列表来源）
+//   demo/configs/<名字>.json 运行参数（一个模型一个文件，只在保存过之后才存在）
+//
+// 路径**只有这两个函数和 demo_config_path() 三处在拼**——以前 models 被拼了三遍、
+// 三套口径，改目录时漏一处就是"模型传上去了但检测不到"。
+
+/// `$AKA_HOME/demo/models`
+std::string model_dir(AppContext& ctx);
+/// `$AKA_HOME/demo/models/<name>.cvimodel`
+std::string model_path(AppContext& ctx, const std::string& name);
+
+/// `$AKA_HOME/demo/<name>.lua` —— 一个 demo 一个脚本，名字与模型/参数对齐
+std::string demo_script_path(AppContext& ctx, const std::string& name);
+/// 这份脚本在不在（demo 列表用它标 script 字段，跑之前也用它先挡一道）
+bool script_file_exists(AppContext& ctx, const std::string& name);
+
+/// 把上传上来的模型内容写进 `model_path()`（**同名覆盖**）。
 /// 给"平台推模型"用：content 就是请求体。落地前校验（`CviModel` 魔数 + 大小上限）
 /// 并原子换入，坏包不会覆盖掉正在用的模型。返回 `{ok, name, path, size}` 或 `{ok:false, error}`。
 csrc::Json save_model_upload(AppContext& ctx, const std::string& name, const std::string& content);
 
 
-// ── Lua 流程脚本（scripts/*.lua，实现在 capp/script.cpp）──
+// ── Lua 流程脚本（$AKA_HOME/demo/*.lua，实现在 capp/script.cpp）──
 //
 // 把"看→对准→靠近→抓"这类**要反复调参的流程**从 C++ 搬到脚本里：改一行存盘重跑，
 // 不用交叉编译 + 部署 + 重启。脚本只拿得到有上限的原语；超时/限速/被抢占地接管/
 // 底盘掉线这些**安全兜底全在宿主**（见 script.cpp 的注释与文档）。
 
 /// 跑一个脚本（异步；同一时刻只允许一个）。params 会以 Lua table 的形式给脚本读。
-/// 脚本从 `$AKA_HOME/scripts/<name>.lua` 读；名字只允许 [A-Za-z0-9_.-]。
+/// 脚本从 `$AKA_HOME/demo/<name>.lua` 读；名字只允许 [A-Za-z0-9_.-]。
 /// max_seconds 是宿主强制的总时长上限（clamp 到 5..300），到点宿主会打断脚本并停车。
 csrc::Json script_run(AppContext& ctx, const std::string& name, const csrc::Json& params,
                       int max_seconds);

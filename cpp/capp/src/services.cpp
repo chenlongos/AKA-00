@@ -18,6 +18,7 @@
 #include <sstream>
 #include <sys/stat.h>
 #include <thread>
+#include <unistd.h>
 
 #include "csrc/http_client.hpp"
 #include "csrc/log.hpp"
@@ -584,12 +585,31 @@ bool install_model_file(const std::string& tmp_path, const std::string& final_pa
 
 }  // namespace
 
+std::string model_dir(AppContext& ctx) { return ctx.app_dir + "/demo/models"; }
+
+std::string model_path(AppContext& ctx, const std::string& name) {
+    return model_dir(ctx) + "/" + name + ".cvimodel";
+}
+
+std::string demo_script_path(AppContext& ctx, const std::string& name) {
+    return ctx.app_dir + "/demo/" + name + ".lua";
+}
+
+bool script_file_exists(AppContext& ctx, const std::string& name) {
+    return access(demo_script_path(ctx, name).c_str(), F_OK) == 0;
+}
+
 csrc::Json save_model_upload(AppContext& ctx, const std::string& name, const std::string& content) {
     csrc::Json j;
-    const std::string dir = ctx.app_dir + "/models";
-    const std::string final_path = dir + "/" + name + ".cvimodel";
+    const std::string final_path = model_path(ctx, name);
     const std::string tmp_path = final_path + ".part";   // 先落 .part 再原子换入
-    mkdir(dir.c_str(), 0755);
+    // 目录得自己建，而且**要递归**：`demo/` 一级在 OTA 之后一定在（包里带着），
+    // 但裸 mkdir() 只建一层、返回值还容易被忽略，最后表现成"临时文件写不开"，白查。
+    if (!csrc::ensure_dir(model_dir(ctx))) {
+        j["ok"] = false;
+        j["error"] = "建模型目录失败：" + model_dir(ctx);
+        return j;
+    }
 
     {
         std::ofstream f(tmp_path, std::ios::binary | std::ios::trunc);
@@ -647,8 +667,8 @@ bool detect_boxes(AppContext& ctx, const std::string& model_name, const csrc::De
     std::lock_guard<std::mutex> lk(ctx.detect_mu);
 
     if (!ctx.detector) ctx.detector.reset(new csrc::YoloDetector());
-    // 模型只有一个来源：$AKA_HOME/models/<名字>.cvimodel
-    const std::string path = ctx.app_dir + "/models/" + model_name + ".cvimodel";
+    // 模型只有一个来源：model_path()（= $AKA_HOME/demo/models/<名字>.cvimodel）
+    const std::string path = model_path(ctx, model_name);
     // 文件被换过（重新下载覆盖）也要重载 —— 一次 stat 的开销，换"覆盖即生效"。
     struct stat st {};
     const bool have = (stat(path.c_str(), &st) == 0);

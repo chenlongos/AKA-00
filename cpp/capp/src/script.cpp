@@ -3,7 +3,7 @@
 // ── 为什么有这一层 ──
 // "看 → 对准 → 靠近 → 抓"这类**流程**天生要反复调参（阈值、脉冲时长、速度…）。
 // 写在 C++ 里，改一个数就要交叉编译 + 部署 + 重启，一轮几分钟；写成脚本就是改一行
-// 存盘重跑。所以：**原语留在 C++（快、稳），流程搬进 scripts/*.lua（好改）**。
+// 存盘重跑。所以：**原语留在 C++（快、稳），流程搬进 demo/*.lua（好改）**。
 //
 // ── 红线：安全兜底不放进脚本 ──
 // 脚本只能拿到「有上限的原语」，下面这些由宿主强制，脚本绕不过去（连 pcall 都不给，
@@ -24,6 +24,7 @@
 #include <chrono>
 #include <cstring>
 #include <fstream>
+#include <pthread.h>
 #include <signal.h>
 #include <sstream>
 #include <thread>
@@ -43,7 +44,11 @@ namespace capp {
 namespace {
 
 // 上限类常量（脚本改不了）
-constexpr int kScriptMaxSpeed = 35;                   // 速度硬上限（%）
+// 速度硬上限（%）：脚本/ demo 配置给再大的数，到这里一律砍成 ±这个值。
+// 原来定的 35 实测不够用（demo 需要的直线速度在 40~70 之间，填 40/60/100 在车上
+// 一模一样 —— 全被砍成 35，看起来就像"配置的速度没生效"），所以放宽到 70。
+// 留着它是因为这是唯一拦在"脚本乱发速度"和电机之间的东西，别顺手删。
+constexpr int kScriptMaxSpeed = 70;
 constexpr int kScriptMinSeconds = 5;
 constexpr int kScriptMaxSeconds = 300;
 constexpr size_t kScriptMemBytes = 4 * 1024 * 1024;   // 脚本 VM 内存预算
@@ -384,7 +389,7 @@ void json_to_lua(lua_State* L, csrc::Json& j) {
     }
     // 取值一律用 as_* 系列：gets(k)/getb(k) 是"按键查值"，对叶子节点会返回默认值
     // （踩过：params.model 被转成了空字符串，脚本拿着空模型名去 detect，报"注册模型失败
-    //   /root/AKA-00/models/.cvimodel"）。
+    //   /root/AKA-00/demo/models/.cvimodel"）。
     if (j.is_bool()) { lua_pushboolean(L, j.as_int(0) != 0); return; }
     if (j.is_number()) { lua_pushnumber(L, (lua_Number)j.as_double(0)); return; }
     if (j.is_string()) { lua_pushstring(L, j.as_string().c_str()); return; }
@@ -452,6 +457,23 @@ void classify(const std::string& reason, const std::string& ret, std::string& st
     message = reason;
 }
 
+constexpr size_t kScriptStackBytes = 1024 * 1024;   // 1MB（musl 默认才 128KB，见 context.hpp）
+
+struct ScriptThreadArg {
+    AppContext* ctx;
+    std::string name;
+    csrc::Json params;
+    long long budget_ms;
+};
+
+void script_worker(AppContext& ctx, std::string name, csrc::Json params, long long budget_ms);
+
+void* script_thread_entry(void* p) {
+    std::unique_ptr<ScriptThreadArg> a((ScriptThreadArg*)p);
+    script_worker(*a->ctx, a->name, a->params, a->budget_ms);
+    return nullptr;
+}
+
 void script_worker(AppContext& ctx, std::string name, csrc::Json params, long long budget_ms) {
     RunCtx r;
     r.ctx = &ctx;
@@ -463,25 +485,22 @@ void script_worker(AppContext& ctx, std::string name, csrc::Json params, long lo
         if (r.moving) ctx.motor_pair->brake();   // 脚本自己忘了停 → 宿主兜底
         std::string state, message;
         classify(reason, ret, state, message);
+        // 只落状态，**不碰线程对象**：它是"属于下一次运行的资源"，由 script_run 在锁内
+        // 统一回收。以前这里 detach+delete 自己，而 script_run 的 `new std::thread`
+        // 赋值又在锁外 —— 两条路可以交错，造成 double free / use-after-free（实测表现是
+        // 内存被踩坏后，在完全无关的地方（JPEG 解码的 IDCT）段错误）。
         std::lock_guard<std::mutex> lk(ctx.script_mu);
         ctx.script_state = state;
         ctx.script_message = message;
         ctx.script_running = false;
-        // 线程收尾：先 detach 再 delete（joinable 的 std::thread 析构会 terminate）。
-        // 全程持 script_mu，避免与 script_run 交错（那边看到 running=false 才会新建）。
-        if (ctx.script_thread) {
-            ctx.script_thread->detach();
-            delete ctx.script_thread;
-            ctx.script_thread = nullptr;
-        }
     };
     auto fail = [&](const std::string& why) {
         CAM_WARN("[script] %s 中止：%s", name.c_str(), why.c_str());
         finish(why, "");
     };
 
-    // 读脚本
-    const std::string path = ctx.app_dir + "/scripts/" + name + ".lua";
+    // 读脚本（路径与 demo 列表/接口用的是同一个函数，别再手拼一遍）
+    const std::string path = demo_script_path(ctx, name);
     std::string src;
     {
         std::ifstream f(path, std::ios::binary);
@@ -557,8 +576,31 @@ csrc::Json script_run(AppContext& ctx, const std::string& name, const csrc::Json
         ctx.script_notes.clear();
     }
     const long long budget_ms = (long long)max_seconds * 1000;
-    ctx.script_thread = new std::thread(
-        [&ctx, name, params, budget_ms] { script_worker(ctx, name, params, budget_ms); });
+    {
+        std::lock_guard<std::mutex> lk(ctx.script_mu);
+        // 回收上一次的线程（pthread_join：此刻它一定已跑完，join 立即返回并释放资源）
+        if (ctx.script_tid_valid) {
+            pthread_join(ctx.script_tid, nullptr);
+            ctx.script_tid_valid = false;
+        }
+        // 创建也放在锁内：否则工作线程可能抢在记账之前跑完，被下一次运行重复回收。
+        pthread_attr_t attr;
+        pthread_attr_init(&attr);
+        pthread_attr_setstacksize(&attr, kScriptStackBytes);
+        auto* arg = new ScriptThreadArg{&ctx, name, params, budget_ms};
+        const int rc = pthread_create(&ctx.script_tid, &attr, script_thread_entry, arg);
+        pthread_attr_destroy(&attr);
+        if (rc != 0) {
+            delete arg;
+            ctx.script_running = false;
+            ctx.script_state = "failed";
+            ctx.script_message = "创建脚本线程失败（rc=" + std::to_string(rc) + "）";
+            j["ok"] = false;
+            j["error"] = ctx.script_message;
+            return j;
+        }
+        ctx.script_tid_valid = true;
+    }
 
     j["ok"] = true;
     j["state"] = "running";

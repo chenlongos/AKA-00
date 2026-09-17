@@ -39,6 +39,11 @@ int disk_usage();
 /// 运行时长秒（/proc/uptime）
 int uptime_secs();
 
+/// 递归建目录（`mkdir -p` 语义）：逐级建，已存在不算失败。
+/// 用它的地方都是"写文件前先确保目录在"——裸 `mkdir()` 只建一层，
+/// 且返回值容易被忽略，最后表现成"文件写不开"，白查半天。
+bool ensure_dir(const std::string& path);
+
 /// 读文件内容（trim 后），失败返回空串
 std::string read_sys_file(const std::string& path);
 

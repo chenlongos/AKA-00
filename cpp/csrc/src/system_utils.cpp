@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -227,6 +228,17 @@ int uptime_secs() {
     std::string s = read_sys_file("/proc/uptime");
     if (s.empty()) return 0;
     return (int)strtod(s.c_str(), nullptr);
+}
+
+bool ensure_dir(const std::string& path) {
+    if (path.empty()) return false;
+    // 逐级建："a/b/c" → "a"、"a/b"、"a/b/c"。EEXIST 不算失败（并发/重复调用都可能撞上）。
+    for (size_t i = 1; i <= path.size(); i++) {
+        if (i != path.size() && path[i] != '/') continue;
+        const std::string part = path.substr(0, i);
+        if (mkdir(part.c_str(), 0755) != 0 && errno != EEXIST) return false;
+    }
+    return true;
 }
 
 }  // namespace csrc
