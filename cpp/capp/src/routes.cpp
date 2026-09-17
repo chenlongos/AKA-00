@@ -41,11 +41,6 @@ using HttpResult = csrc::HttpResult;
 
 // ═══════════════════════ 小工具 ═══════════════════════
 
-std::string demo_base_dir(AppContext& ctx) {
-    if (const char* env = getenv("DEMO_BASE_DIR")) return env;
-    return ctx.app_dir + "/demo";
-}
-
 std::string speed_config_path(AppContext& ctx) {
     return ctx.app_dir + "/speed_config.json";
 }
@@ -241,43 +236,30 @@ bool extract_multipart_file(const std::string& body, const std::string& content_
 }
 
 // ── demo: 扫描含 init.sh 的子目录 ──
+// 板上"能跑的 demo" = models/ 里有哪个模型（demo 名就是模型名，跑同一条 chase 流程）。
+// 原来这里扫的是 demo/ 目录（预编译二进制 + init.sh），那套已被 Lua 脚本取代。
 struct DemoInfo {
     std::string name;
     std::string path;
 };
+
 std::vector<DemoInfo> list_demos(AppContext& ctx) {
     std::vector<DemoInfo> out;
-    std::string base = demo_base_dir(ctx);
-    // 简化：用 exec_output("ls -1 ...") 不可靠，改 opendir
-    DIR* d = opendir(base.c_str());
+    const std::string dir = ctx.app_dir + "/models";
+    const std::string suffix = ".cvimodel";
+    DIR* d = opendir(dir.c_str());
     if (!d) return out;
-    struct dirent* ent;
-    while ((ent = readdir(d)) != nullptr) {
-        if (ent->d_name[0] == '.') continue;
-        std::string dir = base + "/" + ent->d_name;
-        struct stat st;
-        if (stat(dir.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) continue;
-        std::string init = dir + "/init.sh";
-        struct stat st2;
-        if (stat(init.c_str(), &st2) == 0) {
-            out.push_back({ent->d_name, dir});
-        }
+    while (struct dirent* e = readdir(d)) {
+        std::string n = e->d_name;
+        if (n.size() <= suffix.size() ||
+            n.compare(n.size() - suffix.size(), suffix.size(), suffix) != 0)
+            continue;
+        out.push_back({n.substr(0, n.size() - suffix.size()), dir + "/" + n});
     }
     closedir(d);
-    std::sort(out.begin(), out.end(), [](const DemoInfo& a, const DemoInfo& b) {
-        return a.name < b.name;
-    });
+    std::sort(out.begin(), out.end(),
+              [](const DemoInfo& x, const DemoInfo& y) { return x.name < y.name; });
     return out;
-}
-
-std::string current_demo_name(AppContext& ctx) {
-    auto demos = list_demos(ctx);
-    return demos.empty() ? "" : demos[0].name;
-}
-
-// 进程是否存活
-bool pid_alive(pid_t pid) {
-    return kill(pid, 0) == 0;
 }
 
 // wpa_supplicant 自举（移植自 app/routes/wifi.py 的 ensure_wpa_env）
@@ -756,14 +738,45 @@ void register_routes(Router& router, AppContext& ctx) {
         resp.set_json(r, r.getb("ok") ? 200 : 400);
     });
 
-    // ── /api/demo ──
+    // ── 流程脚本（scripts/*.lua）──
+    // 把"看→对准→靠近→抓"这类要反复调参的流程写成脚本，改一行存盘重跑，不用重编部署。
+    // 安全兜底（限速/总超时/被人的指令取代/底盘掉线/内存与卡死）全在宿主里，脚本绕不过去。
+    router.add("POST", "/api/script/run", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
+        const Json payload = req.json();
+        if (!payload.is_object()) {
+            resp.set_error("json body is required", 400);
+            return;
+        }
+        const std::string name = payload.gets("script");
+        if (name.empty()) {
+            resp.set_error("script 必填（例：chase）", 400);
+            return;
+        }
+        const Json* params = payload.get("params");
+        const int max_seconds = (int)payload.geti("max_seconds", 30);
+        const Json r = script_run(ctx, name, params ? *params : Json(), max_seconds);
+        resp.set_json(r, r.getb("ok") ? 200 : 400);
+    });
+
+    router.add("GET", "/api/script/status", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
+        resp.set_json(script_status(ctx));
+    });
+
+    router.add("POST", "/api/script/stop", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
+        resp.set_json(script_stop(ctx));
+    });
+
+    // ── /api/demo ──（**薄封装**：demo 现在就是"拿某个模型跑一遍 Lua 抓取流程"）
+    // 路径与字段保持不变，前端 DemoPage 一行都不用改；行为则从预编译二进制变成了可改的脚本：
+    // 调追物就改 scripts/chase.lua，改完 scp 上去即可，不用重编不用重启。
     router.add("GET", "/api/demo/list", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
         Json demos;
         for (auto& d : list_demos(ctx)) {
             Json item;
             item["name"] = d.name;
             item["path"] = d.path;
-            item["kind"] = "binary";
+            item["kind"] = "model";     // 原来是 binary（预编译 demo），现在是"脚本 + 模型"
+            item["script"] = "chase";
             demos.push_back(item);
         }
         Json j;
@@ -773,201 +786,81 @@ void register_routes(Router& router, AppContext& ctx) {
 
     router.add("GET", "/api/demo/name", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
         Json j;
-        std::string name = current_demo_name(ctx);
-        j["name"] = name.empty() ? Json() : Json(name);
+        j["name"] = script_status(ctx).gets("script");
         resp.set_json(j);
     });
 
     router.add("POST", "/api/demo/init", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
-        Json payload = req.json();
-        std::string demo_name;
-        if (payload.is_object()) demo_name = payload.gets("name");
-        if (demo_name.empty()) demo_name = current_demo_name(ctx);
-        if (demo_name.empty()) {
-            resp.set_error("no demo found", 404);
+        const Json payload = req.json();
+        const std::string name = payload.is_object() ? payload.gets("name") : "";
+        if (name.empty()) {
+            resp.set_error("name is required", 400);
             return;
         }
-        std::string demo_dir = demo_base_dir(ctx) + "/" + demo_name;
-        std::string init_script = demo_dir + "/init.sh";
-        struct stat st;
-        if (stat(demo_dir.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) {
-            resp.set_error("demo '" + demo_name + "' not found", 404);
-            return;
-        }
-        if (stat(init_script.c_str(), &st) != 0) {
-            resp.set_error("init.sh not found in demo '" + demo_name + "'", 404);
-            return;
-        }
-        {
-            std::lock_guard<std::mutex> lk(ctx.demo_mu);
-            if (ctx.demo_pid > 0 && pid_alive(ctx.demo_pid)) {
-                Json j;
-                j["error"] = "demo is already running";
-                j["pid"] = csrc::Json((int64_t)ctx.demo_pid);
-                resp.set_json(j, 409);
-                return;
-            }
-            chmod(init_script.c_str(), 0755);
-            pid_t pid = fork();
-            if (pid == 0) {
-                // 子进程：新会话 + 切目录 + 执行 init.sh
-                setsid();
-                chdir(demo_dir.c_str());
-                int devnull = open("/dev/null", O_RDWR);
-                if (devnull >= 0) {
-                    dup2(devnull, 0);
-                    dup2(devnull, 1);
-                    dup2(devnull, 2);
-                    if (devnull > 2) close(devnull);
-                }
-                execl("/bin/sh", "sh", init_script.c_str(), (char*)nullptr);
-                _exit(127);
-            }
-            if (pid < 0) {
-                resp.set_error("fork failed", 500);
-                return;
-            }
-            ctx.demo_pid = pid;
-            ctx.demo_pgid = pid;
-            ctx.demo_name = demo_name;
+        // 跑同一条 chase 流程，模型就是 demo 名。target_size/speed 这里给默认值，
+        // 细调在 scripts/chase.lua 的判据常量里。
+        Json params;
+        params["model"] = name;
+        params["target_size"] = Json((int64_t)payload.geti("target_size", 300));
+        params["speed"] = Json((int64_t)payload.geti("speed", 25));
+        const Json r = script_run(ctx, "chase", params, (int)payload.geti("max_seconds", 60));
+
+        if (!r.getb("ok")) {
+            const Json st = script_status(ctx);
             Json j;
-            j["status"] = "started";
-            j["pid"] = csrc::Json((int64_t)pid);
-            j["pgid"] = csrc::Json((int64_t)pid);
-            j["name"] = demo_name;
-            resp.set_json(j);
-        }
-    });
-
-    router.add("POST", "/api/demo/stop", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
-        std::lock_guard<std::mutex> lk(ctx.demo_mu);
-        Json j;
-        if (ctx.demo_pid <= 0 || !pid_alive(ctx.demo_pid)) {
-            j["status"] = "already_stopped";
-            j["name"] = ctx.demo_name.empty() ? "unknown" : ctx.demo_name;
-            resp.set_json(j);
+            j["status"] = "already_running";
+            j["pid"] = Json((int64_t)getpid());
+            j["name"] = st.gets("script");
+            j["error"] = r.gets("error");
+            resp.set_json(j, 409);
             return;
         }
-        pid_t pid = ctx.demo_pid;
-        ctx.demo_pid = -1;
-        ctx.demo_pgid = -1;
-        std::string name = ctx.demo_name;
-        ctx.demo_name.clear();
-
-        kill(pid, SIGTERM);
-        // 最多等 3 秒，未响应升级 SIGKILL
-        for (int i = 0; i < 30 && pid_alive(pid); i++) {
-            usleep(100000);
-        }
-        if (pid_alive(pid)) kill(pid, SIGKILL);
-        int wstatus = 0;
-        waitpid(pid, &wstatus, 0);  // 回收子进程，防僵尸
-        j["status"] = "stopped";
-        j["pid"] = csrc::Json((int64_t)pid);
+        Json j;
+        j["status"] = "started";
+        j["name"] = name;
+        j["script"] = "chase";
+        j["pid"] = Json((int64_t)getpid());   // 兼容字段：跑 demo 的进程就是 capp 自己
+        j["pgid"] = Json((int64_t)getpid());
         resp.set_json(j);
     });
 
+    router.add("POST", "/api/demo/stop", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
+        const Json r = script_stop(ctx);
+        Json j;
+        j["status"] = r.gets("state") == "idle" ? "already_stopped" : "stopped";
+        j["name"] = script_status(ctx).gets("script");
+        resp.set_json(j);
+    });
+
+    // 模型的"下载"（前端 demo 页的按钮）：从云端 demo_server 拉进板上 models/。
+    // 与 /api/models/upload 是同一条流水线的两个方向（一个推、一个拉）。
     router.add("POST", "/api/demo/download_model_with_progress", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
-        Json payload = req.json();
+        const Json payload = req.json();
         if (!payload.is_object()) {
             resp.set_error("json body is required", 400);
             return;
         }
-        std::string model_name = payload.gets("model_name");
-        std::string demo_server = payload.gets("demo_server", ctx.config.demo_server_url);
-        if (model_name.empty()) {
+        const std::string name = payload.gets("model_name");
+        if (name.empty()) {
             resp.set_error("model_name is required", 400);
             return;
         }
-        std::string current_name = current_demo_name(ctx);
-        if (current_name.empty()) {
-            resp.set_error("no local demo found", 404);
+        if (!valid_model_name(name)) {
+            resp.set_error("model_name 非法（只允许字母数字与 _ - .）：" + name, 400);
             return;
         }
-        std::string base = demo_base_dir(ctx);
-        std::string old_dir = base + "/" + current_name;
-        std::string new_dir = base + "/" + model_name;
-        std::string file_path = (model_name == current_name ? old_dir : new_dir) + "/yolo_model.cvimodel";
-        std::string url = demo_server + "/api/models/" + model_name;
-
-        std::string task_id = current_name + "_to_" + model_name;
-        {
-            std::lock_guard<std::mutex> lk(ctx.dl_mu);
-            if (ctx.downloads.size() > 20) ctx.downloads.erase(ctx.downloads.begin());
-            Json t;
-            t["progress"] = csrc::Json((int64_t)0);
-            t["status"] = "downloading";
-            t["error"] = Json();
-            ctx.downloads[task_id] = t;
-        }
-
-        std::thread([&ctx, url, file_path, new_dir, old_dir, task_id] {
-            try {
-                // 目录重命名（新 demo 名称不同时）
-                if (new_dir != old_dir) {
-                    struct stat st;
-                    if (stat(new_dir.c_str(), &st) == 0) {
-                        std::string rm = "rm -rf \"" + new_dir + "\"";
-                        system(rm.c_str());
-                    }
-                    rename(old_dir.c_str(), new_dir.c_str());
-                }
-                csrc::HttpResult r = csrc::http_download(url, file_path,
-                    [&ctx, task_id](int pct) {
-                        std::lock_guard<std::mutex> lk(ctx.dl_mu);
-                        ctx.downloads[task_id]["progress"] = csrc::Json((int64_t)pct);
-                    }, 120);
-                std::lock_guard<std::mutex> lk(ctx.dl_mu);
-                if (r.ok) {
-                    ctx.downloads[task_id]["progress"] = csrc::Json((int64_t)100);
-                    ctx.downloads[task_id]["status"] = "done";
-                } else {
-                    ctx.downloads[task_id]["status"] = "error";
-                    ctx.downloads[task_id]["error"] = r.error;
-                }
-            } catch (...) {
-                std::lock_guard<std::mutex> lk(ctx.dl_mu);
-                ctx.downloads[task_id]["status"] = "error";
-                ctx.downloads[task_id]["error"] = "download exception";
-            }
-        }).detach();
-
+        const std::string server = payload.gets("demo_server", ctx.config.demo_server_url);
+        const Json r = start_model_pull(ctx, name, server + "/api/models/" + name);
         Json j;
         j["status"] = "started";
-        j["task_id"] = task_id;
-        j["new_name"] = model_name;
-        resp.set_json(j);
-    });
-
-    router.add("POST", "/api/demo/upload_model", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
-        std::string filename, content;
-        if (!extract_multipart_file(req.body, req.header("content-type"), filename, content)) {
-            resp.set_error("file is required", 400);
-            return;
-        }
-        std::string current_name = current_demo_name(ctx);
-        if (current_name.empty()) {
-            resp.set_error("no local demo found", 404);
-            return;
-        }
-        std::string file_path = demo_base_dir(ctx) + "/" + current_name + "/yolo_model.cvimodel";
-        std::ofstream f(file_path, std::ios::binary | std::ios::trunc);
-        if (!f) {
-            resp.set_error("cannot write file", 500);
-            return;
-        }
-        f.write(content.data(), (std::streamsize)content.size());
-        f.close();
-        Json j;
-        j["status"] = "uploaded";
-        j["size"] = csrc::Json((int64_t)content.size());
-        j["name"] = current_name;
+        j["task_id"] = r.gets("task_id");
+        j["new_name"] = name;
+        j["path"] = r.gets("path");
         resp.set_json(j);
     });
 
     router.add_param("GET", "/api/demo/download_progress/{task_id}", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
-        std::string task_id = req.header("__route_param");
-        Json j;
+        const std::string task_id = req.header("__route_param");
         {
             std::lock_guard<std::mutex> lk(ctx.dl_mu);
             auto it = ctx.downloads.find(task_id);
@@ -976,10 +869,12 @@ void register_routes(Router& router, AppContext& ctx) {
                 return;
             }
         }
+        Json j;
         j["progress"] = csrc::Json((int64_t)0);
         j["status"] = "not_found";
         resp.set_json(j);
     });
+
 
     // ── /api/ota ──
     router.add("GET", "/api/ota/version", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {

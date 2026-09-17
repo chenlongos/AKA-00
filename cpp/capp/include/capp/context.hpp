@@ -4,7 +4,8 @@
 //   - 硬件: MotorPair / Gripper / Camera（csrc）
 //   - 状态采集: StateCollector（csrc 单例）
 //   - 控制服务: 定时停线程 / 夹爪锁
-//   - demo: 运行进程 + 下载进度
+//   - demo: 就是"拿某个模型跑一遍 Lua 流程"（薄封装，见 routes.cpp）
+//   - 脚本: Lua 流程宿主（scripts/*.lua）
 //   - ota: 升级任务
 //   - 云端上报: 命令日志
 //
@@ -46,7 +47,21 @@ struct AppContext {
 
     // 单帧推理（GET /api/detect）：懒加载的模型 + 一把锁。
     // 同步跑（每请求一次推理），锁把"换模型 + 推理"整段罩住 —— TPU 是单实例、
-    // YoloDetector 非线程安全，而且别和 demo/*/tennis 同时跑（互相抢 TPU）。
+    // YoloDetector 非线程安全；脚本并发由 script_running 串行（同一时刻只有一个流程）。
+    // Lua 流程脚本（scripts/*.lua）—— 状态由工作线程写、接口读，都用 script_mu 保护；
+    // script_abort 是给"立即停"用的（原子，免得停止请求要等锁）。
+    std::mutex script_mu;
+    std::thread* script_thread = nullptr;
+    std::atomic<bool> script_abort{false};
+    bool script_running = false;
+    std::string script_state = "idle";   // idle|running|done|failed|aborted
+    std::string script_message;
+    std::string script_name;
+    long long script_elapsed_ms = 0;
+    long long script_calls = 0;                  // 原语调用计数（看脚本有没有在动）
+    std::string script_action;                   // 最近一次动作
+    std::vector<std::pair<std::string, std::string>> script_notes;   // 脚本 note() 发布的字段
+
     std::mutex detect_mu;
     std::string detect_model;                      // 当前已加载的模型名（空 = 没加载）
     // 加载时模型文件的 mtime / 大小。同名模型被重新下载覆盖后，下一个请求就换新的
@@ -68,12 +83,6 @@ struct AppContext {
     /// "自己发起的运动是否已被后续指令取代"（被取代则不再自动停车）
     int motion_seq = 0;
     std::mutex arm_mu;   // grab/release 串行
-
-    // demo 状态
-    std::mutex demo_mu;
-    pid_t demo_pid = -1;
-    int demo_pgid = -1;
-    std::string demo_name;
 
     // demo 模型下载进度: task_id → Json{progress, status, error}
     std::mutex dl_mu;
@@ -128,6 +137,27 @@ csrc::Json reinitialize_motor_pair(AppContext& ctx);
 /// 底盘连接状态对象（backend/enabled/connected/state/attempts/error）
 csrc::Json motor_status_json(AppContext& ctx);
 
+// ── 底盘/机械臂的底层原语（服务层内部用；脚本宿主 capp/script.cpp 也复用）──
+
+/// 取一帧跑一次推理 → 框列表（原图像素坐标、已 NMS）。`/api/detect` 与脚本原语共用。
+bool detect_boxes(AppContext& ctx, const std::string& model_name, const csrc::DecodeOptions& opt,
+                  std::vector<csrc::Detection>& out, int& frame_w, std::string& err);
+
+/// 取消挂起的"定时停"线程
+void cancel_pending_stop(AppContext& ctx);
+/// 推进控制指令代际号（每条新指令都要推；同步等待方据此判断自己是否已被取代）
+int64_t bump_motion_seq(AppContext& ctx);
+/// 读当前代际号
+int64_t motion_seq_now(AppContext& ctx);
+/// 跑 duration 秒后自动停车（同步阻塞）。0=正常 1=被后续指令取代 2=应用退出
+int wait_timed_done(AppContext& ctx, int64_t seq, double duration_sec);
+/// 底盘动作：up/down/left/right/stop（速度百分比，调用方负责 clamp）
+bool apply_base_action(AppContext& ctx, const std::string& action, int speed);
+/// 机械臂动作：grab/release（内部持 arm_mu，异步执行）
+bool apply_arm_action(AppContext& ctx, const std::string& action);
+/// 底盘连接状态 JSON（含 connected 字段）
+csrc::Json motor_status_json(AppContext& ctx);
+
 // ── 摄像头服务（对应 app/services/camera_service.py）──
 
 /// 确保摄像头已打开
@@ -153,6 +183,27 @@ bool valid_model_name(const std::string& name);
 /// 给"平台推模型"用：content 就是请求体。落地前校验（`CviModel` 魔数 + 大小上限）
 /// 并原子换入，坏包不会覆盖掉正在用的模型。返回 `{ok, name, path, size}` 或 `{ok:false, error}`。
 csrc::Json save_model_upload(AppContext& ctx, const std::string& name, const std::string& content);
+
+/// 后台把模型**拉取**到 `$AKA_HOME/models/<name>.cvimodel`（同名覆盖；先 .part 再原子换入）。
+/// url 由调用方给全（前端 demo 页的"下载"就是 云端 demo_server + /api/models/<name>）。
+/// 进度查 `GET /api/demo/download_progress/<task_id>`。
+csrc::Json start_model_pull(AppContext& ctx, const std::string& name, const std::string& url);
+
+// ── Lua 流程脚本（scripts/*.lua，实现在 capp/script.cpp）──
+//
+// 把"看→对准→靠近→抓"这类**要反复调参的流程**从 C++ 搬到脚本里：改一行存盘重跑，
+// 不用交叉编译 + 部署 + 重启。脚本只拿得到有上限的原语；超时/限速/被抢占地接管/
+// 底盘掉线这些**安全兜底全在宿主**（见 script.cpp 的注释与文档）。
+
+/// 跑一个脚本（异步；同一时刻只允许一个）。params 会以 Lua table 的形式给脚本读。
+/// 脚本从 `$AKA_HOME/scripts/<name>.lua` 读；名字只允许 [A-Za-z0-9_.-]。
+/// max_seconds 是宿主强制的总时长上限（clamp 到 5..300），到点宿主会打断脚本并停车。
+csrc::Json script_run(AppContext& ctx, const std::string& name, const csrc::Json& params,
+                      int max_seconds);
+/// 停止当前脚本：置中止标志并立刻刹车（不等脚本配合）。
+csrc::Json script_stop(AppContext& ctx);
+/// 当前状态：state / script / message / elapsed_ms / calls / action / notes
+csrc::Json script_status(AppContext& ctx);
 
 /// 取当前摄像头帧跑一次推理。
 /// 成功：{"ok":true,"count":N,"boxes":[{"x1","y1","x2","y2"}...]}（原图像素坐标）

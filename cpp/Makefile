@@ -32,6 +32,7 @@ CPP      := $(CURDIR)
 ROOT     := $(CPP)/..
 JPEG     := $(CPP)/third_party/jpeg/lib/libjpeg.a
 MBEDTLS  := $(CPP)/third_party/mbedtls/lib/libmbedtls.a
+LUA      := $(CPP)/third_party/lua/lib/liblua.a
 
 # 带屏版
 CSRC_LIB     := $(CPP)/csrc/build-cross/libcsrc.a
@@ -45,7 +46,7 @@ CAPP_BIN_NS  := $(CPP)/capp/bin/aka-capp-noscreen
 DIST_NS      := $(CPP)/dist-noscreen/AKA-00
 OBJDIR_NS    := build-cross-noscreen
 
-.PHONY: all screen noscreen libjpeg mbedtls csrc capp tools package ota \
+.PHONY: all screen noscreen libjpeg mbedtls lua csrc capp tools package ota \
         csrc-noscreen capp-noscreen tools-noscreen package-noscreen demos clean FORCE
 
 # 默认：只产出两样东西 —— dist/AKA-00/（部署目录）与 dist/aka-00-server（自解压安装器）
@@ -57,6 +58,7 @@ noscreen: package-noscreen
 
 libjpeg: $(JPEG)
 mbedtls: $(MBEDTLS)
+lua: $(LUA)
 
 csrc: $(CSRC_LIB)
 capp: $(CAPP_BIN)
@@ -91,6 +93,10 @@ $(JPEG):
 $(MBEDTLS):
 	$(ORB_RUN) "cd $(CPP)/scripts && ./build-mbedtls.sh"
 
+# Lua：流程脚本宿主（scripts/*.lua）。纯 C、无依赖，编成静态库链进 capp。
+$(LUA):
+	$(ORB_RUN) "cd $(CPP)/scripts && ./build-lua.sh"
+
 # FORCE 同 capp：csrc 源/头文件改动时保证重编（内部增量，秒级）
 $(CSRC_LIB): $(JPEG) FORCE
 	$(ORB_RUN) "cd $(CPP)/csrc && make -f Makefile.cross WITH_SCREEN=1"
@@ -101,10 +107,10 @@ $(CSRC_LIB_NS): $(JPEG) FORCE
 # FORCE: bin/aka-capp* 可能被本机 make（host 版）覆盖成非 RISC-V 二进制，
 # make 只看 mtime 会误判为最新。每次都跑交叉编译（内部增量，秒级），
 # 确保部署产物永远是 riscv64 静态版。
-$(CAPP_BIN): $(CSRC_LIB) $(MBEDTLS) FORCE
+$(CAPP_BIN): $(CSRC_LIB) $(MBEDTLS) $(LUA) FORCE
 	$(ORB_RUN) "cd $(CPP)/capp && make -f Makefile.cross WITH_SCREEN=1"
 
-$(CAPP_BIN_NS): $(CSRC_LIB_NS) $(MBEDTLS) FORCE
+$(CAPP_BIN_NS): $(CSRC_LIB_NS) $(MBEDTLS) $(LUA) FORCE
 	$(ORB_RUN) "cd $(CPP)/capp && make -f Makefile.cross WITH_SCREEN=0"
 
 # ── 打包宏：$(1)=带屏标志(1/0) $(2)=capp 二进制 $(3)=部署目录 $(4)=工具构建目录
@@ -112,7 +118,7 @@ $(CAPP_BIN_NS): $(CSRC_LIB_NS) $(MBEDTLS) FORCE
 define PACKAGE_RECIPE
 	@set -e; \
 	DIST="$(3)"; \
-	rm -rf "$$DIST"; mkdir -p "$$DIST/demo"; \
+	rm -rf "$$DIST"; mkdir -p "$$DIST"; \
 	echo "── 组装部署目录 → $$DIST （$(if $(filter 1,$(1)),带屏,不带屏) 版本）──"; \
 	cp "$(2)" "$$DIST/$(5)"; chmod 755 "$$DIST/$(5)"; \
 	if [ -f "$(ROOT)/static/index.html" ]; then cp -r "$(ROOT)/static" "$$DIST/static"; fi; \
@@ -139,13 +145,14 @@ define PACKAGE_RECIPE
 	    echo "  ! models/ 里没有 .cvimodel —— 启动会报找不到模型；"; \
 	    echo "    把模型放进 $(ROOT)/models/ 再打包，或到板上 scp 进 /root/AKA-00/models/"; \
 	fi; \
-	if [ -d "$(ROOT)/demo" ]; then \
-	    for d in "$(ROOT)"/demo/*/; do [ -f "$$d/init.sh" ] && cp -r "$${d%/}" "$$DIST/demo/"; done; \
-	fi; \
-	if [ -d "$(ROOT)/libs" ] && [ -n "$$(ls "$(ROOT)"/libs/*.so* 2>/dev/null)" ]; then \
-	    mkdir -p "$$DIST/libs"; \
-	    cp "$(ROOT)"/libs/*.so* "$$DIST/libs/"; \
-	    echo "  ✓ libs/ 已打包（demo 运行时依赖）"; \
+	echo ""; \
+	echo "── 流程脚本（scripts/*.lua 整目录照搬）──"; \
+	mkdir -p "$$DIST/scripts"; \
+	if [ -d "$(ROOT)/scripts" ]; then cp -r "$(ROOT)/scripts/." "$$DIST/scripts/"; fi; \
+	nlua=$$(ls "$$DIST/scripts"/*.lua 2>/dev/null | wc -l | tr -d ' '); \
+	echo "  ✓ scripts/：$$nlua 个 .lua（GET /api/script/run 跑的就是它们）"; \
+	if [ "$$nlua" = "0" ]; then \
+	    echo "  ! scripts/ 里没有 .lua —— /api/script/run 会报『脚本打不开』"; \
 	fi; \
 	cp "$(CPP)/capp/scripts/init.sh" "$$DIST/init.sh"; \
 	cp "$(CPP)/capp/scripts/stop.sh" "$$DIST/stop.sh"; \

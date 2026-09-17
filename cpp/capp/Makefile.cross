@@ -43,13 +43,15 @@ CXX      := /home/junbo_dai/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-
 CSRC     := ../csrc
 JPEG_DIR ?= ../third_party/jpeg
 MBEDTLS_DIR ?= ../third_party/mbedtls
+LUA_DIR  ?= ../third_party/lua
 TARGET   := bin/aka-capp$(SCREEN_SUFFIX)
 CSRC_LIB := $(CSRC)/build-cross$(SCREEN_SUFFIX)/libcsrc.a
 
 CXXFLAGS := -std=c++17 -O3 -Wall -Wextra -mcpu=c906fdv -MMD -MP -mabi=lp64d \
             $(SCREEN_DEF) \
-            -Iinclude -I$(CSRC)/include -I$(JPEG_DIR)/include -I$(MBEDTLS_DIR)/include
-LDFLAGS  := -static -L$(JPEG_DIR)/lib -L$(MBEDTLS_DIR)/lib $(TPU_LDFLAGS)
+            -Iinclude -I$(CSRC)/include -I$(JPEG_DIR)/include -I$(MBEDTLS_DIR)/include \
+            -I$(LUA_DIR)/include
+LDFLAGS  := -static -L$(JPEG_DIR)/lib -L$(MBEDTLS_DIR)/lib -L$(LUA_DIR)/lib $(TPU_LDFLAGS)
 
 OBJDIR := build-cross$(SCREEN_SUFFIX)
 SRCS := $(wildcard src/*.cpp)
@@ -74,7 +76,7 @@ $(CSRC_LIB):
 
 $(TARGET): $(OBJS) $(CSRC_LIB)
 	$(CXX) $(CXXFLAGS) -o $@ $(OBJS) $(CSRC_LIB) \
-	    $(LDFLAGS) -ljpeg -lmbedtls -lmbedx509 -lmbedcrypto -lpthread
+	    $(LDFLAGS) -ljpeg -llua -lmbedtls -lmbedx509 -lmbedcrypto -lm -lpthread
 	@echo "  ✓ aka-capp$(SCREEN_SUFFIX) (riscv64 static$(if $(SCREEN_SUFFIX), 不带屏, 带屏)) built"
 
 clean:

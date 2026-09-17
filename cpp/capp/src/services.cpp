@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <signal.h>
 #include <sstream>
 #include <sys/stat.h>
 #include <thread>
@@ -27,16 +28,6 @@ namespace capp {
 namespace {
 
 // ── 定时停线程管理 ──
-
-void cancel_pending_stop(AppContext& ctx) {
-    std::lock_guard<std::mutex> lk(ctx.timer_mu);
-    if (ctx.timer_thread) {
-        ctx.timer_cancel = true;
-        ctx.timer_thread->join();
-        delete ctx.timer_thread;
-        ctx.timer_thread = nullptr;
-    }
-}
 
 void schedule_stop(AppContext& ctx, double duration_sec) {
     std::lock_guard<std::mutex> lk(ctx.timer_mu);
@@ -63,30 +54,6 @@ void schedule_stop(AppContext& ctx, double duration_sec) {
 
 // ── 同步"执行完再 ACK"辅助 ──
 
-int64_t motion_seq_now(AppContext& ctx) {
-    std::lock_guard<std::mutex> lk(ctx.timer_mu);
-    return ctx.motion_seq;
-}
-int64_t bump_motion_seq(AppContext& ctx) {
-    std::lock_guard<std::mutex> lk(ctx.timer_mu);
-    return ++ctx.motion_seq;
-}
-/// 等待 duration 秒后自动停车（同步阻塞）。返回:
-///   0 = 正常：到点已 sleep() 停车
-///   1 = 期间被后续指令取代（seq 变化，不自动停车，交由新指令接管）
-///   2 = 应用退出
-int wait_timed_done(AppContext& ctx, int64_t seq, double duration_sec) {
-    auto until = std::chrono::steady_clock::now() +
-                 std::chrono::milliseconds((int64_t)(duration_sec * 1000.0));
-    while (std::chrono::steady_clock::now() < until) {
-        if (ctx.shutdown) return 2;
-        if (motion_seq_now(ctx) != seq) return 1;
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    }
-    ctx.motor_pair->sleep();  // 到点滑行停车（与旧 schedule_stop 动作一致）
-    return 0;
-}
-
 /// 等待底盘停稳（判定：曾经在动，且连续 stall_s 秒速度≈0）。
 /// 返回 true=已停稳；false=超时。ever_moved 区分"走完停了"与"根本没动"。
 bool wait_stationary(AppContext& ctx, double timeout_s, double stall_s, bool& ever_moved) {
@@ -107,6 +74,71 @@ bool wait_stationary(AppContext& ctx, double timeout_s, double stall_s, bool& ev
         if (ctx.shutdown) return false;
         std::this_thread::sleep_for(std::chrono::milliseconds(30));
     }
+}
+
+void do_grab(AppContext& ctx) {
+    std::lock_guard<std::mutex> lk(ctx.arm_mu);
+    ctx.gripper->close();
+    ctx.collector.set_gripper_target(0);
+}
+
+void do_release(AppContext& ctx) {
+    std::lock_guard<std::mutex> lk(ctx.arm_mu);
+    ctx.gripper->open();
+}
+
+std::string read_version(AppContext& ctx) {
+    std::ifstream f(ctx.app_dir + "/VERSION");
+    if (!f) return "unknown";
+    std::string raw;
+    std::getline(f, raw);
+    size_t at = raw.find('@');
+    if (at != std::string::npos) return raw.substr(0, at);
+    size_t sp = raw.find(' ');
+    if (sp != std::string::npos) return raw.substr(0, sp);
+    return raw.empty() ? "unknown" : raw;
+}
+
+
+}  // namespace
+
+// ── 跨 TU 的控制原语 ──
+// 定义必须在 capp 作用域（context.hpp 有声明；脚本宿主 capp/script.cpp 也要用），
+// 不能放进上面的匿名 namespace，否则声明与定义分属两个名字，重载解析会歧义。
+void cancel_pending_stop(AppContext& ctx) {
+    std::lock_guard<std::mutex> lk(ctx.timer_mu);
+    if (ctx.timer_thread) {
+        ctx.timer_cancel = true;
+        ctx.timer_thread->join();
+        delete ctx.timer_thread;
+        ctx.timer_thread = nullptr;
+    }
+}
+
+int64_t motion_seq_now(AppContext& ctx) {
+    std::lock_guard<std::mutex> lk(ctx.timer_mu);
+    return ctx.motion_seq;
+}
+
+int64_t bump_motion_seq(AppContext& ctx) {
+    std::lock_guard<std::mutex> lk(ctx.timer_mu);
+    return ++ctx.motion_seq;
+}
+
+/// 等待 duration 秒后自动停车（同步阻塞）。返回:
+///   0 = 正常：到点已 sleep() 停车
+///   1 = 期间被后续指令取代（seq 变化，不自动停车，交由新指令接管）
+///   2 = 应用退出
+int wait_timed_done(AppContext& ctx, int64_t seq, double duration_sec) {
+    auto until = std::chrono::steady_clock::now() +
+                 std::chrono::milliseconds((int64_t)(duration_sec * 1000.0));
+    while (std::chrono::steady_clock::now() < until) {
+        if (ctx.shutdown) return 2;
+        if (motion_seq_now(ctx) != seq) return 1;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    ctx.motor_pair->sleep();  // 到点滑行停车（与旧 schedule_stop 动作一致）
+    return 0;
 }
 
 bool apply_base_action(AppContext& ctx, const std::string& action, int speed) {
@@ -131,17 +163,6 @@ bool apply_base_action(AppContext& ctx, const std::string& action, int speed) {
     return true;
 }
 
-void do_grab(AppContext& ctx) {
-    std::lock_guard<std::mutex> lk(ctx.arm_mu);
-    ctx.gripper->close();
-    ctx.collector.set_gripper_target(0);
-}
-
-void do_release(AppContext& ctx) {
-    std::lock_guard<std::mutex> lk(ctx.arm_mu);
-    ctx.gripper->open();
-}
-
 bool apply_arm_action(AppContext& ctx, const std::string& action) {
     if (action == "grab") {
         ctx.collector.set_gripper_target(1);
@@ -155,20 +176,6 @@ bool apply_arm_action(AppContext& ctx, const std::string& action) {
     }
     return false;
 }
-
-std::string read_version(AppContext& ctx) {
-    std::ifstream f(ctx.app_dir + "/VERSION");
-    if (!f) return "unknown";
-    std::string raw;
-    std::getline(f, raw);
-    size_t at = raw.find('@');
-    if (at != std::string::npos) return raw.substr(0, at);
-    size_t sp = raw.find(' ');
-    if (sp != std::string::npos) return raw.substr(0, sp);
-    return raw.empty() ? "unknown" : raw;
-}
-
-}  // namespace
 
 // ═══════════════════════ 初始化 ═══════════════════════
 
@@ -540,6 +547,10 @@ bool build_stream_jpeg_rgb(AppContext& ctx, const csrc::Camera::RgbFrame& rgb,
 
 // ═══════════════════════ 单帧推理服务 ═══════════════════════
 
+// 拉取（下载）的大小上限：边下边写盘，256MB —— 挡"链接错了下成一个大文件、把根分区塞满"。
+// 上传（推）的上限则是服务器那个 kMaxRequestBody（体是整块进内存的）。
+constexpr long long kMaxModelBytes = 256LL * 1024 * 1024;
+
 namespace {
 
 /// 校验临时文件（CviModel 魔数 + 大小上限）后原子换入最终路径；失败时删掉临时文件并填 err。
@@ -576,6 +587,67 @@ bool install_model_file(const std::string& tmp_path, const std::string& final_pa
 }
 
 }  // namespace
+
+csrc::Json start_model_pull(AppContext& ctx, const std::string& name, const std::string& url) {
+    csrc::Json j;
+    const std::string dir = ctx.app_dir + "/models";
+    const std::string final_path = dir + "/" + name + ".cvimodel";
+    const std::string tmp_path = final_path + ".part";   // 先落 .part 再原子换入
+    const std::string task_id = "model_" + name;
+
+    mkdir(dir.c_str(), 0755);
+    {
+        std::lock_guard<std::mutex> lk(ctx.dl_mu);
+        if (ctx.downloads.size() > 20) ctx.downloads.erase(ctx.downloads.begin());
+        csrc::Json t;
+        t["progress"] = csrc::Json((int64_t)0);
+        t["status"] = "downloading";
+        t["error"] = csrc::Json();
+        t["name"] = name;
+        t["url"] = url;
+        ctx.downloads[task_id] = t;
+    }
+    std::thread([&ctx, url, name, tmp_path, final_path, task_id] {
+        auto fail = [&](const std::string& msg) {
+            std::remove(tmp_path.c_str());
+            std::lock_guard<std::mutex> lk(ctx.dl_mu);
+            ctx.downloads[task_id]["status"] = "error";
+            ctx.downloads[task_id]["error"] = msg;
+            CAM_WARN("[models] 拉取失败（%s）：%s", name.c_str(), msg.c_str());
+        };
+        const csrc::HttpResult r = csrc::http_download(
+            url, tmp_path,
+            [&ctx, task_id](int pct) {
+                std::lock_guard<std::mutex> lk(ctx.dl_mu);
+                ctx.downloads[task_id]["progress"] = csrc::Json((int64_t)pct);
+            },
+            300);
+        if (!r.ok) {
+            fail("下载失败：" + r.error);
+            return;
+        }
+        long long sz = 0;
+        std::string verr;
+        if (!install_model_file(tmp_path, final_path, kMaxModelBytes, sz, verr)) {
+            fail(verr);
+            return;
+        }
+        {
+            std::lock_guard<std::mutex> lk(ctx.dl_mu);
+            ctx.downloads[task_id]["progress"] = csrc::Json((int64_t)100);
+            ctx.downloads[task_id]["status"] = "done";
+            ctx.downloads[task_id]["size"] = csrc::Json((int64_t)sz);
+        }
+        CAM_INFO("[models] 模型已就位 %s（%lld KB，来源 %s）", final_path.c_str(), sz / 1024,
+                 url.c_str());
+    }).detach();
+
+    j["ok"] = true;
+    j["task_id"] = task_id;
+    j["name"] = name;
+    j["path"] = final_path;
+    return j;
+}
 
 csrc::Json save_model_upload(AppContext& ctx, const std::string& name, const std::string& content) {
     csrc::Json j;
@@ -628,8 +700,12 @@ bool valid_model_name(const std::string& name) {
     return true;
 }
 
-csrc::Json detect_once(AppContext& ctx, const std::string& model_name) {
-    csrc::Json j;
+/// 取一帧跑一次推理 → 框列表（原图像素坐标）。`/api/detect` 与脚本原语共用同一条链：
+/// 模型懒加载 / 文件变了重载 / 取原生帧 / 推理。错误串与对外契约保持一致。
+bool detect_boxes(AppContext& ctx, const std::string& model_name, const csrc::DecodeOptions& opt,
+                  std::vector<csrc::Detection>& out, int& frame_w, std::string& err) {
+    out.clear();
+    frame_w = 0;
 
     // 锁罩住"换模型 + 推理"整段：TPU 是单实例，YoloDetector 非线程安全；
     // 半路换模型或两个请求并发进来都会出问题。
@@ -644,12 +720,9 @@ csrc::Json detect_once(AppContext& ctx, const std::string& model_name) {
     const bool changed = have && (st.st_mtime != ctx.detect_mtime ||
                                   (long long)st.st_size != ctx.detect_size);
     if (!ctx.detector->loaded() || ctx.detect_model != model_name || changed) {
-        std::string err;
         if (!ctx.detector->load(path, err)) {
             ctx.detect_model.clear();
-            j["ok"] = false;
-            j["error"] = err;
-            return j;
+            return false;
         }
         ctx.detect_model = model_name;
         ctx.detect_mtime = have ? st.st_mtime : 0;
@@ -657,9 +730,8 @@ csrc::Json detect_once(AppContext& ctx, const std::string& model_name) {
     }
 
     if (!ensure_camera(ctx)) {
-        j["ok"] = false;
-        j["error"] = "camera not available";
-        return j;
+        err = "camera not available";
+        return false;
     }
     // 取帧用**原生采集宽度**（camera.width），不是浏览器的 stream_width。
     // stream_width 是为了省浏览器带宽而降采样的（默认 320），拿它喂 640x480 的模型
@@ -669,15 +741,20 @@ csrc::Json detect_once(AppContext& ctx, const std::string& model_name) {
     // 用 camera.width 还能和板载屏显示的 decode_max_w 同档，共用同一次解码。
     csrc::Camera::RgbFrame rgb;
     if (!ctx.camera.latest_rgb(ctx.config.camera.width, rgb) || rgb.data.empty()) {
-        j["ok"] = false;
-        j["error"] = "no frame";
-        return j;
+        err = "no frame";
+        return false;
     }
+    frame_w = rgb.w;
+    return ctx.detector->detect(rgb.data.data(), rgb.w, rgb.h, opt, out, err);
+}
 
-    csrc::DecodeOptions opt;   // conf=0.25 / iou=0.45（先不做 query 覆盖）
+csrc::Json detect_once(AppContext& ctx, const std::string& model_name) {
+    csrc::Json j;
     std::vector<csrc::Detection> dets;
+    int frame_w = 0;
     std::string err;
-    if (!ctx.detector->detect(rgb.data.data(), rgb.w, rgb.h, opt, dets, err)) {
+    // conf=0.25 / iou=0.45（先不做 query 覆盖）
+    if (!detect_boxes(ctx, model_name, csrc::DecodeOptions{}, dets, frame_w, err)) {
         j["ok"] = false;
         j["error"] = err;
         return j;

@@ -47,10 +47,17 @@ CXXFLAGS += $(JPEG_INC)
 # mbedTLS（HTTPS 可选）：仅当 third_party/mbedtls 已交叉编译好才挂上 include/lib，
 # 本机 dev 可不装（HTTP-only 也跑得起来）。真上 mbedTLS 后 brew 装系统版即可。
 MBEDTLS_DIR ?= ../third_party/mbedtls
+LUA_DIR  ?= ../third_party/lua-host
 MBEDTLS_INC := $(if $(wildcard $(MBEDTLS_DIR)/include/mbedtls/ssl.h),-I$(MBEDTLS_DIR)/include,)
 MBEDTLS_LIB := $(if $(wildcard $(MBEDTLS_DIR)/lib/libmbedtls.a),-L$(MBEDTLS_DIR)/lib,)
 MBEDTLS_LINK := $(if $(wildcard $(MBEDTLS_DIR)/lib/libmbedtls.a),-lmbedtls -lmbedx509 -lmbedcrypto,)
 CXXFLAGS += $(MBEDTLS_INC)
+
+# Lua（流程脚本宿主）：本机版用 scripts/build-lua.sh HOST=1 生成
+LUA_INC  := $(if $(wildcard $(LUA_DIR)/include/lua.h),-I$(LUA_DIR)/include,)
+LUA_LIB  := $(if $(wildcard $(LUA_DIR)/lib/liblua.a),-L$(LUA_DIR)/lib,)
+LUA_LINK := $(if $(wildcard $(LUA_DIR)/lib/liblua.a),-llua,)
+CXXFLAGS += $(LUA_INC)
 
 OBJDIR := build$(SCREEN_SUFFIX)
 SRCS := $(wildcard src/*.cpp)
@@ -74,7 +81,7 @@ $(CSRC_LIB):
 
 $(TARGET): $(OBJS) $(CSRC_LIB)
 	$(CXX) $(CXXFLAGS) -o $@ $(OBJS) $(CSRC_LIB) \
-	    $(LDFLAGS) $(MBEDTLS_LIB) $(MBEDTLS_LINK) -lpthread
+	    $(LDFLAGS) $(MBEDTLS_LIB) $(MBEDTLS_LINK) $(LUA_LIB) $(LUA_LINK) -lm -lpthread
 	@echo "  ✓ aka-capp-dev$(SCREEN_SUFFIX) built"
 
 clean:
