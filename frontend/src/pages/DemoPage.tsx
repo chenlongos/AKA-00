@@ -6,13 +6,22 @@ import Card from "../components/Card";
 import {S} from "../styles";
 import {useViewportScale} from "../hooks/useViewportScale";
 
-interface Model { name: string; file: string; size: number; type: string; }
-
-// 与后端 DemoInfo (web-server/src/services/demo.rs) 对齐: /api/demo/list
-// 返回 {demos: DemoInfo[]}。这里只用 name/kind，path 留给后端。
+// 与后端 /api/demo/list 对齐：返回 {demos: DemoInfo[]}。这里只用 name。
 interface DemoInfo { name: string; path: string; kind: string; }
 
-const DEMO_SERVER_URL = import.meta.env.VITE_DEMO_SERVER_URL || "http://localhost:8888";
+// 跑 demo 时传给脚本的参数（每个 demo 各存一份，存在板上的 demo_config.json）。
+// 这几个字段会作为 params 传给 scripts/chase.lua：target_size = 目标框宽（像素）、
+// speed = 驱动速度百分比、max_seconds = 单次运行的总时长上限。
+// speed = 直线速度，turn_speed = 转弯速度（分开：转弯要的占空比和直线不一样）
+interface DemoParams { target_size: number; speed: number; turn_speed: number; max_seconds: number; }
+// 表单里按键存字符串：编辑期间不解析，清空/输一半都不会突然跳成 0；保存时才转数字。
+type DemoForm = { target_size: string; speed: string; turn_speed: string; max_seconds: string };
+
+const DEFAULT_PARAMS: DemoParams = {target_size: 300, speed: 25, turn_speed: 25, max_seconds: 60};
+const formOf = (p: DemoParams): DemoForm => ({
+    target_size: String(p.target_size), speed: String(p.speed), turn_speed: String(p.turn_speed),
+    max_seconds: String(p.max_seconds),
+});
 
 const DemoPage = () => {
     const {scalePx} = useViewportScale();
@@ -22,25 +31,33 @@ const DemoPage = () => {
     const [demoLoading, setDemoLoading] = useState(false);
     const runningDemoRef = useRef<string | null>(null);
 
-    const [models, setModels] = useState<Model[]>([]);
-    const [listLoading, setListLoading] = useState(false);
-    const [listStatus, setListStatus] = useState("准备就绪");
-    const [downloading, setDownloading] = useState<string | null>(null);
-    const [progress, setProgress] = useState<number>(0);
+    // 每个 demo 一份参数（键 = demo 名 = 模型名）
+    const [params, setParams] = useState<Record<string, DemoForm>>({});
+    const [savedHint, setSavedHint] = useState<string | null>(null);
+    const [savingName, setSavingName] = useState<string | null>(null);
 
-    const fetchDemoList = useCallback(() => { api.demo.list().then(data => setDemos(data.demos || [])).catch(() => {}); }, []);
-    const fetchModels = useCallback(async () => {
-        setListLoading(true);
-        try {
-            const res = await fetch(`${DEMO_SERVER_URL}/api/models`);
-            const data = await res.json();
-            setModels(data.models || []);
-            setListStatus(`共 ${data.models?.length || 0} 个模型`);
-        } catch (err) { setListStatus(`连接 Demo Server 失败: ${err}`); }
-        finally { setListLoading(false); }
+    const fetchDemoList = useCallback(() => {
+        api.demo.list().then(data => {
+            const list: DemoInfo[] = data.demos || [];
+            setDemos(list);
+            // 顺带把每个 demo 存下来的参数拉回来
+            list.forEach(d => {
+                api.demo.getConfig(d.name).then((p: Partial<DemoParams>) => {
+                    setParams(prev => ({
+                        ...prev,
+                        [d.name]: formOf({
+                            target_size: p.target_size ?? DEFAULT_PARAMS.target_size,
+                            speed: p.speed ?? DEFAULT_PARAMS.speed,
+                            turn_speed: p.turn_speed ?? DEFAULT_PARAMS.turn_speed,
+                            max_seconds: p.max_seconds ?? DEFAULT_PARAMS.max_seconds,
+                        }),
+                    }));
+                }).catch(() => {});
+            });
+        }).catch(() => {});
     }, []);
 
-    useEffect(() => { fetchDemoList(); fetchModels(); }, [fetchDemoList, fetchModels]);
+    useEffect(() => { fetchDemoList(); }, [fetchDemoList]);
 
     const runDemo = async (name: string) => {
         if (runningDemoRef.current !== null) {
@@ -67,35 +84,61 @@ const DemoPage = () => {
         } catch (err) { setDemoStatus(`错误: ${err}`); setRunningDemo(null); runningDemoRef.current = null; }
     };
 
-    const downloadModel = async (name: string) => {
-        setDownloading(name); setProgress(0); setListStatus(`下载中: ${name}...`);
-        try {
-            const res = await fetch("/api/demo/download_model_with_progress", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({model_name: name, demo_server: DEMO_SERVER_URL})});
-            const data = await res.json();
-            if (data.error) { setListStatus(`下载失败: ${data.error}`); setDownloading(null); return; }
-            const taskId = data.task_id;
-            const poll = setInterval(async () => {
-                try {
-                    const pr = await fetch(`/api/demo/download_progress/${taskId}`);
-                    const pd = await pr.json();
-                    if (pd.status === "done") { setProgress(100); setListStatus(`下载完成: ${name}`); clearInterval(poll); setDownloading(null); fetchDemoList(); }
-                    else if (pd.status === "error") { setListStatus(`下载失败: ${pd.error}`); clearInterval(poll); setDownloading(null); }
-                    else { setProgress(pd.progress || 0); }
-                } catch { clearInterval(poll); setDownloading(null); }
-            }, 200);
-        } catch (err) { setListStatus(`下载失败: ${err}`); setDownloading(null); }
+    const changeParam = (name: string, key: keyof DemoParams, value: string) => {
+        // 只留数字，避免用户输入法带进别的字符；不转成数字（见 DemoForm 的注释）
+        const digits = value.replace(/[^0-9]/g, "");
+        setParams(prev => ({...prev, [name]: {...(prev[name] || formOf(DEFAULT_PARAMS)), [key]: digits}}));
     };
 
-    const formatSize = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    const displayName = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
+    const saveParams = async (name: string) => {
+        const form = params[name] || formOf(DEFAULT_PARAMS);
+        const p: DemoParams = {
+            target_size: parseInt(form.target_size, 10) || DEFAULT_PARAMS.target_size,
+            speed: parseInt(form.speed, 10) || DEFAULT_PARAMS.speed,
+            turn_speed: parseInt(form.turn_speed, 10) || DEFAULT_PARAMS.turn_speed,
+            max_seconds: parseInt(form.max_seconds, 10) || DEFAULT_PARAMS.max_seconds,
+        };
+        setParams(prev => ({...prev, [name]: formOf(p)}));   // 回填解析后的值
+        setSavingName(name);
+        try {
+            const r = await api.demo.setConfig(name, p);
+            if (r.error) {
+                setSavedHint(`${name}: 保存失败 ${r.error}`);
+            } else {
+                setSavedHint(`${name}: 已保存（目标框宽 ${p.target_size}px，直线 ${p.speed}%，转弯 ${p.turn_speed}%，超时 ${p.max_seconds}s）`);
+            }
+        } catch (err) { setSavedHint(`${name}: 保存失败 ${err}`); }
+        finally { setSavingName(null); setTimeout(() => setSavedHint(null), 4000); }
+    };
 
+    const displayName = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
     const maxW = {width: "100%", maxWidth: scalePx(420)};
+
+    // 标签放上面、输入框占满整列 —— 比"输入框+后缀挤一行"能给足宽度
+    const numInput = (name: string, key: keyof DemoParams, label: string) => (
+        <div style={{display: "flex", flexDirection: "column", gap: scalePx(3), flex: "1 1 0", minWidth: scalePx(72)}}>
+            <span style={{fontSize: scalePx(10), color: "var(--color-text-dim)"}}>{label}</span>
+            <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={(params[name] || formOf(DEFAULT_PARAMS))[key]}
+                onChange={e => changeParam(name, key, e.target.value)}
+                style={{
+                    width: "100%", boxSizing: "border-box",
+                    padding: `${scalePx(7)} ${scalePx(6)}`,
+                    fontSize: scalePx(14), textAlign: "center",
+                    background: "var(--color-bg-elevated)", color: "var(--color-text)",
+                    border: "1px solid var(--color-border-light)", borderRadius: scalePx(5),
+                }}
+            />
+        </div>
+    );
 
     return (
         <Page center>
             <h2 style={{fontSize: scalePx(17), fontWeight: 700, marginBottom: scalePx(2), marginTop: "20px"}}>Demo 控制台</h2>
 
-            {/* ====== 本地 Demo ====== */}
             <div style={{...maxW, marginTop: scalePx(14)}}>
                 <div style={{...S.rowBetween, marginBottom: scalePx(8)}}>
                     <h3 style={{fontSize: scalePx(14), fontWeight: 600, margin: 0}}>本地 Demo</h3>
@@ -145,6 +188,34 @@ const DemoPage = () => {
                                             {isRunning ? "停止" : "启动"}
                                         </ControlButton>
                                     </div>
+
+                                    {/* 运行参数（跑这个 demo 时传给脚本的 params）*/}
+                                    <div style={{
+                                        marginTop: scalePx(10), paddingTop: scalePx(10),
+                                        borderTop: "1px solid var(--color-border-light)",
+                                    }}>
+                                        <div style={{
+                                            fontSize: scalePx(10), color: "var(--color-text-dim)",
+                                            textTransform: "uppercase", letterSpacing: "1px", marginBottom: scalePx(6),
+                                        }}>
+                                            运行参数
+                                        </div>
+                                        <div style={{display: "flex", alignItems: "center", gap: scalePx(8), flexWrap: "wrap"}}>
+                                            {numInput(name, "target_size", "目标框宽 px")}
+                                            {numInput(name, "speed", "直线速度 %")}
+                                            {numInput(name, "turn_speed", "转弯速度 %")}
+                                            {numInput(name, "max_seconds", "超时 s")}
+                                            <div style={{display: "flex", alignItems: "flex-end"}}>
+                                                <ControlButton
+                                                    variant="secondary" size="small"
+                                                    onClick={() => saveParams(name)}
+                                                    loading={savingName === name}
+                                                >
+                                                    保存
+                                                </ControlButton>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </Card>
                             );
                         })}
@@ -152,7 +223,7 @@ const DemoPage = () => {
                 )}
             </div>
 
-            {/* 本地状态 */}
+            {/* 状态行 */}
             {demoStatus && demoStatus !== "准备就绪" && (
                 <div style={{
                     ...maxW, marginTop: scalePx(6), textAlign: "center",
@@ -161,83 +232,14 @@ const DemoPage = () => {
                     {demoStatus}
                 </div>
             )}
-
-            {/* ====== 分割 ====== */}
-            <div style={{
-                ...maxW, marginTop: scalePx(20), marginBottom: scalePx(20),
-                height: 1, background: "var(--color-border-light)",
-                position: "relative",
-            }}>
-                <span style={{
-                    position: "absolute", left: "50%", top: "50%",
-                    transform: "translate(-50%, -50%)",
-                    background: "var(--color-bg)", padding: `0 ${scalePx(12)}`,
-                    fontSize: scalePx(10), color: "var(--color-text-dim)",
-                    textTransform: "uppercase", letterSpacing: "2px",
+            {savedHint && (
+                <div style={{
+                    ...maxW, marginTop: scalePx(4), textAlign: "center",
+                    fontSize: scalePx(11), color: savedHint.includes("失败") ? "var(--color-danger)" : "var(--color-success)",
                 }}>
-                    模型商店
-                </span>
-            </div>
-
-            {/* ====== 模型下载 ====== */}
-            <div style={maxW}>
-                <div style={{...S.rowBetween, marginBottom: scalePx(8)}}>
-                    <h3 style={{fontSize: scalePx(14), fontWeight: 600, margin: 0}}>远端模型</h3>
-                    <ControlButton variant="secondary" size="small" onClick={fetchModels} disabled={listLoading}>
-                        {listLoading ? "加载中..." : "🔄 刷新"}
-                    </ControlButton>
+                    {savedHint}
                 </div>
-
-                <div style={{fontSize: scalePx(11), color: "var(--color-text-dim)", marginBottom: scalePx(10)}}>
-                    {listStatus}
-                    {downloading && progress > 0 && progress < 100 && <span> · {progress}%</span>}
-                </div>
-
-                {downloading && progress > 0 && (
-                    <div style={{
-                        width: "100%", height: scalePx(4),
-                        background: "var(--color-bg-card)", borderRadius: scalePx(2),
-                        marginBottom: scalePx(10), overflow: "hidden",
-                    }}>
-                        <div style={{
-                            width: `${progress}%`, height: "100%",
-                            background: progress === 100 ? "var(--color-success)" : "var(--color-primary)",
-                            transition: "width 0.3s ease", borderRadius: scalePx(2),
-                        }} />
-                    </div>
-                )}
-
-                {models.length === 0 && !listLoading ? (
-                    <Card>
-                        <div style={{textAlign: "center", padding: scalePx(24), color: "var(--color-text-muted)", fontSize: scalePx(13)}}>
-                            暂无远端模型
-                        </div>
-                    </Card>
-                ) : (
-                    <div style={{display: "flex", flexDirection: "column", gap: scalePx(8)}}>
-                        {models.map(model => (
-                            <Card key={model.name} marginBottom={0}>
-                                <div style={{display: "flex", alignItems: "center", justifyContent: "space-between"}}>
-                                    <div style={{flex: 1, minWidth: 0}}>
-                                        <div style={{fontWeight: 600, fontSize: scalePx(14)}}>{model.name}</div>
-                                        <div style={{fontSize: scalePx(11), color: "var(--color-text-dim)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>
-                                            {model.file} · {formatSize(model.size)} · <span style={{textTransform: "uppercase", fontSize: scalePx(10)}}>{model.type}</span>
-                                        </div>
-                                    </div>
-                                    <ControlButton
-                                        variant="success" size="small"
-                                        onClick={() => downloadModel(model.name)}
-                                        disabled={downloading !== null}
-                                        loading={downloading === model.name}
-                                    >
-                                        {downloading === model.name ? `${progress}%` : "下载"}
-                                    </ControlButton>
-                                </div>
-                            </Card>
-                        ))}
-                    </div>
-                )}
-            </div>
+            )}
         </Page>
     );
 };

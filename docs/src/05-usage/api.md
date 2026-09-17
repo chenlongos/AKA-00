@@ -338,7 +338,8 @@ curl -F "file=@tennis.cvimodel" "http://<ip>/api/models/upload?name=tennis"
 同步接口：文件收完、校验通过、写盘换入之后才返回（3.5MB 的模型在内网上是一瞬间的事，不需要进度查询）。
 
 > **为什么是"推"而不是"拉"**：小车在机器人的内网里（通常是热点/局域网），平台未必能被它反向访问；
-> 平台把文件直接推过来最省事。若你的场景恰好相反（小车能访问平台、平台进不来），用下面的拉取接口。
+> 这就是模型进入板子的**唯一**方式：由平台把文件推过来（不需要小车去访问平台，
+> 也不需要板上有任何"模型商店/下载"的界面）。
 
 **同名覆盖，且覆盖即生效**：`/api/detect` 每次请求都会 stat 模型文件，大小或 mtime 变了就重新加载
 —— 换新版本不用重启 capp（代价是那一次请求多等一次模型加载）。
@@ -359,6 +360,40 @@ curl -F "file=@tennis.cvimodel" "http://<ip>/api/models/upload?name=tennis"
 | 内容不是 cvimodel | 400 | `不是 cvimodel（文件头不是 CviModel）` |
 | 请求体为空 | 400 | `请求体为空（把模型文件放进 body）` |
 | 超过 32MB | 413 | `文件过大：34603008 字节，上限 32MB` |
+
+## Demo（本地演示）
+
+板上的 demo 就是"拿某个模型跑一遍抓取流程"。列表里有什么，取决于 `models/` 里有什么
+（demo 名 = 模型名），模型由平台推上来（见上）。
+
+```
+GET  /api/demo/list           → {"demos":[{"name":"tennis","kind":"model","script":"chase"}, ...]}
+POST /api/demo/init  {"name":"tennis"}   → 跑 scripts/chase.lua，参数取下面那份配置
+POST /api/demo/stop                        → 停（等于 /api/script/stop）
+```
+
+### 运行参数（每个 demo 一份）
+
+跑 demo 时传给脚本的参数，存在 `$AKA_HOME/demo_config.json`（重启后仍在）。
+界面上在 Demo 页每个 demo 卡片里编辑；接口是：
+
+```
+GET  /api/demo/config?name=tennis
+     → {"name":"tennis","target_size":300,"speed":25,"max_seconds":60}
+POST /api/demo/config  {"name":"tennis","target_size":220,"speed":30,"max_seconds":45}
+```
+
+| 字段 | 含义 |
+|------|------|
+| target_size | 目标框宽（原图像素）——框宽达到它就认为到位并抓取 |
+| speed | 驱动速度百分比（宿主还会再 clamp 到 ≤35） |
+| max_seconds | 单次运行的总时长上限（宿主强制，到点打断并停车） |
+
+> 每个 demo 各存一份：不同的模型本来就需要不同的框宽/速度，互不干扰。
+> 这些值就是脚本里 `params()` 读到的东西 —— 想给脚本加参数时，在这里加字段、
+> 在脚本里读即可（见下一节）。
+
+---
 
 ## 流程脚本（Lua）
 

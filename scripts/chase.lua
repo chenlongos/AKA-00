@@ -23,7 +23,8 @@
 local p = params() or {}
 local model = p.model
 local target = tonumber(p.target_size)
-local speed = tonumber(p.speed) or 20
+local speed = tonumber(p.speed) or 20                 -- 直线速度
+local turn_speed = tonumber(p.turn_speed) or speed    -- 转弯速度（没配就跟直线一样）
 
 if not model then fail("params.model 必填") end
 if not target or target <= 0 then fail("params.target_size 必须是正数（目标框宽，像素）") end
@@ -49,7 +50,7 @@ local FINE_PULSE_MAX = 500     -- 精调转向的脉冲上限（够大但没对�
 local LOST_MS       = 1500     -- 连续多久看不到目标就收工
 local LOOP_GAP_MS   = 30       -- 每步之间喘口气，让相机出新帧
 
-log("开始：模型=%s 目标框宽=%dpx 速度=%d%%", model, target, speed)
+log("开始：模型=%s 目标框宽=%dpx 直线速度=%d%% 转弯速度=%d%%", model, target, speed, turn_speed)
 
 local last_seen = elapsed_ms()
 
@@ -96,7 +97,7 @@ while true do
             -- 还差得远：大脉冲转向
             local pulse = math.floor(TURN_PULSE_K * math.abs(align_err))
             pulse = math.max(TURN_PULSE_MIN, math.min(TURN_PULSE_MAX, pulse))
-            if align_err < 0 then turn_left(speed) else turn_right(speed) end
+            if align_err < 0 then turn_left(turn_speed) else turn_right(turn_speed) end
             sleep_ms(pulse)
             standby()
         elseif w >= target then
@@ -104,7 +105,7 @@ while true do
             local pulse = math.floor(TURN_PULSE_K * math.abs(align_err))
             pulse = math.max(TURN_PULSE_MIN, math.min(FINE_PULSE_MAX, pulse))
             log("精调：偏移 %d → 对准 %d（误差 %d，脉冲 %dms）", offset, GRAB_OFFSET, align_err, pulse)
-            if align_err < 0 then turn_left(speed) else turn_right(speed) end
+            if align_err < 0 then turn_left(turn_speed) else turn_right(turn_speed) end
             sleep_ms(pulse)
             standby()
         else

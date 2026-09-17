@@ -284,7 +284,7 @@ capp 同时支持 HTTP 和 HTTPS：默认 `:80` 与 `:5443` 共存（与原 Pyth
 | `GET /api/detect?model=<名字>` | 单帧推理：取当前帧跑一次模型，只回框的四个角（原图像素坐标）。模型必填、裸名字映射 `models/<名字>.cvimodel` |
 | `POST /api/models/upload?name=<名字>` | 模型上传：平台把模型文件推到 `models/`（body 为文件；同名覆盖、覆盖即生效） |
 | `POST /api/script/run` `GET /api/script/status` `POST /api/script/stop` | 跑 Lua 流程脚本（`scripts/*.lua`，如 chase=追物抓取）。安全兜底（限速/超时/被接管/掉线/内存）在宿主里 |
-| `GET /api/demo/list|name` `POST /api/demo/init|stop|download_model_with_progress|upload_model` `GET /api/demo/download_progress/{id}` | demo |
+| `GET /api/demo/list|name|config` `POST /api/demo/init|stop|config` | demo（config = 跑 demo 的参数，每个 demo 一份） |
 | `GET /api/ota/version|status|check|upgrade/progress` `POST /api/ota/upgrade|update` | OTA |
 | `GET /api/system/info|ip|heartbeat` | 系统 |
 | `GET /api/wifi/ip|status|scan` `POST /api/wifi/connect` | WiFi |

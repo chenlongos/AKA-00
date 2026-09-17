@@ -90,7 +90,6 @@ struct Config {
     DisplayConfig display;
 
     // 云端 URL（app/config.py HardwareConfig 对齐）
-    std::string demo_server_url = "http://124.222.162.228:8888";
     std::string status_report_url = "https://api.chenlongrobot.com/api/robot-actions";
 
     // 距离标定: D = m / P + c

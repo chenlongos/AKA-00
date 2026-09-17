@@ -41,6 +41,55 @@ using HttpResult = csrc::HttpResult;
 
 // ═══════════════════════ 小工具 ═══════════════════════
 
+// ── demo 参数（跑 demo 时传给脚本的 params）──
+// 每个 demo（= 模型名）各存一份：不同的模型本来就需要不同的框宽/速度。
+// 存 $AKA_HOME/demo_config.json —— 与 speed_config.json 同一套做法，重启后仍在。
+std::string demo_config_path(AppContext& ctx) { return ctx.app_dir + "/demo_config.json"; }
+
+constexpr int kDemoTargetSizeDefault = 300;
+constexpr int kDemoSpeedDefault = 25;        // 直线速度（%）
+constexpr int kDemoTurnSpeedDefault = 25;    // 转弯速度（%）—— 和直线分开：转弯要的占空比不同
+constexpr int kDemoMaxSecondsDefault = 60;
+
+csrc::Json load_demo_params(AppContext& ctx, const std::string& name) {
+    csrc::Json out;
+    out["target_size"] = csrc::Json((int64_t)kDemoTargetSizeDefault);
+    out["speed"] = csrc::Json((int64_t)kDemoSpeedDefault);
+    out["turn_speed"] = csrc::Json((int64_t)kDemoTurnSpeedDefault);
+    out["max_seconds"] = csrc::Json((int64_t)kDemoMaxSecondsDefault);
+    std::ifstream f(demo_config_path(ctx));
+    if (!f) return out;
+    std::stringstream ss;
+    ss << f.rdbuf();
+    csrc::Json all;
+    if (!csrc::Json::parse(ss.str(), all) || !all.is_object()) return out;
+    const csrc::Json* one = all.get(name);
+    if (!one || !one->is_object()) return out;
+    out["target_size"] = csrc::Json(one->geti("target_size", kDemoTargetSizeDefault));
+    out["speed"] = csrc::Json(one->geti("speed", kDemoSpeedDefault));
+    out["turn_speed"] = csrc::Json(one->geti("turn_speed", kDemoTurnSpeedDefault));
+    out["max_seconds"] = csrc::Json(one->geti("max_seconds", kDemoMaxSecondsDefault));
+    return out;
+}
+
+bool save_demo_params(AppContext& ctx, const std::string& name, const csrc::Json& params) {
+    csrc::Json all;
+    {
+        std::ifstream f(demo_config_path(ctx));
+        if (f) {
+            std::stringstream ss;
+            ss << f.rdbuf();
+            csrc::Json parsed;
+            if (csrc::Json::parse(ss.str(), parsed) && parsed.is_object()) all = parsed;
+        }
+    }
+    all[name] = params;                       // 只动这一份，其它 demo 的不受影响
+    std::ofstream f(demo_config_path(ctx));
+    if (!f) return false;
+    f << all.dump(false);
+    return true;
+}
+
 std::string speed_config_path(AppContext& ctx) {
     return ctx.app_dir + "/speed_config.json";
 }
@@ -825,13 +874,15 @@ void register_routes(Router& router, AppContext& ctx) {
             resp.set_error("name is required", 400);
             return;
         }
-        // 跑同一条 chase 流程，模型就是 demo 名。target_size/speed 这里给默认值，
-        // 细调在 scripts/chase.lua 的判据常量里。
-        Json params;
+        // 跑同一条 chase 流程，模型就是 demo 名；参数取"这个 demo 存下来的那份"
+        // （在界面的 demo 页设置），请求里显式传的字段优先。
+        Json params = load_demo_params(ctx, name);
         params["model"] = name;
-        params["target_size"] = Json((int64_t)payload.geti("target_size", 300));
-        params["speed"] = Json((int64_t)payload.geti("speed", 25));
-        const Json r = script_run(ctx, "chase", params, (int)payload.geti("max_seconds", 60));
+        if (payload.get("target_size")) params["target_size"] = Json(payload.geti("target_size", kDemoTargetSizeDefault));
+        if (payload.get("speed")) params["speed"] = Json(payload.geti("speed", kDemoSpeedDefault));
+        if (payload.get("turn_speed")) params["turn_speed"] = Json(payload.geti("turn_speed", kDemoTurnSpeedDefault));
+        if (payload.get("max_seconds")) params["max_seconds"] = Json(payload.geti("max_seconds", kDemoMaxSecondsDefault));
+        const Json r = script_run(ctx, "chase", params, (int)params.geti("max_seconds", kDemoMaxSecondsDefault));
 
         if (!r.getb("ok")) {
             const Json st = script_status(ctx);
@@ -852,6 +903,49 @@ void register_routes(Router& router, AppContext& ctx) {
         resp.set_json(j);
     });
 
+    // demo 参数：跑这个 demo 时传给脚本的 params（脚本里用 params() 读）
+    router.add("GET", "/api/demo/config", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
+        const std::string name = req.query_param("name");
+        if (name.empty()) {
+            resp.set_error("name 必填（?name=tennis）", 400);
+            return;
+        }
+        Json j = load_demo_params(ctx, name);
+        j["name"] = name;
+        resp.set_json(j);
+    });
+
+    router.add("POST", "/api/demo/config", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
+        const Json payload = req.json();
+        if (!payload.is_object()) {
+            resp.set_error("json body is required", 400);
+            return;
+        }
+        const std::string name = payload.gets("name");
+        if (name.empty()) {
+            resp.set_error("name 必填", 400);
+            return;
+        }
+        if (!valid_model_name(name)) {
+            resp.set_error("name 非法（只允许字母数字与 _ - .）：" + name, 400);
+            return;
+        }
+        // 只接受这三个字段；范围与脚本里的上限一致（速度留给宿主再 clamp 一层）
+        Json params;
+        params["target_size"] = Json((int64_t)payload.geti("target_size", kDemoTargetSizeDefault));
+        params["speed"] = Json((int64_t)payload.geti("speed", kDemoSpeedDefault));
+        params["turn_speed"] = Json((int64_t)payload.geti("turn_speed", kDemoTurnSpeedDefault));
+        params["max_seconds"] = Json((int64_t)payload.geti("max_seconds", kDemoMaxSecondsDefault));
+        if (!save_demo_params(ctx, name, params)) {
+            resp.set_error("写入 demo_config.json 失败", 500);
+            return;
+        }
+        Json j = params;
+        j["name"] = name;
+        j["ok"] = true;
+        resp.set_json(j);
+    });
+
     router.add("POST", "/api/demo/stop", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
         const Json r = script_stop(ctx);
         Json j;
@@ -859,50 +953,6 @@ void register_routes(Router& router, AppContext& ctx) {
         j["name"] = script_status(ctx).gets("script");
         resp.set_json(j);
     });
-
-    // 模型的"下载"（前端 demo 页的按钮）：从云端 demo_server 拉进板上 models/。
-    // 与 /api/models/upload 是同一条流水线的两个方向（一个推、一个拉）。
-    router.add("POST", "/api/demo/download_model_with_progress", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
-        const Json payload = req.json();
-        if (!payload.is_object()) {
-            resp.set_error("json body is required", 400);
-            return;
-        }
-        const std::string name = payload.gets("model_name");
-        if (name.empty()) {
-            resp.set_error("model_name is required", 400);
-            return;
-        }
-        if (!valid_model_name(name)) {
-            resp.set_error("model_name 非法（只允许字母数字与 _ - .）：" + name, 400);
-            return;
-        }
-        const std::string server = payload.gets("demo_server", ctx.config.demo_server_url);
-        const Json r = start_model_pull(ctx, name, server + "/api/models/" + name);
-        Json j;
-        j["status"] = "started";
-        j["task_id"] = r.gets("task_id");
-        j["new_name"] = name;
-        j["path"] = r.gets("path");
-        resp.set_json(j);
-    });
-
-    router.add_param("GET", "/api/demo/download_progress/{task_id}", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
-        const std::string task_id = req.header("__route_param");
-        {
-            std::lock_guard<std::mutex> lk(ctx.dl_mu);
-            auto it = ctx.downloads.find(task_id);
-            if (it != ctx.downloads.end()) {
-                resp.set_json(it->second);
-                return;
-            }
-        }
-        Json j;
-        j["progress"] = csrc::Json((int64_t)0);
-        j["status"] = "not_found";
-        resp.set_json(j);
-    });
-
 
     // ── /api/ota ──
     router.add("GET", "/api/ota/version", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {

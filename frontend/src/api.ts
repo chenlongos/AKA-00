@@ -80,6 +80,14 @@ export const demo = {
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({}),
     }).then(r => r.json()),
+    // 跑 demo 的参数（每个 demo 一份，存在板上的 demo_config.json）
+    getConfig: (name: string) => fetch(`/api/demo/config?name=${encodeURIComponent(name)}`).then(r => r.json()),
+    setConfig: (name: string, params: {target_size: number; speed: number; turn_speed: number; max_seconds: number}) =>
+        fetch("/api/demo/config", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({name, ...params}),
+        }).then(r => r.json()),
 };
 
 export const api = { system, motor, arm, camera, demo, display };

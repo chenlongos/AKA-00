@@ -184,10 +184,6 @@ bool valid_model_name(const std::string& name);
 /// 并原子换入，坏包不会覆盖掉正在用的模型。返回 `{ok, name, path, size}` 或 `{ok:false, error}`。
 csrc::Json save_model_upload(AppContext& ctx, const std::string& name, const std::string& content);
 
-/// 后台把模型**拉取**到 `$AKA_HOME/models/<name>.cvimodel`（同名覆盖；先 .part 再原子换入）。
-/// url 由调用方给全（前端 demo 页的"下载"就是 云端 demo_server + /api/models/<name>）。
-/// 进度查 `GET /api/demo/download_progress/<task_id>`。
-csrc::Json start_model_pull(AppContext& ctx, const std::string& name, const std::string& url);
 
 // ── Lua 流程脚本（scripts/*.lua，实现在 capp/script.cpp）──
 //

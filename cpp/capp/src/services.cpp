@@ -547,10 +547,6 @@ bool build_stream_jpeg_rgb(AppContext& ctx, const csrc::Camera::RgbFrame& rgb,
 
 // ═══════════════════════ 单帧推理服务 ═══════════════════════
 
-// 拉取（下载）的大小上限：边下边写盘，256MB —— 挡"链接错了下成一个大文件、把根分区塞满"。
-// 上传（推）的上限则是服务器那个 kMaxRequestBody（体是整块进内存的）。
-constexpr long long kMaxModelBytes = 256LL * 1024 * 1024;
-
 namespace {
 
 /// 校验临时文件（CviModel 魔数 + 大小上限）后原子换入最终路径；失败时删掉临时文件并填 err。
@@ -587,67 +583,6 @@ bool install_model_file(const std::string& tmp_path, const std::string& final_pa
 }
 
 }  // namespace
-
-csrc::Json start_model_pull(AppContext& ctx, const std::string& name, const std::string& url) {
-    csrc::Json j;
-    const std::string dir = ctx.app_dir + "/models";
-    const std::string final_path = dir + "/" + name + ".cvimodel";
-    const std::string tmp_path = final_path + ".part";   // 先落 .part 再原子换入
-    const std::string task_id = "model_" + name;
-
-    mkdir(dir.c_str(), 0755);
-    {
-        std::lock_guard<std::mutex> lk(ctx.dl_mu);
-        if (ctx.downloads.size() > 20) ctx.downloads.erase(ctx.downloads.begin());
-        csrc::Json t;
-        t["progress"] = csrc::Json((int64_t)0);
-        t["status"] = "downloading";
-        t["error"] = csrc::Json();
-        t["name"] = name;
-        t["url"] = url;
-        ctx.downloads[task_id] = t;
-    }
-    std::thread([&ctx, url, name, tmp_path, final_path, task_id] {
-        auto fail = [&](const std::string& msg) {
-            std::remove(tmp_path.c_str());
-            std::lock_guard<std::mutex> lk(ctx.dl_mu);
-            ctx.downloads[task_id]["status"] = "error";
-            ctx.downloads[task_id]["error"] = msg;
-            CAM_WARN("[models] 拉取失败（%s）：%s", name.c_str(), msg.c_str());
-        };
-        const csrc::HttpResult r = csrc::http_download(
-            url, tmp_path,
-            [&ctx, task_id](int pct) {
-                std::lock_guard<std::mutex> lk(ctx.dl_mu);
-                ctx.downloads[task_id]["progress"] = csrc::Json((int64_t)pct);
-            },
-            300);
-        if (!r.ok) {
-            fail("下载失败：" + r.error);
-            return;
-        }
-        long long sz = 0;
-        std::string verr;
-        if (!install_model_file(tmp_path, final_path, kMaxModelBytes, sz, verr)) {
-            fail(verr);
-            return;
-        }
-        {
-            std::lock_guard<std::mutex> lk(ctx.dl_mu);
-            ctx.downloads[task_id]["progress"] = csrc::Json((int64_t)100);
-            ctx.downloads[task_id]["status"] = "done";
-            ctx.downloads[task_id]["size"] = csrc::Json((int64_t)sz);
-        }
-        CAM_INFO("[models] 模型已就位 %s（%lld KB，来源 %s）", final_path.c_str(), sz / 1024,
-                 url.c_str());
-    }).detach();
-
-    j["ok"] = true;
-    j["task_id"] = task_id;
-    j["name"] = name;
-    j["path"] = final_path;
-    return j;
-}
 
 csrc::Json save_model_upload(AppContext& ctx, const std::string& name, const std::string& content) {
     csrc::Json j;
