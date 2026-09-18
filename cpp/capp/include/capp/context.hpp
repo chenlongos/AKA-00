@@ -65,6 +65,8 @@ struct AppContext {
     std::string script_name;    // 动作脚本名（demo/<动作>.lua）
     std::string script_model;   // 这次跑的是哪个模型（params.model；脚本路径之外还要能答"在追什么"）
     std::string script_card;    // 哪张卡片发起的（直接调 action+model 跑时为空）
+    bool script_repeat = false; // 循环执行（mode=loop）：跑完一轮接着下一轮，直到被停
+    int script_round = 0;       // 已跑到第几轮（once 恒为 1）
     long long script_elapsed_ms = 0;
     long long script_calls = 0;                  // 原语调用计数（看脚本有没有在动）
     std::string script_action;                   // 最近一次动作
@@ -223,11 +225,11 @@ csrc::Json save_model_upload(AppContext& ctx, const std::string& name, const std
 // 不用交叉编译 + 部署 + 重启。脚本只拿得到有上限的原语；超时/限速/被抢占地接管/
 // 底盘掉线这些**安全兜底全在宿主**（见 script.cpp 的注释与文档）。
 
-/// 跑一个脚本（异步；同一时刻只允许一个）。params 会以 Lua table 的形式给脚本读。
-/// 脚本从 `$AKA_HOME/demo/<name>.lua` 读；名字只允许 [A-Za-z0-9_.-]。
-/// max_seconds 是宿主强制的总时长上限（clamp 到 5..300），到点宿主会打断脚本并停车。
-csrc::Json script_run(AppContext& ctx, const std::string& name, const csrc::Json& params,
-                      int max_seconds);
+/// 跑一个动作脚本（异步；同一时刻只允许一个）。params 会以 Lua table 的形式给脚本读。
+/// 脚本从 `$AKA_HOME/demo/<name>.lua` 读（name 是**动作名**）；名字只允许 [A-Za-z0-9_.-]。
+/// 执行方式看 params.mode：`once`（默认，跑一遍就结束）/ `loop`（跑完接着跑，直到被停）。
+/// **没有总时长上限** —— 停不停由 stop / 人的指令接管 / 服务退出决定。
+csrc::Json script_run(AppContext& ctx, const std::string& name, const csrc::Json& params);
 /// 停止当前脚本：置中止标志并立刻刹车（不等脚本配合）。
 csrc::Json script_stop(AppContext& ctx);
 /// 当前状态：state / script / message / elapsed_ms / calls / action / notes

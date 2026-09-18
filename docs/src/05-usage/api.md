@@ -454,9 +454,9 @@ POST /api/demo/stop                     → 停
 ```
 GET  /api/demo/config?name=追网球接近
      → {"name":"追网球接近","action":"approach","model":"tennis",
-        "target_size":300,"speed":50,"turn_speed":25,"max_seconds":60}
+        "target_size":300,"speed":50,"turn_speed":25,"mode":"once"}
 POST /api/demo/config  {"name":"追网球接近","action":"approach","model":"tennis",
-                        "target_size":300,"speed":30,"turn_speed":25,"max_seconds":60}
+                        "target_size":300,"speed":30,"turn_speed":25,"mode":"loop"}
 POST /api/demo/delete  {"name":"追网球接近"}
 ```
 
@@ -467,7 +467,7 @@ POST /api/demo/delete  {"name":"追网球接近"}
 | target_size | 目标框宽（原图像素）——框宽达到它就认为到位 |
 | speed | 直线速度百分比（宿主还会再 clamp 到 ≤70） |
 | turn_speed | 转弯速度百分比（同样 clamp 到 ≤70）—— 和直线分开：转弯要的占空比不同 |
-| max_seconds | 单次运行的总时长上限（宿主强制，到点打断并停车） |
+| mode | 执行方式：`once`（默认，跑一遍就结束）/ `loop`（跑完接着跑，**直到你按停止**）。没有超时 |
 
 > **POST 就是"新建或覆盖一张卡片"**：界面上的"新建"与"保存"走的是同一个接口
 > （改参数时要把 `action`/`model` 一起回传，否则会当成新建）。改名 = 用新名字 POST 一份、
@@ -487,7 +487,7 @@ POST /api/demo/delete  {"name":"追网球接近"}
 ```bash
 curl -X POST http://<ip>/api/demo/init \
      -H 'Content-Type: application/json' \
-     -d '{"action":"approach","model":"apple","target_size":300,"speed":30,"max_seconds":30}'
+     -d '{"action":"approach","model":"apple","target_size":300,"speed":30,"mode":"loop"}'
 ```
 
 效果与建一张卡再跑一样（宿主会把 `model=apple` 注入给动作脚本）；区别是不落盘、
@@ -509,9 +509,9 @@ curl -X POST http://<ip>/api/demo/init \
 **原语在 C++（快、稳），流程在 `$AKA_HOME/demo/*.lua`（好改）**。
 
 ```
-POST /api/demo/run       {"script":"grab", "max_seconds":30,
+POST /api/demo/run       {"script":"grab",
                           "params":{"model":"tennis","target_size":300,"speed":20}}
-     → {"ok":true,"state":"running","script":"grab","max_seconds":30}
+     → {"ok":true,"state":"running","script":"grab","mode":"once"}
 GET  /api/demo/status
      → {"state":"running","script":"grab","model":"tennis","card":"追网球","message":"","calls":42,"action":"forward",
         "notes":{"box_w":"212","offset":"-33"}}
@@ -523,14 +523,14 @@ POST /api/demo/stop
 |------|------|
 | script | **动作名**，读 `$AKA_HOME/demo/<动作>.lua`（`grab` / `approach` …）。只允许字母数字与 `_ - .` |
 | params | 传给脚本的参数（脚本用 `params()` 读），任意扁平/嵌套表 |
-| max_seconds | **宿主强制**的总时长上限，默认 30，夹到 5~300 |
+| params.mode | `once`（默认）跑一遍就结束 / `loop` 跑完接着跑直到被停。**没有超时** |
 
 | state | 含义 |
 |-------|------|
 | `idle` | 没在跑 |
 | `running` | 正在跑 |
 | `done` | 脚本正常结束（`message` 是脚本的返回值） |
-| `failed` | 失败：脚本 `fail()`、推理/相机出错、脚本语法错、超时、底盘掉线 |
+| `failed` | 失败：脚本 `fail()`、推理/相机出错、脚本语法错、底盘掉线 |
 | `aborted` | 被停止：`/api/demo/stop`、人的运动指令接管、服务退出 |
 
 ### 脚本能用的原语（全部只有这些）
@@ -560,7 +560,7 @@ POST /api/demo/stop
 | 约束 | 由谁强制 |
 |------|---------|
 | 速度上限 ±70% | 宿主 clamp 每个驱动原语的参数 |
-| 总时长 | `max_seconds` + **看门狗**（每 2000 条 Lua 指令查一次，`while true do end` 也掐得住） |
+| 执行方式 | `mode`：跑一遍 / 循环跑；**没有总时长上限** —— 停不停由你按停止决定 |
 | 被人的指令取代 | 脚本一驱动，宿主就记下指令代际号；摇杆/`/api/control` 一进来代际号就变，脚本立刻被中断并交出控制权 |
 | stop / 服务退出 / 底盘掉线 | 同上，立刻中断 |
 | 内存 | Lua VM 用带预算的分配器（4MB），脚本狂建 table 也吃不光板子内存 |
@@ -573,7 +573,7 @@ POST /api/demo/stop
 curl -X POST http://<ip>/api/camera/open
 curl "http://<ip>/api/detect?model=tennis"      # 先看框多大，据此定 target_size
 curl -X POST -H 'Content-Type: application/json' \
-  -d '{"script":"grab","max_seconds":30,"params":{"model":"tennis","target_size":300,"speed":20}}' \
+  -d '{"script":"grab","params":{"model":"tennis","target_size":300,"speed":20,"mode":"once"}}' \
   http://<ip>/api/demo/run
 curl http://<ip>/api/demo/status                # 边跑边看 action/notes
 curl -X POST http://<ip>/api/demo/stop          # 随时打断

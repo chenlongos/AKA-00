@@ -9,7 +9,8 @@
 // 脚本只能拿到「有上限的原语」，下面这些由宿主强制，脚本绕不过去（连 pcall 都不给，
 // 所以它也吞不掉宿主的打断）：
 //   · 速度上限       drive/forward/... 的参数一律 clamp 到 ±kScriptMaxSpeed
-//   · 总时长上限     max_seconds，由看门狗 hook 掐（脚本 while true do end 也掐得住）
+//   · 执行方式       params.mode：once（跑一遍）/ loop（跑完接着跑）—— **没有总时长上限**，
+//                    停不停由 stop / 人的指令接管 / 服务退出决定
 //   · 被人的指令取代 有人推进了 motion_seq（摇杆/HTTP 指令）→ 立刻报错退出，交还控制权
 //   · stop / 服务退出 / 底盘掉线 —— 同上，立刻退出
 //   · 内存上限       自定义分配器给 Lua VM 设预算，脚本狂建 table 也吃不光板子的内存
@@ -49,8 +50,8 @@ namespace {
 // 一模一样 —— 全被砍成 35，看起来就像"配置的速度没生效"），所以放宽到 70。
 // 留着它是因为这是唯一拦在"脚本乱发速度"和电机之间的东西，别顺手删。
 constexpr int kScriptMaxSpeed = 70;
-constexpr int kScriptMinSeconds = 5;
-constexpr int kScriptMaxSeconds = 300;
+// 循环执行时每轮之间的间隔（毫秒）：停一下车、也给 stop/人的指令留响应窗口
+constexpr int kScriptLoopGapMs = 200;
 constexpr size_t kScriptMemBytes = 4 * 1024 * 1024;   // 脚本 VM 内存预算
 constexpr int kScriptHookEvery = 2000;                // 每多少条 Lua 指令检查一次打断
 constexpr int kScriptSleepStepMs = 50;                // sleep_ms 切段睡，便于被中断
@@ -62,7 +63,7 @@ constexpr int kScriptKeepaliveMs = 80;
 struct RunCtx {
     AppContext* ctx = nullptr;
     std::chrono::steady_clock::time_point t0;
-    long long budget_ms = 0;
+
     int64_t own_seq = 0;    // 本脚本最近一次推进的指令代际号（用来发现"被接管"）
     bool claimed = false;   // 是否动过电机（没动过就不该误判"被接管"）
     bool moving = false;    // 发过速度且还没回静止 → 收尾兜底要停
@@ -91,8 +92,6 @@ void check_interrupt(lua_State* L, RunCtx* r) {
         r->reason = "aborted: 收到停止请求";
     } else if (r->ctx->shutdown) {
         r->reason = "aborted: 服务退出";
-    } else if (now_ms(r) > r->budget_ms) {
-        r->reason = "timeout: 超过 max_seconds（" + std::to_string(r->budget_ms / 1000) + "s）";
     } else if (r->claimed && motion_seq_now(*r->ctx) != r->own_seq) {
         r->reason = "superseded: 被新的运动指令取代（人接管）";
     } else if (!motor_ok(*r->ctx)) {
@@ -484,22 +483,21 @@ struct ScriptThreadArg {
     AppContext* ctx;
     std::string name;
     csrc::Json params;
-    long long budget_ms;
+    bool repeat;      // 循环执行：跑完一轮接着下一轮，直到被停
 };
 
-void script_worker(AppContext& ctx, std::string name, csrc::Json params, long long budget_ms);
+void script_worker(AppContext& ctx, std::string name, csrc::Json params, bool repeat);
 
 void* script_thread_entry(void* p) {
     std::unique_ptr<ScriptThreadArg> a((ScriptThreadArg*)p);
-    script_worker(*a->ctx, a->name, a->params, a->budget_ms);
+    script_worker(*a->ctx, a->name, a->params, a->repeat);
     return nullptr;
 }
 
-void script_worker(AppContext& ctx, std::string name, csrc::Json params, long long budget_ms) {
+void script_worker(AppContext& ctx, std::string name, csrc::Json params, bool repeat) {
     RunCtx r;
     r.ctx = &ctx;
     r.t0 = std::chrono::steady_clock::now();
-    r.budget_ms = budget_ms;
 
     // 收尾（无论从哪条路出去都要走）：停电机 + 落状态 + 清理线程句柄
     auto finish = [&](const std::string& reason, const std::string& ret) {
@@ -538,47 +536,83 @@ void script_worker(AppContext& ctx, std::string name, csrc::Json params, long lo
         return;
     }
 
-    lua_State* L = lua_newstate(budget_alloc, &r);
-    if (!L) {
-        fail("failed: 创建 Lua VM 失败");
-        return;
-    }
-    open_sandbox(L);
-    register_primitives(L, &r);
-    json_to_lua(L, params);
-    lua_setglobal(L, "__params");
-    *(RunCtx**)lua_getextraspace(L) = &r;   // 看门狗 hook 从这里取状态
-    lua_sethook(L, hook_tick, LUA_MASKCOUNT, kScriptHookEvery);
-
-    CAM_INFO("[script] 跑 %s（上限 %llds）", path.c_str(), budget_ms / 1000);
+    // 一轮 = 一份干净 VM 跑一遍脚本。
+    // 循环执行（卡片上选"循环"）：跑完一轮接着下一轮，直到被停（stop / 人的指令接管 /
+    // 服务退出）—— **没有总时长上限**，停不停由你决定。
     std::string ret;
-    if (luaL_loadbuffer(L, src.c_str(), src.size(), ("@" + path).c_str()) != LUA_OK) {
-        const char* e = lua_tostring(L, -1);
-        if (r.reason.empty()) r.reason = std::string("error: 脚本语法错误：") + (e ? e : "?");
-    } else if (lua_pcall(L, 0, 1, 0) != LUA_OK) {
-        const char* e = lua_tostring(L, -1);
-        if (r.reason.empty()) r.reason = std::string("error: ") + (e ? e : "?");
-    } else if (lua_type(L, -1) == LUA_TSTRING) {
-        ret = lua_tostring(L, -1);   // 脚本的返回值当结果说明
-    } else if (lua_isboolean(L, -1) && !lua_toboolean(L, -1)) {
-        r.reason = "failed: 脚本返回 false";
+    int round = 0;
+    while (true) {
+        round++;
+        r.reason.clear();
+        r.moving = false;   // 每轮重新算（收尾兜底刹车时用它）
+        {
+            std::lock_guard<std::mutex> lk(ctx.script_mu);
+            ctx.script_round = round;
+        }
+
+        lua_State* L = lua_newstate(budget_alloc, &r);
+        if (!L) {
+            finish("failed: 创建 Lua VM 失败", "");
+            return;
+        }
+        open_sandbox(L);
+        register_primitives(L, &r);
+        json_to_lua(L, params);
+        lua_setglobal(L, "__params");
+        *(RunCtx**)lua_getextraspace(L) = &r;   // 看门狗 hook 从这里取状态
+        lua_sethook(L, hook_tick, LUA_MASKCOUNT, kScriptHookEvery);
+
+        if (repeat) {
+            CAM_INFO("[script] 跑 %s（第 %d 轮，循环执行）", path.c_str(), round);
+        } else {
+            CAM_INFO("[script] 跑 %s", path.c_str());
+        }
+        if (luaL_loadbuffer(L, src.c_str(), src.size(), ("@" + path).c_str()) != LUA_OK) {
+            const char* e = lua_tostring(L, -1);
+            if (r.reason.empty()) r.reason = std::string("error: 脚本语法错误：") + (e ? e : "?");
+        } else if (lua_pcall(L, 0, 1, 0) != LUA_OK) {
+            const char* e = lua_tostring(L, -1);
+            if (r.reason.empty()) r.reason = std::string("error: ") + (e ? e : "?");
+        } else if (lua_type(L, -1) == LUA_TSTRING) {
+            ret = lua_tostring(L, -1);   // 脚本的返回值当结果说明
+        } else if (lua_isboolean(L, -1) && !lua_toboolean(L, -1)) {
+            r.reason = "failed: 脚本返回 false";
+        }
+        lua_close(L);
+
+        if (!repeat || ctx.script_abort || ctx.shutdown) {
+            // 循环模式是在轮与轮之间被叫停的：这一轮本身是正常结束的，但状态要标成
+            // "被停止"才准确 —— 否则界面上看着像"自然跑完了"
+            if (repeat && r.reason.empty()) {
+                r.reason = ctx.shutdown ? "aborted: 服务退出" : "aborted: 收到停止请求";
+            }
+            break;
+        }
+        // 轮与轮之间：先把车停住（上一轮可能停在"还在走"的状态），喘口气再继续 ——
+        // 这段时间也让人来得及按停止
+        if (r.moving) {
+            ctx.motor_pair->brake();
+            r.moving = false;
+        }
+        for (int i = 0; i < 4 && !ctx.script_abort && !ctx.shutdown; i++) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(kScriptLoopGapMs / 4));
+        }
     }
-    lua_close(L);
     finish(r.reason, ret);
 }
 
 }  // namespace
 
-csrc::Json script_run(AppContext& ctx, const std::string& name, const csrc::Json& params,
-                      int max_seconds) {
+csrc::Json script_run(AppContext& ctx, const std::string& name, const csrc::Json& params) {
     csrc::Json j;
     if (!valid_model_name(name)) {   // 同一个"名字会拼进路径"的校验（禁 / 与 ..）
         j["ok"] = false;
-        j["error"] = "脚本名非法（只允许字母数字与 _ - .）：" + name;
+        j["error"] = "动作名非法（只允许字母数字与 _ - .）：" + name;
         return j;
     }
-    if (max_seconds < kScriptMinSeconds) max_seconds = kScriptMinSeconds;
-    if (max_seconds > kScriptMaxSeconds) max_seconds = kScriptMaxSeconds;
+    // 执行方式：params.mode = "once"（默认，跑一遍就结束）| "loop"（跑完接着跑，直到被停）。
+    // **没有总时长上限** —— 跑多久由这个模式 + 你什么时候按停止决定。
+    const bool repeat = params.gets("mode") == "loop";
 
     // 入口就把"动作脚本不存在"挡掉：以前是异步失败（先回 ok:true 再变 failed），
     // 动作名打错一个字母要过一会儿才看得出来
@@ -601,11 +635,12 @@ csrc::Json script_run(AppContext& ctx, const std::string& name, const csrc::Json
         ctx.script_name = name;
         ctx.script_model = params.gets("model");   // 卡片里的模型（直接跑时是请求里给的）
         ctx.script_card = params.gets("card");     // 卡片名；直接 action+model 跑时为空
+        ctx.script_repeat = repeat;
+        ctx.script_round = 0;
         ctx.script_calls = 0;
         ctx.script_action.clear();
         ctx.script_notes.clear();
     }
-    const long long budget_ms = (long long)max_seconds * 1000;
     {
         std::lock_guard<std::mutex> lk(ctx.script_mu);
         // 回收上一次的线程（pthread_join：此刻它一定已跑完，join 立即返回并释放资源）
@@ -617,7 +652,7 @@ csrc::Json script_run(AppContext& ctx, const std::string& name, const csrc::Json
         pthread_attr_t attr;
         pthread_attr_init(&attr);
         pthread_attr_setstacksize(&attr, kScriptStackBytes);
-        auto* arg = new ScriptThreadArg{&ctx, name, params, budget_ms};
+        auto* arg = new ScriptThreadArg{&ctx, name, params, repeat};
         const int rc = pthread_create(&ctx.script_tid, &attr, script_thread_entry, arg);
         pthread_attr_destroy(&attr);
         if (rc != 0) {
@@ -635,7 +670,7 @@ csrc::Json script_run(AppContext& ctx, const std::string& name, const csrc::Json
     j["ok"] = true;
     j["state"] = "running";
     j["script"] = name;
-    j["max_seconds"] = csrc::Json((int64_t)max_seconds);
+    j["mode"] = repeat ? "loop" : "once";
     return j;
 }
 
@@ -663,6 +698,8 @@ csrc::Json script_status(AppContext& ctx) {
     std::lock_guard<std::mutex> lk(ctx.script_mu);
     j["state"] = ctx.script_state;
     j["script"] = ctx.script_name;       // 动作名（demo/<动作>.lua）
+    j["mode"] = ctx.script_repeat ? "loop" : "once";
+    j["round"] = csrc::Json((int64_t)ctx.script_round);   // 循环执行跑到第几轮
     j["model"] = ctx.script_model;       // 在追哪个模型
     j["card"] = ctx.script_card;         // 哪张卡片（空 = 直接 action+model 跑的）
     j["message"] = ctx.script_message;

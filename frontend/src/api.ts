@@ -88,7 +88,7 @@ export const demo = {
     getConfig: (name: string) => fetch(`/api/demo/config?name=${encodeURIComponent(name)}`).then(r => r.json()),
     setConfig: (name: string,
                 params: {action?: string; model?: string; target_size: number; speed: number;
-                         turn_speed: number; max_seconds: number}) =>
+                         turn_speed: number; mode?: "once" | "loop"}) =>
         fetch("/api/demo/config", {
             method: "POST",
             headers: {"Content-Type": "application/json"},

@@ -59,7 +59,8 @@ std::string demo_config_path(AppContext& ctx, const std::string& name) {
 constexpr int kDemoTargetSizeDefault = 300;
 constexpr int kDemoSpeedDefault = 25;        // 直线速度（%）
 constexpr int kDemoTurnSpeedDefault = 25;    // 转弯速度（%）—— 和直线分开：转弯要的占空比不同
-constexpr int kDemoMaxSecondsDefault = 60;
+// 执行方式（卡片上一个字段）：跑一遍就结束 / 跑完接着跑直到被停
+constexpr const char* kDemoModeDefault = "once";
 
 /// 一张卡片（= 一份 configs/<卡片名>.json）
 struct DemoCard {
@@ -86,7 +87,8 @@ bool load_demo_card(AppContext& ctx, const std::string& name, DemoCard& out) {
     out.params["target_size"] = csrc::Json((int64_t)one.geti("target_size", kDemoTargetSizeDefault));
     out.params["speed"] = csrc::Json((int64_t)one.geti("speed", kDemoSpeedDefault));
     out.params["turn_speed"] = csrc::Json((int64_t)one.geti("turn_speed", kDemoTurnSpeedDefault));
-    out.params["max_seconds"] = csrc::Json((int64_t)one.geti("max_seconds", kDemoMaxSecondsDefault));
+    const std::string mode = one.gets("mode");
+    out.params["mode"] = (mode == "loop") ? "loop" : "once";
     return !out.action.empty() && !out.model.empty();
 }
 
@@ -120,7 +122,7 @@ bool save_demo_card(AppContext& ctx, const std::string& name, const std::string&
     one["target_size"] = csrc::Json((int64_t)params.geti("target_size", kDemoTargetSizeDefault));
     one["speed"] = csrc::Json((int64_t)params.geti("speed", kDemoSpeedDefault));
     one["turn_speed"] = csrc::Json((int64_t)params.geti("turn_speed", kDemoTurnSpeedDefault));
-    one["max_seconds"] = csrc::Json((int64_t)params.geti("max_seconds", kDemoMaxSecondsDefault));
+    one["mode"] = (params.gets("mode") == "loop") ? "loop" : "once";
     std::ofstream f(demo_config_path(ctx, name));
     if (!f) return false;
     f << one.dump(false);
@@ -1004,7 +1006,7 @@ void register_routes(Router& router, AppContext& ctx) {
     // 调试/一次性用；正常跑 demo 走 `/api/demo/init`（跑卡片，或 action+model，会先校验
     // 动作脚本和模型文件都在）。
     // 把"看→对准→靠近→抓"这类要反复调参的流程写成脚本，改一行存盘重跑，不用重编部署。
-    // 安全兜底（限速/总超时/被人的指令取代/底盘掉线/内存与卡死）全在宿主里，脚本绕不过去。
+    // 安全兜底（限速/被人的指令取代/底盘掉线/内存与卡死）全在宿主里，脚本绕不过去。
     router.add("POST", "/api/demo/run", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
         const Json payload = req.json();
         if (!payload.is_object()) {
@@ -1013,12 +1015,12 @@ void register_routes(Router& router, AppContext& ctx) {
         }
         const std::string name = payload.gets("script");
         if (name.empty()) {
-            resp.set_error("script 必填（例：tennis）", 400);
+            resp.set_error("script 必填（动作名，例：grab）", 400);
             return;
         }
+        // params 原样给脚本（含 mode=once|loop）；**没有 max_seconds**，跑多久看模式与停止
         const Json* params = payload.get("params");
-        const int max_seconds = (int)payload.geti("max_seconds", 30);
-        const Json r = script_run(ctx, name, params ? *params : Json(), max_seconds);
+        const Json r = script_run(ctx, name, params ? *params : Json());
         resp.set_json(r, r.getb("ok") ? 200 : 400);
     });
 
@@ -1140,7 +1142,7 @@ void register_routes(Router& router, AppContext& ctx) {
             params["target_size"] = Json((int64_t)payload.geti("target_size", kDemoTargetSizeDefault));
             params["speed"] = Json((int64_t)payload.geti("speed", kDemoSpeedDefault));
             params["turn_speed"] = Json((int64_t)payload.geti("turn_speed", kDemoTurnSpeedDefault));
-            params["max_seconds"] = Json((int64_t)payload.geti("max_seconds", kDemoMaxSecondsDefault));
+            params["mode"] = (payload.gets("mode") == "loop") ? "loop" : "once";
         }
 
         // 名字都要拼进路径，且必须真存在 —— 在这里挡掉，别让它变成脚本里一句含糊的报错
@@ -1165,14 +1167,14 @@ void register_routes(Router& router, AppContext& ctx) {
         if (payload.get("target_size")) params["target_size"] = Json(payload.geti("target_size", kDemoTargetSizeDefault));
         if (payload.get("speed")) params["speed"] = Json(payload.geti("speed", kDemoSpeedDefault));
         if (payload.get("turn_speed")) params["turn_speed"] = Json(payload.geti("turn_speed", kDemoTurnSpeedDefault));
-        if (payload.get("max_seconds")) params["max_seconds"] = Json(payload.geti("max_seconds", kDemoMaxSecondsDefault));
+        if (payload.get("mode")) params["mode"] = payload.gets("mode");
 
         // ★ 模型来自卡片/请求，**不是卡片名** —— 搞错的话脚本会去开
         //   demo/models/<卡片名>.cvimodel，报错长成"注册模型失败"，极具误导性
         params["model"] = model;
         params["card"] = card;   // 让状态能回答"现在跑的是哪张卡"；脚本不用管它
 
-        const Json r = script_run(ctx, action, params, (int)params.geti("max_seconds", kDemoMaxSecondsDefault));
+        const Json r = script_run(ctx, action, params);
 
         if (!r.getb("ok")) {
             const Json st = script_status(ctx);
@@ -1267,7 +1269,7 @@ void register_routes(Router& router, AppContext& ctx) {
         j["target_size"] = Json((int64_t)payload.geti("target_size", kDemoTargetSizeDefault));
         j["speed"] = Json((int64_t)payload.geti("speed", kDemoSpeedDefault));
         j["turn_speed"] = Json((int64_t)payload.geti("turn_speed", kDemoTurnSpeedDefault));
-        j["max_seconds"] = Json((int64_t)payload.geti("max_seconds", kDemoMaxSecondsDefault));
+        j["mode"] = (payload.gets("mode") == "loop") ? "loop" : "once";
         resp.set_json(j);
     });
 

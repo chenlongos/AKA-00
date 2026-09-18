@@ -20,23 +20,29 @@ interface DemoInfo {
 // 动作清单：name 是脚本第一行 `-- name: 接近瞄准` 给的显示名，缺省就是文件名
 interface ActionInfo { id: string; name: string; }
 
-interface DemoParams { target_size: number; speed: number; turn_speed: number; max_seconds: number; }
-// 表单里存字符串：编辑期间不解析，清空/输一半都不会突然跳成 0；保存时才转数字。
-type DemoForm = { target_size: string; speed: string; turn_speed: string; max_seconds: string };
+// 执行方式：once = 跑一遍就结束；loop = 跑完接着跑，直到你按停止（**没有超时**）
+type RunMode = "once" | "loop";
+interface DemoParams { target_size: number; speed: number; turn_speed: number; mode: RunMode; }
+// 表单里数字存字符串：编辑期间不解析，清空/输一半都不会突然跳成 0；保存时才转数字。
+type DemoForm = { target_size: string; speed: string; turn_speed: string; mode: RunMode };
 
-const DEFAULT_PARAMS: DemoParams = {target_size: 300, speed: 25, turn_speed: 25, max_seconds: 60};
-const EMPTY_FORM: DemoForm = {target_size: "", speed: "", turn_speed: "", max_seconds: ""};
+const DEFAULT_PARAMS: DemoParams = {target_size: 300, speed: 25, turn_speed: 25, mode: "once"};
+const EMPTY_FORM: DemoForm = {target_size: "", speed: "", turn_speed: "", mode: "once"};
 const formOf = (p: DemoParams): DemoForm => ({
     target_size: String(p.target_size), speed: String(p.speed), turn_speed: String(p.turn_speed),
-    max_seconds: String(p.max_seconds),
+    mode: p.mode === "loop" ? "loop" : "once",
 });
 // 空着的字段回落到默认值（与后端 /api/demo/config 的默认值一致）
 const parseForm = (f: DemoForm): DemoParams => ({
     target_size: parseInt(f.target_size, 10) || DEFAULT_PARAMS.target_size,
     speed: parseInt(f.speed, 10) || DEFAULT_PARAMS.speed,
     turn_speed: parseInt(f.turn_speed, 10) || DEFAULT_PARAMS.turn_speed,
-    max_seconds: parseInt(f.max_seconds, 10) || DEFAULT_PARAMS.max_seconds,
+    mode: f.mode === "loop" ? "loop" : "once",
 });
+const MODES: {id: RunMode; label: string}[] = [
+    {id: "once", label: "执行一次"},
+    {id: "loop", label: "循环执行"},
+];
 
 const DemoPage = () => {
     const {scalePx} = useViewportScale();
@@ -80,7 +86,7 @@ const DemoPage = () => {
                             target_size: p.target_size ?? DEFAULT_PARAMS.target_size,
                             speed: p.speed ?? DEFAULT_PARAMS.speed,
                             turn_speed: p.turn_speed ?? DEFAULT_PARAMS.turn_speed,
-                            max_seconds: p.max_seconds ?? DEFAULT_PARAMS.max_seconds,
+                            mode: (p as {mode?: RunMode}).mode === "loop" ? "loop" : "once",
                         }),
                     }));
                 }).catch(() => {});
@@ -135,7 +141,7 @@ const DemoPage = () => {
         } catch (err) { setDemoStatus(`错误: ${err}`); setRunningDemo(null); runningDemoRef.current = null; }
     };
 
-    const changeParam = (name: string, key: keyof DemoParams, value: string) => {
+    const changeParam = (name: string, key: "target_size" | "speed" | "turn_speed", value: string) => {
         // 只留数字，避免用户输入法带进别的字符；不转成数字（见 DemoForm 的注释）
         const digits = value.replace(/[^0-9]/g, "");
         setParams(prev => ({...prev, [name]: {...(prev[name] || formOf(DEFAULT_PARAMS)), [key]: digits}}));
@@ -151,7 +157,7 @@ const DemoPage = () => {
             if (r.error) {
                 setSavedHint(`${name}: 保存失败 ${r.error}`);
             } else {
-                setSavedHint(`${name}: 已保存（目标框宽 ${p.target_size}px，直线 ${p.speed}%，转弯 ${p.turn_speed}%，超时 ${p.max_seconds}s）`);
+                setSavedHint(`${name}: 已保存（目标框宽 ${p.target_size}px，直线 ${p.speed}%，转弯 ${p.turn_speed}%，${p.mode === "loop" ? "循环执行" : "执行一次"}）`);
             }
         } catch (err) { setSavedHint(`${name}: 保存失败 ${err}`); }
         finally { setSavingName(null); setTimeout(() => setSavedHint(null), 4000); }
@@ -201,7 +207,7 @@ const DemoPage = () => {
     };
     const labelStyle = {fontSize: scalePx(10), color: "var(--color-text-dim)"};
 
-    const numInput = (name: string, key: keyof DemoParams, label: string) => (
+    const numInput = (name: string, key: "target_size" | "speed" | "turn_speed", label: string) => (
         <div style={{display: "flex", flexDirection: "column", gap: scalePx(3), flex: "1 1 0", minWidth: scalePx(72)}}>
             <span style={labelStyle}>{label}</span>
             <input
@@ -216,7 +222,7 @@ const DemoPage = () => {
     );
 
     // 新建表单里的数字输入（同一套样式，只是 key 在 newForm 上）
-    const newNumInput = (key: keyof DemoParams, label: string) => (
+    const newNumInput = (key: "target_size" | "speed" | "turn_speed", label: string) => (
         <div style={{display: "flex", flexDirection: "column", gap: scalePx(3), flex: "1 1 0", minWidth: scalePx(72)}}>
             <span style={labelStyle}>{label}</span>
             <input
@@ -306,7 +312,10 @@ const DemoPage = () => {
                                 {newNumInput("target_size", "目标框宽 px")}
                                 {newNumInput("speed", "直线速度 %")}
                                 {newNumInput("turn_speed", "转弯速度 %")}
-                                {newNumInput("max_seconds", "超时 s")}
+                            </div>
+                            <div style={{display: "flex", flexDirection: "column", gap: scalePx(4)}}>
+                                <span style={labelStyle}>执行方式</span>
+                                {chooser(MODES, newForm.mode, m => setNewForm(prev => ({...prev, mode: m as RunMode})))}
                             </div>
                             <div style={{display: "flex", justifyContent: "flex-end"}}>
                                 <ControlButton variant="primary" size="small" onClick={createCard} loading={creating}>
@@ -346,6 +355,7 @@ const DemoPage = () => {
                                                 <div style={{fontWeight: 600, fontSize: scalePx(14)}}>{name}</div>
                                                 <div style={{fontSize: scalePx(11), color: "var(--color-text-dim)", marginTop: 1}}>
                                                     {actionLabel(card.action)} · {card.model}
+                                                    {(params[name]?.mode ?? "once") === "loop" ? " · 循环" : " · 一次"}
                                                     {isRunning ? " · ● 运行中" : ""}
                                                 </div>
                                                 {!card.ready && (
@@ -386,7 +396,6 @@ const DemoPage = () => {
                                             {numInput(name, "target_size", "目标框宽 px")}
                                             {numInput(name, "speed", "直线速度 %")}
                                             {numInput(name, "turn_speed", "转弯速度 %")}
-                                            {numInput(name, "max_seconds", "超时 s")}
                                             <div style={{display: "flex", alignItems: "flex-end"}}>
                                                 <ControlButton
                                                     variant="secondary" size="small"
