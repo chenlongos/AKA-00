@@ -396,6 +396,16 @@ const DemoPage = () => {
                                             {numInput(name, "target_size", "目标框宽 px")}
                                             {numInput(name, "speed", "直线速度 %")}
                                             {numInput(name, "turn_speed", "转弯速度 %")}
+                                            {/* 执行方式：一次 / 循环，跟其它参数一样改完点保存 */}
+                                            <div style={{display: "flex", flexDirection: "column", gap: scalePx(3), minWidth: scalePx(120)}}>
+                                                <span style={labelStyle}>执行方式</span>
+                                                {chooser(MODES, (params[name] || formOf(DEFAULT_PARAMS)).mode,
+                                                         m => setParams(prev => ({
+                                                             ...prev,
+                                                             [name]: {...(prev[name] || formOf(DEFAULT_PARAMS)),
+                                                                      mode: m as RunMode},
+                                                         })))}
+                                            </div>
                                             <div style={{display: "flex", alignItems: "flex-end"}}>
                                                 <ControlButton
                                                     variant="secondary" size="small"
