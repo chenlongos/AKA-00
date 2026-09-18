@@ -388,6 +388,30 @@ curl -F "file=@tennis.cvimodel" "http://<ip>/api/models/upload?name=tennis"
 | 请求体为空 | 400 | `请求体为空（把模型文件放进 body）` |
 | 超过 32MB | 413 | `文件过大：34603008 字节，上限 32MB` |
 
+### 删除模型
+
+```
+POST /api/models/delete
+{"name": "tennis"}
+```
+
+```json
+{"ok": true, "name": "tennis", "cards": ["追网球接近"]}
+```
+
+| 失败 | HTTP | error 示例 |
+|------|------|-----------|
+| 没给 name | 400 | `name 必填（要删的模型名，不带 .cvimodel）` |
+| name 非法 | 400 | `模型名非法（只允许字母数字与 _ - .）：../tennis` |
+| 没有这个模型 | 400 | `没有这个模型：demo/models/tennis.cvimodel` |
+
+**只删 `demo/models/<名字>.cvimodel` 这一个文件**（Demo 页上模型标签右上角那个 ✕ 走的就是它）。
+用它建过的卡**不会跟着删**：卡片配置不动，只是变成 `ready=false`、点开始报 `模型文件缺失` ——
+重传一个同名模型就原地复活。响应的 `cards` 是"正在用它的卡片名"，界面拿它提示后果。
+
+> 板上删掉**包里自带**的模型只到下次 OTA 为止：升级按文件名取并集，同名会用包里的版本
+> （见 `cpp/scripts/build-ota.sh`）。想让它彻底不来，得从 `cpp/board/demo/models/` 里去掉。
+
 ### 训练平台直传（浏览器 → 小车）
 
 训练平台（`yolotrain.chenlongrobot.com`）训练完，浏览器把模型**直传小车**（同一局域网），

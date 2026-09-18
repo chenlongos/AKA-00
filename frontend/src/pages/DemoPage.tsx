@@ -74,6 +74,9 @@ const DemoPage = () => {
     const [newForm, setNewForm] = useState<DemoForm>(EMPTY_FORM);
     const [creating, setCreating] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+    // 模型：删一个（等确认）、传一个（文件正在上传）
+    const [deleteModel, setDeleteModel] = useState<string | null>(null);
+    const [uploadingModel, setUploadingModel] = useState(false);
 
     const fetchDemoList = useCallback(() => {
         api.demo.list().then(data => {
@@ -197,6 +200,49 @@ const DemoPage = () => {
         finally { fetchDemoList(); setTimeout(() => setSavedHint(null), 4000); }
     };
 
+    /** 文件名 → 模型名：去掉 .cvimodel，再把后端不收的字符（空格、中文…）换成 _
+     *  —— 后端只认 [A-Za-z0-9_-.]+，不换的话会直接被 400 顶回来，还得让人回去重命名文件。 */
+    const modelNameFromFile = (fname: string) =>
+        fname.replace(/\.cvimodel$/i, "").replace(/[^A-Za-z0-9_.-]/g, "_");
+
+    const uploadModel = async (file: File) => {
+        const name = modelNameFromFile(file.name);
+        if (!name) {
+            setSavedHint("文件名里没取出模型名，请改名成「<名字>.cvimodel」再传");
+            setTimeout(() => setSavedHint(null), 6000);
+            return;
+        }
+        setUploadingModel(true);
+        try {
+            const r = await api.models.upload(name, file);
+            if (r.error) {
+                setSavedHint(`上传失败：${r.error}`);
+            } else {
+                setSavedHint(`已上传模型 ${r.name}（${Math.round((r.size ?? 0) / 1024)}KB）—— 下面已选中它`);
+                setNewModel(r.name);   // 传完就用它建卡，省得再点一下
+                fetchDemoList();
+            }
+        } catch (err) { setSavedHint(`上传失败：${err}`); }
+        finally { setUploadingModel(false); setTimeout(() => setSavedHint(null), 6000); }
+    };
+
+    const doDeleteModel = async () => {
+        const name = deleteModel;
+        setDeleteModel(null);
+        if (!name) return;
+        try {
+            const r = await api.models.remove(name);
+            if (r.error) {
+                setSavedHint(`删除模型失败 ${r.error}`);
+            } else {
+                // 用着它的卡片会变成"模型缺失"（卡片配置没动），所以列表要重拉
+                const used: string[] = r.cards || [];
+                setSavedHint(`已删除模型 ${name}` + (used.length ? `（${used.length} 张卡片变成模型缺失）` : ""));
+            }
+        } catch (err) { setSavedHint(`删除模型失败 ${err}`); }
+        finally { fetchDemoList(); setTimeout(() => setSavedHint(null), 6000); }
+    };
+
     const maxW = {width: "100%", maxWidth: scalePx(420)};
     // 状态点：空闲=低调的灰，运行=绿+光晕。（不要用 S.dot —— 它不运行时是红的，
     // 一屏卡片全是红点，看着像每一张都出错了）
@@ -258,6 +304,53 @@ const DemoPage = () => {
         </div>
     );
 
+    /** 模型那一排：可点选的小标签，**每个右上角一个删除的 ✕**，末尾一个 ＋ 传新模型。
+     *  ✕ 与标签是**兄弟节点**而不是父子 —— button 里套 button 是非法 HTML，点 ✕ 会连带选中它。
+     *  标签间距放大到 9px 是给 ✕ 让位置（它往外挑 5px）。 */
+    const modelChips = () => (
+        <div style={{display: "flex", gap: scalePx(9), flexWrap: "wrap", alignItems: "flex-start"}}>
+            {models.length === 0 && (
+                <span style={{fontSize: scalePx(11), color: "var(--color-text-dim)"}}>（还没有模型，点右边的 ＋ 传一个）</span>
+            )}
+            {models.map(m => (
+                <span key={m} style={{position: "relative", display: "inline-flex"}}>
+                    <button onClick={() => setNewModel(m)} style={{
+                        padding: `${scalePx(5)} ${scalePx(12)} ${scalePx(5)} ${scalePx(9)}`, cursor: "pointer",
+                        fontSize: scalePx(12), borderRadius: scalePx(6), border: "none",
+                        background: newModel === m ? "var(--color-primary)" : "var(--color-bg-subtle)",
+                        color: newModel === m ? "#fff" : "var(--color-text)",
+                    }}>{m}</button>
+                    <button title={`删除模型 ${m}`} aria-label={`删除模型 ${m}`}
+                            onClick={e => { e.stopPropagation(); setDeleteModel(m); }}
+                            style={{
+                                position: "absolute", top: scalePx(-5), right: scalePx(-5),
+                                width: scalePx(15), height: scalePx(15), padding: 0, lineHeight: 1,
+                                display: "flex", alignItems: "center", justifyContent: "center",
+                                borderRadius: "50%", border: "none", cursor: "pointer",
+                                fontSize: scalePx(10), fontWeight: 700,
+                                background: "var(--color-danger)", color: "#fff",
+                            }}>×</button>
+                </span>
+            ))}
+            <label title="上传模型（.cvimodel）" style={{
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                minWidth: scalePx(26), height: scalePx(26), padding: `0 ${scalePx(6)}`,
+                cursor: uploadingModel ? "wait" : "pointer",
+                borderRadius: scalePx(6), border: "1px dashed var(--color-border-light)",
+                color: "var(--color-text-muted)", fontSize: uploadingModel ? scalePx(10) : scalePx(14),
+            }}>
+                {uploadingModel ? "上传中…" : "＋"}
+                <input type="file" accept=".cvimodel" disabled={uploadingModel}
+                       style={{display: "none"}}
+                       onChange={e => {
+                           const f = e.target.files?.[0];
+                           e.target.value = "";   // 清空，同一个文件再选一次也要能触发
+                           if (f) uploadModel(f);
+                       }}/>
+            </label>
+        </div>
+    );
+
     /** 数字输入：标签在上、单位贴在框内右侧 */
     const numField = (
         form: DemoForm,
@@ -292,7 +385,13 @@ const DemoPage = () => {
                 <div style={{...S.rowBetween, marginBottom: scalePx(8)}}>
                     <h3 style={{fontSize: scalePx(14), fontWeight: 600, margin: 0}}>本地 Demo</h3>
                     <ControlButton variant={showCreate ? "secondary" : "primary"} size="small"
-                                   onClick={() => setShowCreate(v => !v)}>
+                                   onClick={() => {
+                                       // 展开时才拉一次清单：动作与模型是**板子上的文件**，随时可能
+                                       // 被传上来。原来只在页面加载时拉一次，于是"刚传了模型 → 点新建"
+                                       // 看不到它（实测踩过），得手动刷新页面才行。
+                                       if (!showCreate) fetchDemoList();
+                                       setShowCreate(v => !v);
+                                   }}>
                         {showCreate ? "取消" : "新建"}
                     </ControlButton>
                 </div>
@@ -314,8 +413,8 @@ const DemoPage = () => {
                                 {chooser(actions.map(a => ({id: a.id, label: a.name})), newAction, setNewAction)}
                             </div>
                             <div style={{display: "flex", flexDirection: "column", gap: scalePx(4)}}>
-                                <span style={labelStyle}>模型（找什么）</span>
-                                {chooser(models.map(m => ({id: m, label: m})), newModel, setNewModel)}
+                                <span style={labelStyle}>模型（找什么）—— ✕ 删掉、＋ 传新的</span>
+                                {modelChips()}
                             </div>
                             <div style={{display: "flex", alignItems: "flex-end", gap: scalePx(8), flexWrap: "wrap"}}>
                                 {NUM_FIELDS.map(f => numField(newForm, (k, v) =>
@@ -454,6 +553,24 @@ const DemoPage = () => {
                 danger
                 onConfirm={doDelete}
                 onCancel={() => setDeleteTarget(null)}
+            />
+
+            {/* 删模型：卡片不会跟着删，但用到它的会变成"模型缺失" —— 有的话就在这句里说清楚 */}
+            <ConfirmDialog
+                open={deleteModel !== null}
+                title="删除模型"
+                message={(() => {
+                    const name = deleteModel ?? "";
+                    const used = demos.filter(d => d.model === name).map(d => d.name);
+                    const head = `删除模型「${name}」？文件 demo/models/${name}.cvimodel 会从板子上删掉。`;
+                    return used.length
+                        ? `${head}有 ${used.length} 张卡片在用它（${used.join("、")}）—— 删除后它们会变成"模型缺失"，卡片本身不会删。`
+                        : head;
+                })()}
+                confirmText="删除"
+                danger
+                onConfirm={doDeleteModel}
+                onCancel={() => setDeleteModel(null)}
             />
         </Page>
     );

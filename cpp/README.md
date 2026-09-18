@@ -313,7 +313,7 @@ capp 同时支持 HTTP 和 HTTPS：默认 `:80` 与 `:443` 共存。443 是浏�
 | `GET/POST /api/arm/angles` `GET/POST /api/arm/angles/default` `POST /api/arm/angles/preview` | 机械臂 |
 | `GET /api/camera/status` `POST /api/camera/open|close` `GET /api/camera/stream|snapshot|speed|all_status` | 摄像头 |
 | `GET /api/detect?model=<名字>&conf=&iou=` | 单帧推理：取当前帧跑一次模型，只回框的四个角（原像素坐标）。模型必填、裸名字映射 `demo/models/<名字>.cvimodel`；`conf`/`iou` 可选（默认 0.25 / 0.45） |
-| `POST /api/models/upload?name=<名字>` | 模型上传：平台把模型文件推到 `demo/models/`（body 为文件；同名覆盖、覆盖即生效） |
+| `POST /api/models/upload?name=<名字>` `POST /api/models/delete` | 模型上传/删除：平台把模型文件推到 `demo/models/`（body 为文件；同名覆盖、覆盖即生效）；删除只删文件，用到它的卡片变成"模型缺失"（重传同名即复活） |
 | `POST /api/demo/run` `GET /api/demo/status` `POST /api/demo/stop` | 跑**动作脚本**（`demo/grab.lua`、`demo/approach.lua`；模型用 `params.model` 传）。安全兜底（限速/被接管/掉线/内存）在宿主里；执行方式 `mode=once|loop`：**once 最多 5 分钟**（到点宿主自己收工），loop 没有总时长上限 |
 | `GET /api/demo/list|name|config` `POST /api/demo/init|stop|config|delete` | demo 卡片 = **动作 × 模型**（用户建，一份配置一张卡 `demo/configs/<卡片名>.json`）。init 两种形状：`{"name":卡片名}` 或 `{"action":..,"model":..}` |
 | `GET /api/ota/version|status|check|upgrade/progress` `POST /api/ota/upgrade|update` | OTA |

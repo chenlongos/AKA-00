@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>   // errno + strerror（删模型失败时说清楚为什么）
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -951,6 +952,43 @@ void register_routes(Router& router, AppContext& ctx) {
         }
         const Json r = save_model_upload(ctx, name, content);
         resp.set_json(r, r.getb("ok") ? 200 : 400);
+    });
+
+    // 模型删除：**只删 demo/models/<名字>.cvimodel 这一个文件**。
+    // 卡片配置不动 —— 用到它的卡片照样列在 Demo 页上，只是 ready=false、点开始会明确报
+    // "模型文件缺失"（不清卡片是故意的：重传一个同名模型就原地复活）。
+    // 响应里回一份"哪些卡片在用它"，界面删之前就能把后果说清楚。
+    router.add("POST", "/api/models/delete", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
+        const Json payload = req.json();
+        const std::string name = payload.is_object() ? payload.gets("name") : "";
+        if (name.empty()) {
+            resp.set_error("name 必填（要删的模型名，不带 .cvimodel）", 400);
+            return;
+        }
+        // 和上传同一个校验：名字会拼进路径，禁 / 与 ..
+        if (!valid_model_name(name)) {
+            resp.set_error("模型名非法（只允许字母数字与 _ - .）：" + name, 400);
+            return;
+        }
+        const std::string path = model_path(ctx, name);
+        if (access(path.c_str(), F_OK) != 0) {
+            resp.set_error("没有这个模型：demo/models/" + name + ".cvimodel", 400);
+            return;
+        }
+        if (unlink(path.c_str()) != 0) {
+            resp.set_error("删除失败（" + std::string(std::strerror(errno)) + "）：" + path, 500);
+            return;
+        }
+        CAM_INFO("[models] 模型已删除 %s", path.c_str());
+        Json j;
+        j["ok"] = true;
+        j["name"] = name;
+        Json used(Json::Type::Array);
+        for (const auto& c : list_demo_cards(ctx)) {
+            if (c.model == name) used.push_back(c.name);
+        }
+        j["cards"] = used;   // 用着它的卡片（界面拿来提示"这些会变成模型缺失"）
+        resp.set_json(j);
     });
 
     // ── 训练平台直传模型（浏览器 → 小车，同一局域网；yolotrain.chenlongrobot.com）──

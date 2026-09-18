@@ -103,7 +103,22 @@ export const demo = {
         }).then(r => r.json()),
 };
 
-export const api = { system, motor, arm, camera, demo, display };
+// 模型（demo/models/<名字>.cvimodel）：
+// 上传 = 文件**原样放 body**、名字走 query（后端也认 multipart，但这样最省事）；
+// 删除只删这个文件 —— 卡片配置不动，用到它的卡片会变成"模型缺失"（重传同名即复活）。
+export const models = {
+    upload: (name: string, file: File) =>
+        fetch(`/api/models/upload?name=${encodeURIComponent(name)}`, {method: "POST", body: file})
+            .then(r => r.json()),
+    remove: (name: string) =>
+        fetch("/api/models/delete", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({name}),
+        }).then(r => r.json()),
+};
+
+export const api = { system, motor, arm, camera, demo, display, models };
 
 export type MotorStatus = { left: number; right: number };
 
