@@ -61,7 +61,13 @@ local ALIGN_MARGIN  = 25       -- 抓的时候用：要对到 GRAB_OFFSET 附近
 -- 太近的判据：框宽超过目标的这个倍数 = 凑得太近。原来没有这一支 —— 目标离得太近时脚本
 -- 只会"到位"或原地精调，**从不后退**，于是车几乎贴上目标，夹爪反而够不着/视野全被占满。
 local TOO_CLOSE_K   = 1.5
-local BACK_PULSE_MS = 400      -- 后退脉冲：比前进短 —— 退过头比走过头更难救（车尾没有眼睛）
+-- 后退脉冲：跟转向脉冲一个思路 —— **按"超出到位区间多少像素"成比例**（超得越多退越久），
+-- 不是拍一个固定毫秒数。上下限都留着：
+--   BACK_PULSE_MIN 必须大于电机启动时间（板上实测 ~250ms，短了只会在原地抖，车不动）；
+--   BACK_PULSE_MAX 防止退过头 —— 车尾没有眼睛，退多了更麻烦。
+local BACK_PULSE_K   = 2.0     -- ms/px（超出的像素数）
+local BACK_PULSE_MIN = 300
+local BACK_PULSE_MAX = 700
 -- **爪子对准的是它自己，不是画面中心**。夹爪装在相机右侧，所以要夹准，目标应当出现在
 -- 画面中心的**右侧**（正偏移）。原来的版本一直往画面中心对，实测抓的那一刻偏移是 -76px
 -- （球在中心左边），正好对到夹爪的反方向 —— 这就是"左右没对准"的原因。
@@ -110,12 +116,16 @@ while true do
         -- 转向方向一律是"把目标送到 GRAB_OFFSET 那个位置"：目标偏左就左转（视角随之右移）
         local align_err = offset - GRAB_OFFSET
         if w > target * TOO_CLOSE_K then
-            -- 太近：退一小段再重新判。退一点、看一眼、再退 —— 不指望一次到位
+            -- 太近：退一小段再重新判。**退多久按超出的像素数算**（跟转向脉冲同一个套路），
+            -- 所以"刚过线"退一点点、"贴脸了"退大步
+            local over = w - target * TOO_CLOSE_K
+            local back_ms = math.floor(BACK_PULSE_K * over)
+            back_ms = math.max(BACK_PULSE_MIN, math.min(BACK_PULSE_MAX, back_ms))
             back(speed)
-            sleep_ms(BACK_PULSE_MS)
+            sleep_ms(back_ms)
             standby()
-            log("太近：框宽 %dpx（目标 %d 的 %.1f 倍）→ 后退 %dms",
-                math.floor(w), math.floor(target), TOO_CLOSE_K, BACK_PULSE_MS)
+            log("太近：框宽 %dpx（超出到位区间 %dpx）→ 后退 %dms",
+                math.floor(w), math.floor(over), back_ms)
         elseif w >= target and math.abs(align_err) <= ALIGN_MARGIN then
             -- 够大 + 对准夹爪 → 停稳，**不夹就走人**（这就是这个动作的全部）
             brake()
