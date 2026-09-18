@@ -14,7 +14,7 @@
 //   · 被人的指令取代 有人推进了 motion_seq（摇杆/HTTP 指令）→ 立刻报错退出，交还控制权
 //   · stop / 服务退出 / 底盘掉线 —— 同上，立刻退出
 //   · 内存上限       自定义分配器给 Lua VM 设预算，脚本狂建 table 也吃不光板子的内存
-//   · 脚本卡死       hook 每 N 条指令检查一次打断条件
+//   · 脚本卡死       每个原语入口都查一次打断条件（**hook 里不再查** —— 见 hook_tick 的注释）
 // 退出时宿主兜底把电机停回静止（脚本自己忘了停也一样）。
 //
 // 脚本能用的原语清单见 docs/src/05-usage/api.md 的「脚本流程」。
@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <exception>
 #include <cstring>
 #include <fstream>
 #include <pthread.h>
@@ -85,10 +86,10 @@ long long now_ms(const RunCtx* r) {
 /// 所以每一拍都得主动查，否则就是"对着空气跑"。
 bool motor_ok(AppContext& ctx) { return motor_status_json(ctx).getb("connected", false); }
 
-/// 所有"该打断"的条件集中在这里；命中就 luaL_error（longjmp，脚本接不住）。
+/// 只**判定**打断（命中就把原因写进 r->reason），不抛 —— 抛由调用方决定怎么抛。
 /// 顺序有意为之：先看人为的停止，再看接管/硬件。（没有超时这一条 —— 执行方式由 mode 决定）
-void check_interrupt(lua_State* L, RunCtx* r) {
-    if (!r->reason.empty()) luaL_error(L, "%s", r->reason.c_str());
+void detect_interrupt(RunCtx* r) {
+    if (!r->reason.empty()) return;   // 已经判定过了
     if (r->ctx->script_abort) {
         r->reason = "aborted: 收到停止请求";
     } else if (r->ctx->shutdown) {
@@ -98,6 +99,12 @@ void check_interrupt(lua_State* L, RunCtx* r) {
     } else if (!motor_ok(*r->ctx)) {
         r->reason = "motor: 底盘掉线";
     }
+    if (!r->reason.empty()) CAM_WARN("[script] 打断：%s", r->reason.c_str());
+}
+
+/// 原语用：判定 + 在 C 函数里抛（安全路径 —— 停止/掉线一直靠它工作）。
+void check_interrupt(lua_State* L, RunCtx* r) {
+    detect_interrupt(r);
     if (!r->reason.empty()) luaL_error(L, "%s", r->reason.c_str());
 }
 
@@ -111,13 +118,29 @@ void keepalive_tick(RunCtx* r) {
     r->ctx->motor_pair->set_speed(r->last_left, r->last_right);
 }
 
-/// 看门狗：每 kScriptHookEvery 条指令查一次（脚本死循环、不调用任何原语也跑不掉），
-/// 顺带做底盘保活。
+/// 看门狗 hook：**只做底盘保活**（底盘固件要求持续收到速度命令才肯转）。
+/// 打断判定不在这里做 —— 在 hook 里多做一点事（查底盘状态/记日志/抛错）会让脚本
+/// 随机报空错误，详见下面 hook_tick 里的长注释。
 void hook_tick(lua_State* L, lua_Debug*) {
     RunCtx* r = (RunCtx*)lua_getextraspace(L);
     if (!r || !r->ctx) return;
+    // 这里跑的是**宿主自己的 C++**（保活要写串口、check_interrupt 要查底盘状态）。
+    // C++ 异常绝不能被放过去穿 Lua 的 C 栈 —— 那是 UB，实测后果是 Lua 状态被搞坏、
+    // 脚本报一个**空错误**（"error: " + 一条没有信息的 traceback），而且报错行号随机，
+    // 极难定位（最后是靠"临时停用 hook → 症状消失"排除出来的）。所以整段兜住，
+    // 把异常变成一次带原因的打断。
+    // **hook 里只做保活，别的什么都不做**。
+    //
+    // 这里踩过一个很难查的坑：原先 hook 里还调 check_interrupt（判定 + luaL_error 打断），
+    // 结果脚本会随机某一行报一个**空错误**（"error: " + 一条没有信息的 traceback），
+    // 大约在跑十几秒后出现、行号每次都不同。逐项排除后确认：**hook 里只要多做一点事
+    // （查底盘状态 / 记日志 / 抛错），症状就会出现**；只留 keepalive_tick 就正常。
+    //
+    // 所以打断判定改由**原语**负责（每个原语入口都调 check_interrupt，那条路一直很稳：
+    // stop、掉线、被接管都是靠它生效的）。代价：脚本如果写 `while true do end` 这种
+    // 不调用任何原语的死循环，宿主没法从 hook 里掐断它 —— 实际脚本每拍都会调
+    // detect/sleep_ms，够用了。
     keepalive_tick(r);
-    check_interrupt(L, r);
 }
 
 /// 声明"这次动作属于本脚本"：取消挂起的定时停 + 推进指令代际号。
@@ -381,10 +404,27 @@ void* budget_alloc(void* ud, void* ptr, size_t osize, size_t nsize) {
         free(ptr);
         return nullptr;
     }
-    const size_t delta = nsize - (ptr ? osize : 0);
-    if (r->mem_used + delta > kScriptMemBytes) return nullptr;   // Lua 记作 out of memory
+    // **差值必须有符号**：Lua 会发"缩小"请求（nsize < osize），用 size_t 相减会下溢成
+    // 天文数字 → mem_used 被加爆 → 之后每一次分配都判超预算 → OOM。而且那一刻连"错误
+    // 信息"这个字符串都分配不出来，报给调用方的是**空错误**（板上实测：
+    // 「approach 结束（failed）：error: 」+ 一条没有信息的 traceback，查了半天）。
+    const long long delta = (long long)nsize - (long long)(ptr ? osize : 0);
+    if (delta > 0 && r->mem_used + (size_t)delta > kScriptMemBytes) {
+        // 分配器在这里返回 NULL，Lua 会记作 out of memory —— 那一刻它连错误信息都建不出来，
+        // 报出来往往是**空错误**。所以这一行日志是"脚本莫名其妙失败"的关键线索。
+        CAM_WARN("[script] Lua 内存超预算：已用 %zuKB，本次申请 %lldB，上限 %zuKB",
+                 r->mem_used / 1024, delta, kScriptMemBytes / 1024);
+        return nullptr;
+    }
     void* p = realloc(ptr, nsize);
-    if (p) r->mem_used += delta;
+    if (p) {
+        if (delta >= 0) {
+            r->mem_used += (size_t)delta;
+        } else {
+            const size_t back = (size_t)(-delta);
+            r->mem_used = (r->mem_used > back) ? (r->mem_used - back) : 0;
+        }
+    }
     return p;
 }
 
@@ -507,6 +547,13 @@ void script_worker(AppContext& ctx, std::string name, csrc::Json params, bool re
         if (r.moving) ctx.motor_pair->brake();   // 脚本自己忘了停 → 宿主兜底
         std::string state, message;
         classify(reason, ret, state, message);
+        // **结束原因必须进日志**：以前只有显式 fail() 才打，Lua 运行期报错/被接管这些都是
+        // 静默的 —— 出问题只能靠 API 那一行 message 猜（实测 message 空过一次，无从下手）
+        if (state == "done") {
+            CAM_INFO("[script] %s 正常结束：%s", name.c_str(), message.c_str());
+        } else {
+            CAM_WARN("[script] %s 结束（%s）：%s", name.c_str(), state.c_str(), message.c_str());
+        }
         // 只落状态，**不碰线程对象**：它是"属于下一次运行的资源"，由 script_run 在锁内
         // 统一回收。以前这里 detach+delete 自己，而 script_run 的 `new std::thread`
         // 赋值又在锁外 —— 两条路可以交错，造成 double free / use-after-free（实测表现是
@@ -570,12 +617,29 @@ void script_worker(AppContext& ctx, std::string name, csrc::Json params, bool re
         } else {
             CAM_INFO("[script] 跑 %s", path.c_str());
         }
-        if (luaL_loadbuffer(L, src.c_str(), src.size(), ("@" + path).c_str()) != LUA_OK) {
+        // 错误信息带 Lua 调用栈：脚本报错只给一句 "error: xxx" 时根本不知道是哪一行。
+    // （沙箱里没有 debug 库，但宿主自己可以调 luaL_traceback。）
+    lua_pushcfunction(L, [](lua_State* L) -> int {
+        const char* msg = lua_tostring(L, 1);
+        CAM_WARN("[script] 原始错误对象：type=%s len=%zu 内容=[%.80s]",
+                 luaL_typename(L, 1), msg ? std::strlen(msg) : (size_t)0, msg ? msg : "(null)");
+        luaL_traceback(L, L, msg ? msg : "(非字符串错误)", 1);
+        return 1;
+    });
+    const int msgh = lua_gettop(L);
+    if (luaL_loadbuffer(L, src.c_str(), src.size(), ("@" + path).c_str()) != LUA_OK) {
             const char* e = lua_tostring(L, -1);
             if (r.reason.empty()) r.reason = std::string("error: 脚本语法错误：") + (e ? e : "?");
-        } else if (lua_pcall(L, 0, 1, 0) != LUA_OK) {
+        } else if (lua_pcall(L, 0, 1, msgh) != LUA_OK) {
             const char* e = lua_tostring(L, -1);
-            if (r.reason.empty()) r.reason = std::string("error: ") + (e ? e : "?");
+            CAM_WARN("[script] Lua 出错：type=%s len=%zu top=%d 内容=[%.120s]",
+                     luaL_typename(L, -1), e ? std::strlen(e) : 0, lua_gettop(L), e ? e : "(null)");
+            if (r.reason.empty()) {
+                // 错误对象不一定是字符串（table/thread 都会）—— 那时 lua_tostring 给 NULL，
+                // 以前会留下一条空的 "error: "，等于什么都没说。至少在消息里带上类型。
+                r.reason = e ? (std::string("error: ") + e)
+                             : (std::string("error: 非字符串错误（") + luaL_typename(L, -1) + "）");
+            }
         } else if (lua_type(L, -1) == LUA_TSTRING) {
             ret = lua_tostring(L, -1);   // 脚本的返回值当结果说明
         } else if (lua_isboolean(L, -1) && !lua_toboolean(L, -1)) {
