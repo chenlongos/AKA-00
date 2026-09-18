@@ -138,6 +138,19 @@ void AutoReconnectMotorPair::send_cmd_noresp(uint8_t cmd, const uint8_t* payload
     p->send_cmd_noresp(cmd, payload, len);
 }
 
+bool AutoReconnectMotorPair::ping() {
+    auto p = active();
+    if (!p) return false;      // 没连上就是不通（基类默认恒 true 会骗人）
+    return p->ping();
+}
+
+int AutoReconnectMotorPair::move_state() const {
+    // 没连上 → -1（"没有状态源"，调用方据此退化成等停稳，见 services.cpp 的 move_distance）
+    auto p = active();
+    if (!p) return -1;
+    return p->move_state();
+}
+
 MotorLinkStatus AutoReconnectMotorPair::link_status() const {
     std::lock_guard<std::mutex> lk(mu_);
     MotorLinkStatus st;

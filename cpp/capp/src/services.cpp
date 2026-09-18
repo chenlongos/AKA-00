@@ -312,10 +312,13 @@ csrc::Json move_distance(AppContext& ctx, const std::string& direction, double v
     int32_t target;
     std::string unit;
     if (d == 0 || d == 1) {
-        target = (int32_t)std::llround(value);       // 直行：mm
-        unit = "mm";
+        // 换算单位：**API 的 distance 是厘米**（文档口径，前端/curl 都按 cm 传），
+        // 固件的 CMD_MOVE_DISTANCE 要毫米。
+        // 原来这里直接把 cm 当 mm 发下去了 —— `?distance=30` 实际只走 3cm，差 10 倍。
+        target = (int32_t)std::llround(value * 10.0);
+        unit = "cm";
     } else {
-        target = (int32_t)std::llround(value * 10);  // 转向：0.1°
+        target = (int32_t)std::llround(value * 10);  // 转向：固件收 0.1° 为单位
         unit = "deg";
     }
     if (target <= 0) {
@@ -379,7 +382,11 @@ csrc::Json move_distance(AppContext& ctx, const std::string& direction, double v
     } else {
         ok["status"] = "timeout";
     }
+    // 统一的"执行完成"标志：三个会动的入口（距离/角度、走几秒、跑 demo）都给这个布尔，
+    // 客户端只认它就行；细节看 status / state / message
+    ok["completed"] = (outcome == 2 || outcome == -1);
     ok["mode"] = "esp32";
+    ok["direction"] = direction;   // forward/backward/left/right —— 客户端据此知道走的是哪边
     ok["target"] = value;
     ok["unit"] = unit;
     ok["moved"] = saw_running;
@@ -736,6 +743,20 @@ csrc::DecodeOptions decode_options(double conf, double iou) {
     if (conf > 0) opt.conf = (float)std::min(0.99, std::max(0.01, conf));
     if (iou > 0) opt.iou = (float)std::min(0.99, std::max(0.01, iou));
     return opt;
+}
+
+bool wait_script_done(AppContext& ctx, double timeout_s) {
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds((long long)(timeout_s * 1000.0));
+    while (std::chrono::steady_clock::now() < deadline) {
+        {
+            std::lock_guard<std::mutex> lk(ctx.script_mu);
+            if (!ctx.script_running) return true;   // 跑完了（正常/失败/被停都算）
+        }
+        if (ctx.shutdown) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return false;   // 超时还在跑
 }
 
 csrc::Json detect_once(AppContext& ctx, const std::string& model_name,

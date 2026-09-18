@@ -80,6 +80,11 @@ public:
     void get_encoder(int& c1, int& c2) override;
     void move_distance(uint8_t dir, uint8_t speed, int32_t target) override;
     void send_cmd_noresp(uint8_t cmd, const uint8_t* payload, size_t len) override;
+    /// 这两个**必须转发**：基类默认是 ping()=true / move_state()=-1，代理不转发就等于
+    /// "永远没有闭环状态" —— /api/control?distance=&angle= 会因此掉进"等停稳就报 completed"
+    /// 的兜底分支，动作成功与否全靠猜（车卡住了也返回 completed）。
+    bool ping() override;
+    int move_state() const override;
 
     /// 线程安全读取当前连接状态
     MotorLinkStatus link_status() const;

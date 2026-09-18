@@ -239,6 +239,10 @@ csrc::Json script_status(AppContext& ctx);
 /// 都走这里，免得两处各写一套边界。
 csrc::DecodeOptions decode_options(double conf, double iou);
 
+/// 等脚本跑完（状态离开 running）。true = 已结束；false = 超时仍在跑。
+/// 给"跑完再返回"的接口用（每个连接一个线程，阻塞不会卡住别的请求）。
+bool wait_script_done(AppContext& ctx, double timeout_s);
+
 /// 单帧推理（/api/detect 用）。opt 不给就用默认阈值（conf 0.25 / iou 0.45）。
 csrc::Json detect_once(AppContext& ctx, const std::string& model_name,
                        const csrc::DecodeOptions& opt = {});

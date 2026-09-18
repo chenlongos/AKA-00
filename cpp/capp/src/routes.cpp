@@ -61,6 +61,9 @@ constexpr int kDemoSpeedDefault = 25;        // 直线速度（%）
 constexpr int kDemoTurnSpeedDefault = 25;    // 转弯速度（%）—— 和直线分开：转弯要的占空比不同
 // 执行方式（卡片上一个字段）：跑一遍就结束 / 跑完接着跑直到被停
 constexpr const char* kDemoModeDefault = "once";
+// "等它跑完再返回"（请求里带 "wait": true）最多等多久 —— 超时就回 timeout + 当前状态，
+// 不无限挂着（脚本本身没有时长上限，客户端得自己决定还等不等）
+constexpr double kDemoWaitMaxSeconds = 120.0;
 
 /// 一张卡片（= 一份 configs/<卡片名>.json）
 struct DemoCard {
@@ -1022,8 +1025,24 @@ void register_routes(Router& router, AppContext& ctx) {
         }
         // params 原样给脚本（含 mode=once|loop）；**没有 max_seconds**，跑多久看模式与停止
         const Json* params = payload.get("params");
-        const Json r = script_run(ctx, name, params ? *params : Json());
-        resp.set_json(r, r.getb("ok") ? 200 : 400);
+        // "wait": true = 等这次跑完再返回（默认立刻回 started）
+        const bool wait = payload.getb("wait", false);
+        if (wait && params && params->gets("mode") == "loop") {
+            resp.set_error("loop 模式不会自己结束，wait 没有意义（要停就 POST /api/demo/stop）", 400);
+            return;
+        }
+        Json r = script_run(ctx, name, params ? *params : Json());
+        if (!r.getb("ok") || !wait) {
+            if (r.getb("ok")) r["completed"] = false;   // 只是"起来了"，还没跑完
+            resp.set_json(r, r.getb("ok") ? 200 : 400);
+            return;
+        }
+        const bool done = wait_script_done(ctx, kDemoWaitMaxSeconds);
+        Json out = script_status(ctx);
+        out["status"] = done ? "finished" : "timeout";   // 都回 200，看 status 字段
+        // 统一的"执行完成"标志（与 /api/control 的 completed 同一个含义）
+        out["completed"] = done && out.gets("state") == "done";
+        resp.set_json(out);
     });
 
     router.add("GET", "/api/demo/status", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
@@ -1171,6 +1190,14 @@ void register_routes(Router& router, AppContext& ctx) {
         if (payload.get("turn_speed")) params["turn_speed"] = Json(payload.geti("turn_speed", kDemoTurnSpeedDefault));
         if (payload.get("mode")) params["mode"] = payload.gets("mode");
 
+        // "wait": true = 等这次跑完再返回。loop 模式（跑完接着跑）不会自己结束，
+        // 等它没意义 —— 直接在启动前拒掉，别让客户端挂在这儿
+        const bool wait = payload.getb("wait", false);
+        if (wait && params.gets("mode") == "loop") {
+            resp.set_error("loop 模式不会自己结束，wait 没有意义（要停就 POST /api/demo/stop）", 400);
+            return;
+        }
+
         // ★ 模型来自卡片/请求，**不是卡片名** —— 搞错的话脚本会去开
         //   demo/models/<卡片名>.cvimodel，报错长成"注册模型失败"，极具误导性
         params["model"] = model;
@@ -1196,7 +1223,17 @@ void register_routes(Router& router, AppContext& ctx) {
         j["model"] = model;
         j["pid"] = Json((int64_t)getpid());   // 兼容字段：跑 demo 的进程就是 capp 自己
         j["pgid"] = Json((int64_t)getpid());
-        resp.set_json(j);
+        j["completed"] = false;               // 只是"起来了"，还没跑完
+        if (!wait) {
+            resp.set_json(j);                 // 默认：立刻回 started，界面靠 /api/demo/status 轮询
+            return;
+        }
+        // 跑完再返回：字段与 /api/demo/status 一致 + status（finished / timeout）+ completed
+        const bool done = wait_script_done(ctx, kDemoWaitMaxSeconds);
+        Json out = script_status(ctx);
+        out["status"] = done ? "finished" : "timeout";
+        out["completed"] = done && out.gets("state") == "done";
+        resp.set_json(out);
     });
 
     // 卡片配置：GET 读一张、POST 新建或覆盖（动作 + 模型 + 四个参数）

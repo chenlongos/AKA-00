@@ -18,6 +18,21 @@ GET /api/control?action=<action>&speed=<speed>&time=<time>&distance=<distance>&a
 
 > **优先级**：`distance`/`angle` > `time`。传了 distance 或 angle 就忽略 time。
 >
+> **所有"会动"的请求都回一个 `completed` 布尔**（true = 这次动作执行完了，异常/超时/被中止
+> 一律 false，原因看 `status` / `message`）。三个入口都有：
+> `?distance=`/`?angle=`、`?time=`、以及 `POST /api/demo/init|run` 带 `"wait": true`。
+>
+> 返回时机：
+>
+> | 请求 | 何时返回 | 返回 |
+> |---|---|---|
+> | `?distance=` / `?angle=` | **阻塞**到 ESP32 固件闭环报结果（最多 30s） | `{status: completed\|aborted\|timeout, direction, target, unit, moved, elapsed_ms}`（`unit` 回显请求单位：cm / deg；`moved` = 固件是否真的报过"运行中"） |
+> | `?...&time=` | **阻塞**到动作做完并自动停车 | `{status: success, mode: "completed", duration, left_speed, right_speed}` |
+> | `?action=up`（不给 distance/time） | **立刻返回**（持续运动，靠 `?action=stop` 停） | `{status: success}` |
+>
+> `distance`/`angle` 的结论来自固件（它自己闭环 + 回状态），不是主机猜的 ——
+> 车被卡住会回 `aborted`/`timeout` 而不是 `completed`。
+>
 > `speed` 是直接发给 ESP32 PID 控制器的目标百分比（`setMotorSpeed(±100)` → `target_rpm = speed × 150 / 100`）。`100%` 对应约 `0.49 m/s`，由 `PWM_RPM_MAX=150 RPM × 轮径62mm × π / 60` 推出。
 
 ### 距离运动示例
@@ -429,6 +444,7 @@ curl -F "file=@model.cvimodel" -F "name=orange" "http://<ip>/api/model/upload"
 GET  /api/demo/list                     → {"demos":[...], "actions":[...], "models":[...]}
 POST /api/demo/init {"name":"追网球接近"}              → 跑存下来的那张卡片
 POST /api/demo/init {"action":"grab","model":"tennis"} → 直接跑，不用建卡
+POST /api/demo/init {"name":"追网球接近","wait":true}  → **等它跑完再返回**
 POST /api/demo/stop                     → 停
 ```
 
@@ -492,6 +508,22 @@ curl -X POST http://<ip>/api/demo/init \
 
 效果与建一张卡再跑一样（宿主会把 `model=apple` 注入给动作脚本）；区别是不落盘、
 不会在 Demo 页留下卡片。
+
+### 等它跑完再返回（`"wait": true`）
+
+默认 `POST /api/demo/init` / `/api/demo/run` **立刻**返回 `{status:"started"}`（界面靠轮询
+`/api/demo/status` 跟进度）。脚本化调用想要"跑完再拿结果"，请求里加 `"wait": true`：
+
+```bash
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"name":"追网球接近","wait":true}' http://<ip>/api/demo/init
+```
+
+返回的字段与 `/api/demo/status` 一致，外加一个 `status`：`finished`（跑完了，看 `state`/
+`message` 是正常结束还是失败）或 `timeout`（等了 120 秒还在跑，接口不会无限挂着）。
+
+> `mode=loop`（循环执行）**不会自己结束**，所以 `wait` 对它没有意义 —— 这种请求直接 400，
+> 不会让你挂在连接上。要停就 `POST /api/demo/stop`。
 
 | 失败 | HTTP | 响应 |
 |------|------|------|
