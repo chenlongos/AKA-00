@@ -505,15 +505,25 @@ void register_routes(Router& router, AppContext& ctx) {
             // 带时长(time>0)：同步执行完(自动停车)才回 ACK
             result = execute_action(ctx, action, motor_speed, ms, ms > 0);
             if (result.gets("status") == "error") {
-                resp.set_json(result, 400);
+                // 错误也用同一套形状（{completed,error}），别让调用方为失败另写一套解析
+                Json e;
+                e["completed"] = false;
+                e["error"] = result.gets("message");
+                resp.set_json(e, 400);
                 return;
             }
+            // grab/release 是异步的（夹爪序列约 3.5s）—— 等它做完，否则"completed"是假的
+            if (action == "grab" || action == "release") wait_arm_done(ctx);
         }
         // **精简返回**：客户端（含嵌入式调用方）只需要"做完了没有"这一个标志，
         // 省得为了一堆字段写解析。细节要看就去 /api/motor/status 或日志。
         // completed=false 时附一句 error（否则出问题只能靠猜）。
         Json out;
-        out["completed"] = result.getb("completed", false);
+        // 有的分支不产出 completed 字段（比如"命令已生效"这类）——那时以 status 为准，
+        // 别把 "success" 当成失败原因（曾经因此回过 {"completed":false,"error":"success"}）
+        out["completed"] = (result.get("completed") != nullptr)
+                               ? result.getb("completed", false)
+                               : result.gets("status") == "success";
         if (!out.getb("completed")) {
             const std::string why = result.gets("message");
             out["error"] = why.empty() ? result.gets("status") : why;

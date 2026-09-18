@@ -29,6 +29,11 @@ GET /api/control?action=<action>&speed=<speed>&time=<time>&distance=<distance>&a
 > | `?distance=` / `?angle=` | **阻塞**到 ESP32 固件闭环报结果（最多 30s） | `{"completed": …}` |
 > | `?...&time=` | **阻塞**到动作做完并自动停车 | `{"completed": …}` |
 > | `?action=up`（不给 distance/time） | **立刻返回**（持续运动，靠 `?action=stop` 停） | `{status: success}` |
+> | `?action=grab` / `release` | **阻塞**到夹爪那套序列做完（ZP10S 约 3.5s） | `{"completed": …}` |
+>
+> `grab`/`release` **不排队**：上一段还没做完时，后来的请求直接回
+> `{"completed":false,"error":"夹爪正忙：上一段动作还没做完（这次没做，也没排队）"}`（400），
+> 不会攒成一串挨个执行（实测连点 5 次 → 只执行 1 次）。
 >
 > `distance`/`angle` 的结论来自固件（它自己闭环 + 回状态），不是主机猜的 ——
 > 车被卡住会回 `aborted`/`timeout` 而不是 `completed`。

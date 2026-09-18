@@ -78,14 +78,14 @@ bool wait_stationary(AppContext& ctx, double timeout_s, double stall_s, bool& ev
     }
 }
 
+// 这两个**调用时 arm_mu 已经在手里**（apply_arm_action 先 try_lock 再交给线程接手），
+// 所以它们自己不再加锁。
 void do_grab(AppContext& ctx) {
-    std::lock_guard<std::mutex> lk(ctx.arm_mu);
     ctx.gripper->close();
     ctx.collector.set_gripper_target(0);
 }
 
 void do_release(AppContext& ctx) {
-    std::lock_guard<std::mutex> lk(ctx.arm_mu);
     ctx.gripper->open();
 }
 
@@ -165,18 +165,29 @@ bool apply_base_action(AppContext& ctx, const std::string& action, int speed) {
     return true;
 }
 
-bool apply_arm_action(AppContext& ctx, const std::string& action) {
-    if (action == "grab") {
+ArmResult apply_arm_action(AppContext& ctx, const std::string& action) {
+    if (action != "grab" && action != "release") return ArmResult::NotArm;
+
+    // **不排队**：夹爪那套序列要 ~3.5s（ZP10S：伸下去→夹→抬起）。以前每来一次请求就
+    // spawn 一个后台线程去抢 arm_mu —— 连点多次 grab 就是"排了一串队挨个执行"，
+    // 表现是"点了很多次，它就一直夹取"。正忙就跳过这一次，并把"忙"如实报给调用方。
+    if (!ctx.arm_mu.try_lock()) return ArmResult::Busy;
+
+    const bool is_grab = (action == "grab");
+    if (is_grab) {
         ctx.collector.set_gripper_target(1);
         ctx.collector.set_gripper_status("closed");
-        std::thread([&ctx] { do_grab(ctx); }).detach();
-        return true;
     }
-    if (action == "release") {
-        std::thread([&ctx] { do_release(ctx); }).detach();
-        return true;
+    try {
+        std::thread([&ctx, is_grab] {
+            std::lock_guard<std::mutex> lk(ctx.arm_mu, std::adopt_lock);   // 接手已持有的锁
+            if (is_grab) do_grab(ctx); else do_release(ctx);
+        }).detach();
+    } catch (...) {
+        ctx.arm_mu.unlock();   // 线程没起成就把锁还回去
+        return ArmResult::NotArm;
     }
-    return false;
+    return ArmResult::Accepted;
 }
 
 // ═══════════════════════ 初始化 ═══════════════════════
@@ -217,7 +228,19 @@ csrc::Json execute_action(AppContext& ctx, const std::string& action, int speed,
     CAM_INFO("[control] action=%s speed=%d ms=%.0f wait=%d", action.c_str(), speed,
              milliseconds, (int)wait_done);
 
-    bool handled = apply_base_action(ctx, action, speed) || apply_arm_action(ctx, action);
+    bool handled = apply_base_action(ctx, action, speed);
+    if (!handled) {
+        switch (apply_arm_action(ctx, action)) {
+            case ArmResult::Accepted: handled = true; break;
+            case ArmResult::Busy: {
+                csrc::Json err;
+                err["status"] = "error";
+                err["message"] = "夹爪正忙：上一段动作还没做完（这次没做，也没排队）";
+                return err;
+            }
+            case ArmResult::NotArm: break;
+        }
+    }
     if (!handled) {
         csrc::Json err;
         err["status"] = "error";
@@ -743,6 +766,13 @@ csrc::DecodeOptions decode_options(double conf, double iou) {
     if (conf > 0) opt.conf = (float)std::min(0.99, std::max(0.01, conf));
     if (iou > 0) opt.iou = (float)std::min(0.99, std::max(0.01, iou));
     return opt;
+}
+
+void wait_arm_done(AppContext& ctx) {
+    // grab/release 是丢给后台线程跑的（ZP10S 那套"伸下去→夹→抬起"约 3.5s），
+    // 线程全程持 arm_mu —— 所以这里拿得到锁就说明上一段动作已经结束。
+    // 有界：那段序列是固定时长 + 串口自带超时，不会无限等。
+    std::lock_guard<std::mutex> lk(ctx.arm_mu);
 }
 
 bool wait_script_done(AppContext& ctx, double timeout_s) {

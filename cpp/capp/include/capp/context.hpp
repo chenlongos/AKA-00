@@ -158,8 +158,10 @@ int64_t motion_seq_now(AppContext& ctx);
 int wait_timed_done(AppContext& ctx, int64_t seq, double duration_sec);
 /// 底盘动作：up/down/left/right/stop（速度百分比，调用方负责 clamp）
 bool apply_base_action(AppContext& ctx, const std::string& action, int speed);
-/// 机械臂动作：grab/release（内部持 arm_mu，异步执行）
-bool apply_arm_action(AppContext& ctx, const std::string& action);
+/// 机械臂动作的结果：不是机械臂动作 / 已受理（后台执行中）/ 夹爪正忙（这次跳过，没排队）
+enum class ArmResult { NotArm, Accepted, Busy };
+/// 机械臂动作：grab/release。**不排队** —— 正忙时返回 Busy，由调用方如实回报给用户。
+ArmResult apply_arm_action(AppContext& ctx, const std::string& action);
 /// 底盘连接状态 JSON（含 connected 字段）
 csrc::Json motor_status_json(AppContext& ctx);
 
@@ -238,6 +240,9 @@ csrc::Json script_status(AppContext& ctx);
 /// 给了就夹到 0.01~0.99。/api/detect 的 ?conf=&iou= 与脚本的 detect(model, {conf=,iou=})
 /// 都走这里，免得两处各写一套边界。
 csrc::DecodeOptions decode_options(double conf, double iou);
+
+/// 等机械臂动作（grab/release）做完 —— 它们是异步跑的，接口要等它才能报"完成"。
+void wait_arm_done(AppContext& ctx);
 
 /// 等脚本跑完（状态离开 running）。true = 已结束；false = 超时仍在跑。
 /// 给"跑完再返回"的接口用（每个连接一个线程，阻塞不会卡住别的请求）。
