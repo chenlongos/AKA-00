@@ -372,8 +372,10 @@ curl -F "file=@tennis.cvimodel" "http://<ip>/api/models/upload?name=tennis"
 
 训练平台（`yolotrain.chenlongrobot.com`）训练完，浏览器把模型**直传小车**（同一局域网），
 车端不做任何运行切换，只落盘 —— 后续验证人工做。与上面那个接口的区别：名字在表单里
-（走 query 的旧接口是给 curl / 云端推模型用的），响应字段是 `status/name/size`，
-而且**会顺手给新槽位生成一份流程脚本**。
+（走 query 的旧接口是给 curl / 云端推模型用的），响应字段是 `status/name/size`。
+模型落盘即可用：动作脚本是预定义的、与模型无关，**不再给每个模型生成脚本** ——
+传完要么在 Demo 页新建一张卡片（动作 × 这个模型），要么直接
+`POST /api/demo/init {"action":"grab","model":"orange"}`。
 
 ```
 POST /api/model/upload
@@ -392,10 +394,11 @@ curl -F "file=@model.cvimodel" -F "name=orange" "http://<ip>/api/model/upload"
 ```json
 {"status":"ok","name":"orange","size":12865136,
  "path":"/root/AKA-00/demo/models/orange.cvimodel",
- "script":"/root/AKA-00/demo/orange.lua","script_created":true}
+ "script":"","script_created":false,"actions":["approach","grab"]}
 ```
 
-（`script` / `path` 是方便平台侧显示用的，不属于契约字段，忽略即可。）
+（`script` / `script_created` 是为兼容训练平台那份契约保留的字段，现在恒为 `""` / `false`；
+`actions` 是当前可用的动作清单，方便平台侧提示"能用哪些动作"。都不属于必须消费的字段。）
 
 | 失败 | HTTP | 响应 |
 |------|------|------|
@@ -414,41 +417,88 @@ curl -F "file=@model.cvimodel" -F "name=orange" "http://<ip>/api/model/upload"
 
 ## Demo（本地演示）
 
-板上的 demo 就是"拿某个模型跑一遍抓取流程"。列表里有什么，取决于 `demo/models/` 里有什么
-（demo 名 = 模型名），模型由平台推上来（见上）。
+板上的 **一张 demo 卡片 = 动作 × 模型**：
+
+- **动作**是预定义的通用脚本（`demo/grab.lua` 追到就夹、`demo/approach.lua` 只接近不夹，
+  你也可以再放一份 `demo/<动作>.lua` 加新动作）—— 与模型无关；
+- **模型**是 `demo/models/` 里的一颗 `.cvimodel`；
+- 卡片由**用户在 Demo 页新建**（选动作、选模型、起个名字、填参数），名字随便起（中文也行），
+  配置存在 `demo/configs/<卡片名>.json`。
 
 ```
-GET  /api/demo/list           → {"demos":[{"name":"tennis","kind":"model","script":"tennis"}, ...]}
-POST /api/demo/init  {"name":"tennis"}   → 跑 demo/tennis.lua，参数取下面那份配置
-POST /api/demo/stop                        → 停（等于 /api/script/stop）
+GET  /api/demo/list                     → {"demos":[...], "actions":[...], "models":[...]}
+POST /api/demo/init {"name":"追网球接近"}              → 跑存下来的那张卡片
+POST /api/demo/init {"action":"grab","model":"tennis"} → 直接跑，不用建卡
+POST /api/demo/stop                     → 停（等于 /api/script/stop）
 ```
 
-### 运行参数（一个模型一份）
+`GET /api/demo/list` 一次给全三份数据（列表 + 可用的动作 + 可用的模型，新建表单直接用）：
 
-跑 demo 时传给脚本的参数，存在 `$AKA_HOME/demo/configs/<模型名>.json` ——
-**一个模型一个文件，而且只在这张卡片上点过"保存"之后才存在**；没有文件就是内置默认值
-（`target_size=300`、`speed=25`、`turn_speed=25`、`max_seconds=60`）。
-界面上在 Demo 页每个 demo 卡片里编辑；接口是：
+```json
+{
+  "demos": [
+    {"name":"追网球接近", "action":"approach", "model":"tennis",
+     "ready":true, "script":"approach", "path":"/root/AKA-00/demo/models/tennis.cvimodel",
+     "kind":"card", "error":""}
+  ],
+  "actions": [{"id":"approach","name":"接近瞄准"}, {"id":"grab","name":"追到就夹"}],
+  "models": ["block", "tennis"]
+}
+```
+
+> 动作的显示名来自脚本第一行的约定注释 `-- name: 接近瞄准`；没写就用文件名。
+> `ready=false` 表示动作脚本或模型文件缺了（卡片照样列出来，点开始会明确报错）。
+
+### 卡片配置（一张卡片一份）
 
 ```
-GET  /api/demo/config?name=tennis
-     → {"name":"tennis","target_size":300,"speed":50,"turn_speed":25,"max_seconds":60}
-POST /api/demo/config  {"name":"tennis","target_size":220,"speed":30,"turn_speed":30,"max_seconds":45}
+GET  /api/demo/config?name=追网球接近
+     → {"name":"追网球接近","action":"approach","model":"tennis",
+        "target_size":300,"speed":50,"turn_speed":25,"max_seconds":60}
+POST /api/demo/config  {"name":"追网球接近","action":"approach","model":"tennis",
+                        "target_size":300,"speed":30,"turn_speed":25,"max_seconds":60}
+POST /api/demo/delete  {"name":"追网球接近"}
 ```
 
 | 字段 | 含义 |
 |------|------|
-| target_size | 目标框宽（原图像素）——框宽达到它就认为到位并抓取 |
+| action | 动作脚本名（`demo/<action>.lua`），必填 |
+| model | 模型名（`demo/models/<model>.cvimodel`），必填 |
+| target_size | 目标框宽（原图像素）——框宽达到它就认为到位 |
 | speed | 直线速度百分比（宿主还会再 clamp 到 ≤70） |
 | turn_speed | 转弯速度百分比（同样 clamp 到 ≤70）—— 和直线分开：转弯要的占空比不同 |
 | max_seconds | 单次运行的总时长上限（宿主强制，到点打断并停车） |
 
-> 这些值就是脚本里 `params()` 读到的东西 —— 想给脚本加参数时，在这里加字段、
-> 在脚本里读即可（见下一节）。
+> **POST 就是"新建或覆盖一张卡片"**：界面上的"新建"与"保存"走的是同一个接口
+> （改参数时要把 `action`/`model` 一起回传，否则会当成新建）。改名 = 用新名字 POST 一份、
+> 把旧的 `POST /api/demo/delete` 掉。
 >
-> **仓库是这份参数的唯一真源**：板上界面调好并保存的值，会在下一次 OTA 升级时被包里
-> 带的那份覆盖。要正式改参数，就把值抄回仓库的 `demo/configs/<模型名>.json` 再部署
-> （`demo/models/` 相反：平台运行时推上来的模型升级时会保留）。
+> 这些值就是脚本里 `params()` 读到的东西（另外宿主还会注入 `model`，见下节）。
+>
+> 卡片是**用户在板上建的现场数据**：OTA 升级时按"**板上优先**"保留 —— 同名卡片升级不会
+> 覆盖你在界面上调好的参数（包里带的那些只在板上没有同名时才落地，当出厂预设）。
+> `demo/*.lua`（动作脚本）相反是仓库里的代码，升级按包里结算 —— 想调参就改卡片配置，
+> **别改动作脚本**，否则升级会丢。
+
+### 用"动作 + 模型"直接跑（不建卡）
+
+刚传上来一个新模型、想立刻试一下的时候用这条：
+
+```bash
+curl -X POST http://<ip>/api/demo/init \
+     -H 'Content-Type: application/json' \
+     -d '{"action":"approach","model":"apple","target_size":300,"speed":30,"max_seconds":30}'
+```
+
+效果与建一张卡再跑一样（宿主会把 `model=apple` 注入给动作脚本）；区别是不落盘、
+不会在 Demo 页留下卡片。
+
+| 失败 | HTTP | 响应 |
+|------|------|------|
+| 卡片不存在 / 配置读不了 | 400 | `没有这张卡片（或配置读不了）：demo/configs/xxx.json` |
+| 动作脚本不存在 | 400 | `动作脚本不存在：demo/approach.lua` |
+| 模型不存在 | 400 | `模型不存在：demo/models/apple.cvimodel` |
+| 名字非法（卡片名/动作名/模型名） | 400 | 各自说明原因（卡片名不能含 `/` `\\` 与控制字符） |
 
 ---
 
@@ -459,11 +509,11 @@ POST /api/demo/config  {"name":"tennis","target_size":220,"speed":30,"turn_speed
 **原语在 C++（快、稳），流程在 `$AKA_HOME/demo/*.lua`（好改）**。
 
 ```
-POST /api/script/run     {"script":"tennis", "max_seconds":30,
+POST /api/script/run     {"script":"grab", "max_seconds":30,
                           "params":{"model":"tennis","target_size":300,"speed":20}}
-     → {"ok":true,"state":"running","script":"tennis","max_seconds":30}
+     → {"ok":true,"state":"running","script":"grab","max_seconds":30}
 GET  /api/script/status
-     → {"state":"running","script":"tennis","message":"","calls":42,"action":"forward",
+     → {"state":"running","script":"grab","model":"tennis","card":"追网球","message":"","calls":42,"action":"forward",
         "notes":{"box_w":"212","offset":"-33"}}
 POST /api/script/stop
      → {"ok":true,"state":"aborted"}（立刻刹车，不等脚本配合）
@@ -471,7 +521,7 @@ POST /api/script/stop
 
 | 字段 | 说明 |
 |------|------|
-| script | 脚本名，读 `$AKA_HOME/demo/<名字>.lua`。只允许字母数字与 `_ - .` |
+| script | **动作名**，读 `$AKA_HOME/demo/<动作>.lua`（`grab` / `approach` …）。只允许字母数字与 `_ - .` |
 | params | 传给脚本的参数（脚本用 `params()` 读），任意扁平/嵌套表 |
 | max_seconds | **宿主强制**的总时长上限，默认 30，夹到 5~300 |
 
@@ -523,7 +573,7 @@ POST /api/script/stop
 curl -X POST http://<ip>/api/camera/open
 curl "http://<ip>/api/detect?model=tennis"      # 先看框多大，据此定 target_size
 curl -X POST -H 'Content-Type: application/json' \
-  -d '{"script":"tennis","max_seconds":30,"params":{"target_size":300,"speed":20}}' \
+  -d '{"script":"grab","max_seconds":30,"params":{"model":"tennis","target_size":300,"speed":20}}' \
   http://<ip>/api/script/run
 curl http://<ip>/api/script/status              # 边跑边看 action/notes
 curl -X POST http://<ip>/api/script/stop        # 随时打断

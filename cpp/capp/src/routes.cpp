@@ -42,12 +42,14 @@ using HttpResult = csrc::HttpResult;
 
 // ═══════════════════════ 小工具 ═══════════════════════
 
-// ── demo 参数（跑 demo 时传给脚本的 params）──
-// **一个模型一个文件**：$AKA_HOME/demo/configs/<模型名>.json，内容就是那四个字段本身
-// （跟 GET/POST 的 payload 同一个形状）。原来是一个共享 json 按模型名分 key —— 2 个模型
-// 1 条流程却要存两份几乎一样的配置，删模型还会在共享文件里留孤儿 key。
-// 文件**只在这张卡片上点过"保存"之后才存在**；没有文件 = 用下面的内置默认值。
-// 布局与"仓库是唯一真源"的取舍见 cpp/README.md 的部署布局一节。
+// ── demo 卡片（**动作 × 模型**）──
+// 一张卡片 = 一份 JSON：$AKA_HOME/demo/configs/<卡片名>.json
+//     {"action":"approach","model":"tennis","target_size":300,"speed":30,...}
+// 卡片由**用户在界面上新建**（选动作 + 选模型 + 填参数），接口是 POST /api/demo/config。
+// 卡片名**只当文件名用**（可以是中文「追网球接近」），动作和模型写在文件里 ——
+// 所以不需要"从名字拆出模型和动作"（那种拆法遇到模型名自带 `-` 就歧义了）。
+// 跑卡片时：读配置 → 跑 demo/<动作>.lua → 把 params.model 注入成**配置里的模型**。
+// （注意不是卡片名！搞错的话会变成"注册模型失败：…/demo/models/追网球接近.cvimodel"）
 std::string demo_config_dir(AppContext& ctx) { return ctx.app_dir + "/demo/configs"; }
 
 std::string demo_config_path(AppContext& ctx, const std::string& name) {
@@ -59,36 +61,130 @@ constexpr int kDemoSpeedDefault = 25;        // 直线速度（%）
 constexpr int kDemoTurnSpeedDefault = 25;    // 转弯速度（%）—— 和直线分开：转弯要的占空比不同
 constexpr int kDemoMaxSecondsDefault = 60;
 
-csrc::Json load_demo_params(AppContext& ctx, const std::string& name) {
-    csrc::Json out;
-    out["target_size"] = csrc::Json((int64_t)kDemoTargetSizeDefault);
-    out["speed"] = csrc::Json((int64_t)kDemoSpeedDefault);
-    out["turn_speed"] = csrc::Json((int64_t)kDemoTurnSpeedDefault);
-    out["max_seconds"] = csrc::Json((int64_t)kDemoMaxSecondsDefault);
-    if (!valid_model_name(name)) return out;   // 名字要拼进路径：`?name=../x` 必须挡在这里
+/// 一张卡片（= 一份 configs/<卡片名>.json）
+struct DemoCard {
+    std::string name;     // 卡片名（= 文件名，可能中文）
+    std::string action;   // 动作 = 脚本名（demo/<action>.lua）
+    std::string model;    // 模型（demo/models/<model>.cvimodel）
+    csrc::Json params;    // 四个运行参数（缺的用默认值兜底）
+};
+
+/// 读一张卡片；不存在 / 解析失败 / 名字非法 / 没写 action 或 model → 返回 false
+bool load_demo_card(AppContext& ctx, const std::string& name, DemoCard& out) {
+    if (!valid_card_name(name)) return false;
     std::ifstream f(demo_config_path(ctx, name));
-    if (!f) return out;                        // 没保存过 → 默认值
+    if (!f) return false;
     std::stringstream ss;
     ss << f.rdbuf();
     csrc::Json one;
-    if (!csrc::Json::parse(ss.str(), one) || !one.is_object()) return out;
-    out["target_size"] = csrc::Json(one.geti("target_size", kDemoTargetSizeDefault));
-    out["speed"] = csrc::Json(one.geti("speed", kDemoSpeedDefault));
-    out["turn_speed"] = csrc::Json(one.geti("turn_speed", kDemoTurnSpeedDefault));
-    out["max_seconds"] = csrc::Json(one.geti("max_seconds", kDemoMaxSecondsDefault));
+    if (!csrc::Json::parse(ss.str(), one) || !one.is_object()) return false;
+
+    out.name = name;
+    out.action = one.gets("action");
+    out.model = one.gets("model");
+    out.params = csrc::Json();
+    out.params["target_size"] = csrc::Json((int64_t)one.geti("target_size", kDemoTargetSizeDefault));
+    out.params["speed"] = csrc::Json((int64_t)one.geti("speed", kDemoSpeedDefault));
+    out.params["turn_speed"] = csrc::Json((int64_t)one.geti("turn_speed", kDemoTurnSpeedDefault));
+    out.params["max_seconds"] = csrc::Json((int64_t)one.geti("max_seconds", kDemoMaxSecondsDefault));
+    return !out.action.empty() && !out.model.empty();
+}
+
+/// 列出所有卡片：扫 demo/configs/*.json（= 卡片就是配置，没有单独的注册表）
+std::vector<DemoCard> list_demo_cards(AppContext& ctx) {
+    std::vector<DemoCard> out;
+    const std::string dir = demo_config_dir(ctx);
+    DIR* d = opendir(dir.c_str());
+    if (!d) return out;
+    while (struct dirent* e = readdir(d)) {
+        const std::string n = e->d_name;
+        if (n.size() <= 5 || n.compare(n.size() - 5, 5, ".json") != 0) continue;
+        DemoCard c;
+        if (load_demo_card(ctx, n.substr(0, n.size() - 5), c)) out.push_back(c);
+    }
+    closedir(d);
+    std::sort(out.begin(), out.end(),
+              [](const DemoCard& x, const DemoCard& y) { return x.name < y.name; });
     return out;
 }
 
-bool save_demo_params(AppContext& ctx, const std::string& name, const csrc::Json& params) {
-    if (!valid_model_name(name)) return false;
-    // demo/configs/ 可能还不存在（板上第一次保存时），而 ofstream 不会建目录 ——
-    // 以前那句"写入失败"就是这么来的
+/// 写一张卡片（新建或覆盖）
+bool save_demo_card(AppContext& ctx, const std::string& name, const std::string& action,
+                    const std::string& model, const csrc::Json& params) {
+    if (!valid_card_name(name)) return false;
+    // demo/configs/ 可能还不存在（板上第一次建卡时），而 ofstream 不会建目录
     if (!csrc::ensure_dir(demo_config_dir(ctx))) return false;
+    csrc::Json one;
+    one["action"] = action;
+    one["model"] = model;
+    one["target_size"] = csrc::Json((int64_t)params.geti("target_size", kDemoTargetSizeDefault));
+    one["speed"] = csrc::Json((int64_t)params.geti("speed", kDemoSpeedDefault));
+    one["turn_speed"] = csrc::Json((int64_t)params.geti("turn_speed", kDemoTurnSpeedDefault));
+    one["max_seconds"] = csrc::Json((int64_t)params.geti("max_seconds", kDemoMaxSecondsDefault));
     std::ofstream f(demo_config_path(ctx, name));
     if (!f) return false;
-    f << params.dump(false);
+    f << one.dump(false);
     f.close();
     return (bool)f;
+}
+
+/// 动作清单：扫 demo/<动作>.lua（`_` 开头的跳过 —— 那是模板/草稿，不是一个动作）。
+/// 显示名取脚本第一行的约定注释 `-- name: 接近瞄准`；没有就用文件名。
+struct ActionInfo {
+    std::string id;
+    std::string name;
+};
+
+std::vector<ActionInfo> list_actions(AppContext& ctx) {
+    std::vector<ActionInfo> out;
+    const std::string dir = ctx.app_dir + "/demo";
+    DIR* d = opendir(dir.c_str());
+    if (!d) return out;
+    while (struct dirent* e = readdir(d)) {
+        const std::string n = e->d_name;
+        if (n.size() <= 4 || n.compare(n.size() - 4, 4, ".lua") != 0) continue;
+        if (n[0] == '_') continue;                        // _template.lua 之类
+        const std::string id = n.substr(0, n.size() - 4);
+        if (!valid_model_name(id)) continue;              // 动作名要能拼进路径
+        ActionInfo a;
+        a.id = id;
+        a.name = id;
+        std::ifstream f(dir + "/" + n);
+        std::string first;
+        if (f && std::getline(f, first)) {
+            const std::string key = "name:";
+            const size_t at = first.find(key);
+            if (at != std::string::npos) {
+                std::string label = first.substr(at + key.size());
+                const size_t b = label.find_first_not_of(" \t");
+                const size_t e2 = label.find_last_not_of(" \t\r");
+                if (b != std::string::npos) a.name = label.substr(b, e2 - b + 1);
+            }
+        }
+        out.push_back(a);
+    }
+    closedir(d);
+    std::sort(out.begin(), out.end(),
+              [](const ActionInfo& x, const ActionInfo& y) { return x.id < y.id; });
+    return out;
+}
+
+/// 模型清单：扫 demo/models/*.cvimodel（"新建卡片"的下拉要用）
+std::vector<std::string> list_models(AppContext& ctx) {
+    std::vector<std::string> out;
+    const std::string dir = model_dir(ctx);
+    const std::string suffix = ".cvimodel";
+    DIR* d = opendir(dir.c_str());
+    if (!d) return out;
+    while (struct dirent* e = readdir(d)) {
+        const std::string n = e->d_name;
+        if (n.size() <= suffix.size() ||
+            n.compare(n.size() - suffix.size(), suffix.size(), suffix) != 0) continue;
+        out.push_back(n.substr(0, n.size() - suffix.size()));
+    }
+    closedir(d);
+    std::sort(out.begin(), out.end());
+    return out;
 }
 
 std::string speed_config_path(AppContext& ctx) {
@@ -332,86 +428,6 @@ std::string trim_ws(const std::string& s) {
     if (b == std::string::npos) return "";
     size_t e = s.find_last_not_of(" \t\r\n");
     return s.substr(b, e - b + 1);
-}
-
-/// 给新槽位生成一份脚本：拿 demo/_template.lua，把 __MODEL__ 换成槽位名。
-/// **已存在就不动** —— 那份脚本可能已经手调过（对准偏置、脉冲时长），重传模型不该把它冲掉。
-/// 返回：true=这次新建了；false=本来就有（err 里说明模板缺失等异常，调用方不因此失败）
-bool make_demo_script_from_template(AppContext& ctx, const std::string& name, std::string& err) {
-    const std::string target = demo_script_path(ctx, name);
-    if (script_file_exists(ctx, name)) return false;
-    const std::string tpl_path = ctx.app_dir + "/demo/_template.lua";
-    std::ifstream f(tpl_path);
-    if (!f) {
-        err = "模板缺失：" + tpl_path;
-        return false;
-    }
-    std::stringstream ss;
-    ss << f.rdbuf();
-    std::string src = ss.str();
-    // 先删掉模板专用的注释块（`-- [[TEMPLATE-ONLY` … `-- ]]`）——那段话放在生成出来的
-    // 脚本里是错的（它会说"这个文件别改，只用来生成脚本"）。
-    const std::string tpl_beg = "-- [[TEMPLATE-ONLY";
-    const std::string tpl_end = "-- ]]";
-    const size_t tb = src.find(tpl_beg);
-    if (tb != std::string::npos) {
-        const size_t te = src.find(tpl_end, tb);
-        if (te != std::string::npos) {
-            const size_t nl = src.find('\n', te);
-            src.erase(tb, (nl == std::string::npos ? src.size() : nl + 1) - tb);
-        }
-    }
-    const std::string ph = "__MODEL__";
-    size_t pos = 0;
-    int replaced = 0;
-    while ((pos = src.find(ph, pos)) != std::string::npos) {
-        src.replace(pos, ph.size(), name);
-        pos += name.size();
-        replaced++;
-    }
-    if (replaced == 0) {
-        err = "模板里没有 __MODEL__ 占位符：" + tpl_path;
-        return false;
-    }
-    std::ofstream out(target, std::ios::trunc);
-    if (!out) {
-        err = "脚本写不开：" + target;
-        return false;
-    }
-    out << src;
-    out.close();
-    if (!out) {
-        err = "写脚本失败（磁盘满？）：" + target;
-        return false;
-    }
-    return true;
-}
-
-// ── demo: 扫描含 init.sh 的子目录 ──
-// 板上"能跑的 demo" = demo/models/ 里有哪个模型（demo 名就是模型名，跑同名的那份脚本）。
-// 原来这里扫的是预编译二进制目录（每个 demo 一个 init.sh），那套已被 Lua 脚本取代。
-struct DemoInfo {
-    std::string name;
-    std::string path;
-};
-
-std::vector<DemoInfo> list_demos(AppContext& ctx) {
-    std::vector<DemoInfo> out;
-    const std::string dir = model_dir(ctx);
-    const std::string suffix = ".cvimodel";
-    DIR* d = opendir(dir.c_str());
-    if (!d) return out;
-    while (struct dirent* e = readdir(d)) {
-        std::string n = e->d_name;
-        if (n.size() <= suffix.size() ||
-            n.compare(n.size() - suffix.size(), suffix.size(), suffix) != 0)
-            continue;
-        out.push_back({n.substr(0, n.size() - suffix.size()), dir + "/" + n});
-    }
-    closedir(d);
-    std::sort(out.begin(), out.end(),
-              [](const DemoInfo& x, const DemoInfo& y) { return x.name < y.name; });
-    return out;
 }
 
 // wpa_supplicant 自举（移植自 app/routes/wifi.py 的 ensure_wpa_env）
@@ -964,20 +980,21 @@ void register_routes(Router& router, AppContext& ctx) {
             fail(r.gets("error"));   // 魔数不对 / 过大 / 换入失败 —— 原因比"invalid file"有用
             return;
         }
-        std::string script_err;
-        const bool created = make_demo_script_from_template(ctx, name, script_err);
-        if (!created && !script_err.empty()) {
-            CAM_WARN("[models] %s 的脚本没生成：%s", name.c_str(), script_err.c_str());
-        }
-
         Json j;
         j["status"] = "ok";
         j["name"] = name;
         j["size"] = Json((int64_t)r.geti("size", 0));
         j["path"] = r.gets("path");
-        // 方便平台侧显示"模型传完了，脚本也备好了"；已存在的脚本不会被覆盖
-        j["script"] = script_file_exists(ctx, name) ? demo_script_path(ctx, name) : "";
-        j["script_created"] = created;
+        // script / script_created：训练平台那份契约里的字段，**保留不删**（平台在读），
+        // 但语义变了 —— 动作脚本是预定义的、与模型无关，上传模型不再生成脚本。
+        // 模型传上来就能用：建一张卡片（动作 × 这个模型）或直接
+        // POST /api/demo/init {"action":"grab","model":"<名字>"}。
+        j["script"] = "";
+        j["script_created"] = false;
+        // 顺手把可用的动作清单带上，平台侧想提示"能用哪些动作"就有数据了
+        Json actions(Json::Type::Array);
+        for (const auto& a : list_actions(ctx)) actions.push_back(a.id);
+        j["actions"] = actions;
         resp.set_json(j);
     });
 
@@ -1037,90 +1054,166 @@ void register_routes(Router& router, AppContext& ctx) {
         resp.set_json(set_display_enabled(ctx, enabled));
     });
 
-    // ── /api/demo ──（**薄封装**：demo 现在就是"拿某个模型跑一遍 Lua 抓取流程"）
-    // 路径与字段保持不变，前端 DemoPage 一行都不用改；行为则从预编译二进制变成了可改的脚本：
-    // 调某个 demo 就改它自己那份 demo/<名字>.lua，改完 scp 上去即可，不用重编不用重启。
+    // ── /api/demo ── 一张卡片 = **动作 × 模型**（用户在界面上新建，见文件上方 DemoCard 的说明）
+    //
+    // 前端契约：卡片名仍然是 name（前端拿它当 key 与显示），另给 action/model/action_name；
+    // "新建卡片"要用的动作清单与模型清单也跟着 list 一起回，省一次请求。
     router.add("GET", "/api/demo/list", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
-        Json demos;
-        for (auto& d : list_demos(ctx)) {
+        Json demos(Json::Type::Array);
+        for (const auto& c : list_demo_cards(ctx)) {
+            const bool has_action = action_script_exists(ctx, c.action);
+            const bool has_model = access(model_path(ctx, c.model).c_str(), F_OK) == 0;
             Json item;
-            item["name"] = d.name;
-            item["path"] = d.path;
-            item["kind"] = "model";     // 原来是 binary（预编译 demo），现在是"脚本 + 模型"
-            // 一个 demo 一个脚本：脚本名 = demo 名 = 模型名。没有同名脚本的模型照样
-            // 列出来（平台刚推上来、还没来得及写流程），但 script 留空 —— 点开会明确报错。
-            item["script"] = script_file_exists(ctx, d.name) ? d.name : "";
+            item["name"] = c.name;                                  // 卡片名（前端只认这个）
+            item["action"] = c.action;
+            item["model"] = c.model;
+            item["script"] = has_action ? c.action : "";            // 兼容老字段：动作名
+            item["path"] = has_model ? model_path(ctx, c.model) : "";
+            item["kind"] = "card";
+            // 动作脚本或模型文件缺了也照样列出来 —— 点开始会明确报错，别让卡片凭空消失
+            item["ready"] = has_action && has_model;
+            item["error"] = !has_action ? ("动作脚本缺失：demo/" + c.action + ".lua")
+                          : (!has_model ? ("模型文件缺失：demo/models/" + c.model + ".cvimodel") : "");
             demos.push_back(item);
         }
+        Json actions(Json::Type::Array);
+        for (const auto& a : list_actions(ctx)) {
+            Json x;
+            x["id"] = a.id;
+            x["name"] = a.name;      // 脚本第一行 `-- name: 接近瞄准` 给的显示名
+            actions.push_back(x);
+        }
+        Json models(Json::Type::Array);
+        for (const auto& m : list_models(ctx)) models.push_back(m);
         Json j;
         j["demos"] = demos;
+        j["actions"] = actions;
+        j["models"] = models;
         resp.set_json(j);
     });
 
     router.add("GET", "/api/demo/name", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
+        const Json st = script_status(ctx);
         Json j;
-        j["name"] = script_status(ctx).gets("script");
+        j["name"] = st.gets("card");       // 跑的是哪张卡片
+        j["action"] = st.gets("script");   // 动作脚本名
+        j["model"] = st.gets("model");
         resp.set_json(j);
     });
 
     router.add("POST", "/api/demo/init", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
         const Json payload = req.json();
-        const std::string name = payload.is_object() ? payload.gets("name") : "";
-        if (name.empty()) {
-            resp.set_error("name is required", 400);
+        if (!payload.is_object()) {
+            resp.set_error("json body is required", 400);
             return;
         }
-        if (!valid_model_name(name)) {   // 名字会拼进脚本/配置路径
-            resp.set_error("name 非法（只允许字母数字与 _ - .）：" + name, 400);
+
+        // 两种调用方式：
+        //   ① {"name":"追网球接近"}                       ← 界面点"开始"（跑存下来的那张卡片）
+        //   ② {"action":"approach","model":"tennis",...}  ← 直接跑，不用建卡
+        //      （"刚传上来一个新模型，立刻用它接近一下"就是这条）
+        std::string action, model, card;
+        Json params;
+        const std::string name = payload.gets("name");
+        if (!name.empty()) {
+            if (!valid_card_name(name)) {
+                resp.set_error("卡片名非法：" + name, 400);
+                return;
+            }
+            DemoCard c;
+            if (!load_demo_card(ctx, name, c)) {
+                resp.set_error("没有这张卡片（或配置读不了）：demo/configs/" + name + ".json", 400);
+                return;
+            }
+            action = c.action;
+            model = c.model;
+            card = name;
+            params = c.params;
+        } else {
+            action = payload.gets("action");
+            model = payload.gets("model");
+            if (action.empty() || model.empty()) {
+                resp.set_error("要么给 name（跑已建的卡片），要么给 action + model（直接跑）", 400);
+                return;
+            }
+            params["target_size"] = Json((int64_t)payload.geti("target_size", kDemoTargetSizeDefault));
+            params["speed"] = Json((int64_t)payload.geti("speed", kDemoSpeedDefault));
+            params["turn_speed"] = Json((int64_t)payload.geti("turn_speed", kDemoTurnSpeedDefault));
+            params["max_seconds"] = Json((int64_t)payload.geti("max_seconds", kDemoMaxSecondsDefault));
+        }
+
+        // 名字都要拼进路径，且必须真存在 —— 在这里挡掉，别让它变成脚本里一句含糊的报错
+        if (!valid_model_name(action)) {
+            resp.set_error("动作名非法（只允许字母数字与 _ - .）：" + action, 400);
             return;
         }
-        // 一个 demo 一个脚本：跑 demo/<name>.lua，模型写死在那份脚本里。参数取
-        // "这个 demo 存下来的那份"（界面 demo 页设置），请求里显式传的字段优先。
-        if (!script_file_exists(ctx, name)) {
-            resp.set_error("这个 demo 还没有流程脚本：demo/" + name + ".lua", 400);
+        if (!valid_model_name(model)) {
+            resp.set_error("模型名非法（只允许字母数字与 _ - .）：" + model, 400);
             return;
         }
-        Json params = load_demo_params(ctx, name);
-        params["model"] = name;   // 兼容：脚本自己写死了模型，但它照旧能读到
+        if (!action_script_exists(ctx, action)) {
+            resp.set_error("动作脚本不存在：demo/" + action + ".lua", 400);
+            return;
+        }
+        if (access(model_path(ctx, model).c_str(), F_OK) != 0) {
+            resp.set_error("模型不存在：demo/models/" + model + ".cvimodel", 400);
+            return;
+        }
+
+        // 请求里显式传的参数优先（卡片里那份作底）
         if (payload.get("target_size")) params["target_size"] = Json(payload.geti("target_size", kDemoTargetSizeDefault));
         if (payload.get("speed")) params["speed"] = Json(payload.geti("speed", kDemoSpeedDefault));
         if (payload.get("turn_speed")) params["turn_speed"] = Json(payload.geti("turn_speed", kDemoTurnSpeedDefault));
         if (payload.get("max_seconds")) params["max_seconds"] = Json(payload.geti("max_seconds", kDemoMaxSecondsDefault));
-        const Json r = script_run(ctx, name, params, (int)params.geti("max_seconds", kDemoMaxSecondsDefault));
+
+        // ★ 模型来自卡片/请求，**不是卡片名** —— 搞错的话脚本会去开
+        //   demo/models/<卡片名>.cvimodel，报错长成"注册模型失败"，极具误导性
+        params["model"] = model;
+        params["card"] = card;   // 让状态能回答"现在跑的是哪张卡"；脚本不用管它
+
+        const Json r = script_run(ctx, action, params, (int)params.geti("max_seconds", kDemoMaxSecondsDefault));
 
         if (!r.getb("ok")) {
             const Json st = script_status(ctx);
             Json j;
             j["status"] = "already_running";
             j["pid"] = Json((int64_t)getpid());
-            j["name"] = st.gets("script");
+            j["name"] = st.gets("card");
             j["error"] = r.gets("error");
             resp.set_json(j, 409);
             return;
         }
         Json j;
         j["status"] = "started";
-        j["name"] = name;
-        j["script"] = name;
+        j["name"] = card.empty() ? action : card;   // 卡片名（没建卡直接跑时回动作名）
+        j["script"] = action;
+        j["action"] = action;
+        j["model"] = model;
         j["pid"] = Json((int64_t)getpid());   // 兼容字段：跑 demo 的进程就是 capp 自己
         j["pgid"] = Json((int64_t)getpid());
         resp.set_json(j);
     });
 
-    // demo 参数：跑这个 demo 时传给脚本的 params（脚本里用 params() 读）
+    // 卡片配置：GET 读一张、POST 新建或覆盖（动作 + 模型 + 四个参数）
     router.add("GET", "/api/demo/config", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
         const std::string name = req.query_param("name");
         if (name.empty()) {
-            resp.set_error("name 必填（?name=tennis）", 400);
+            resp.set_error("name 必填（卡片名，如 ?name=追网球接近）", 400);
             return;
         }
-        // 与 POST 同一个口径：名字要拼进路径，非法就明确报错，别悄悄回默认值
-        if (!valid_model_name(name)) {
-            resp.set_error("name 非法（只允许字母数字与 _ - .）：" + name, 400);
+        if (!valid_card_name(name)) {
+            resp.set_error("卡片名非法（不能含 / \\ 与控制字符，不能以 . 开头）：" + name, 400);
             return;
         }
-        Json j = load_demo_params(ctx, name);
-        j["name"] = name;
+        DemoCard c;
+        if (!load_demo_card(ctx, name, c)) {
+            resp.set_error("没有这张卡片（或配置读不了）：demo/configs/" + name + ".json", 400);
+            return;
+        }
+        Json j = c.params;
+        j["name"] = c.name;
+        j["action"] = c.action;
+        j["model"] = c.model;
         resp.set_json(j);
     });
 
@@ -1132,34 +1225,80 @@ void register_routes(Router& router, AppContext& ctx) {
         }
         const std::string name = payload.gets("name");
         if (name.empty()) {
-            resp.set_error("name 必填", 400);
+            resp.set_error("name 必填（卡片名，如 追网球接近）", 400);
             return;
         }
-        if (!valid_model_name(name)) {
-            resp.set_error("name 非法（只允许字母数字与 _ - .）：" + name, 400);
+        if (!valid_card_name(name)) {
+            resp.set_error("卡片名非法（不能含 / \\ 与控制字符，不能以 . 开头）：" + name, 400);
             return;
         }
-        // 只接受这三个字段；范围与脚本里的上限一致（速度留给宿主再 clamp 一层）
-        Json params;
-        params["target_size"] = Json((int64_t)payload.geti("target_size", kDemoTargetSizeDefault));
-        params["speed"] = Json((int64_t)payload.geti("speed", kDemoSpeedDefault));
-        params["turn_speed"] = Json((int64_t)payload.geti("turn_speed", kDemoTurnSpeedDefault));
-        params["max_seconds"] = Json((int64_t)payload.geti("max_seconds", kDemoMaxSecondsDefault));
-        if (!save_demo_params(ctx, name, params)) {
+        const std::string action = payload.gets("action");
+        const std::string model = payload.gets("model");
+        if (action.empty() || model.empty()) {
+            resp.set_error("action 与 model 必填（这张卡片跑哪个动作、用哪个模型）", 400);
+            return;
+        }
+        if (!valid_model_name(action)) {
+            resp.set_error("动作名非法（只允许字母数字与 _ - .）：" + action, 400);
+            return;
+        }
+        if (!valid_model_name(model)) {
+            resp.set_error("模型名非法（只允许字母数字与 _ - .）：" + model, 400);
+            return;
+        }
+        if (!action_script_exists(ctx, action)) {
+            resp.set_error("动作脚本不存在：demo/" + action + ".lua", 400);
+            return;
+        }
+        if (access(model_path(ctx, model).c_str(), F_OK) != 0) {
+            resp.set_error("模型不存在：demo/models/" + model + ".cvimodel", 400);
+            return;
+        }
+        if (!save_demo_card(ctx, name, action, model, payload)) {
             resp.set_error("写入 demo/configs/" + name + ".json 失败", 500);
             return;
         }
-        Json j = params;
-        j["name"] = name;
+        Json j;
         j["ok"] = true;
+        j["name"] = name;
+        j["action"] = action;
+        j["model"] = model;
+        j["target_size"] = Json((int64_t)payload.geti("target_size", kDemoTargetSizeDefault));
+        j["speed"] = Json((int64_t)payload.geti("speed", kDemoSpeedDefault));
+        j["turn_speed"] = Json((int64_t)payload.geti("turn_speed", kDemoTurnSpeedDefault));
+        j["max_seconds"] = Json((int64_t)payload.geti("max_seconds", kDemoMaxSecondsDefault));
+        resp.set_json(j);
+    });
+
+    router.add("POST", "/api/demo/delete", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
+        const Json payload = req.json();
+        const std::string name = payload.is_object() ? payload.gets("name") : "";
+        if (name.empty()) {
+            resp.set_error("name 必填（要删的卡片名）", 400);
+            return;
+        }
+        if (!valid_card_name(name)) {
+            resp.set_error("卡片名非法：" + name, 400);
+            return;
+        }
+        const std::string path = demo_config_path(ctx, name);
+        if (std::remove(path.c_str()) != 0) {
+            resp.set_error("没有这张卡片（或删不掉）：demo/configs/" + name + ".json", 400);
+            return;
+        }
+        Json j;
+        j["ok"] = true;
+        j["name"] = name;
         resp.set_json(j);
     });
 
     router.add("POST", "/api/demo/stop", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
         const Json r = script_stop(ctx);
+        const Json st = script_status(ctx);
         Json j;
         j["status"] = r.gets("state") == "idle" ? "already_stopped" : "stopped";
-        j["name"] = script_status(ctx).gets("script");
+        j["name"] = st.gets("card");
+        j["action"] = st.gets("script");
         resp.set_json(j);
     });
 

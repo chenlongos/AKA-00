@@ -62,7 +62,9 @@ struct AppContext {
     bool script_running = false;
     std::string script_state = "idle";   // idle|running|done|failed|aborted
     std::string script_message;
-    std::string script_name;
+    std::string script_name;    // 动作脚本名（demo/<动作>.lua）
+    std::string script_model;   // 这次跑的是哪个模型（params.model；脚本路径之外还要能答"在追什么"）
+    std::string script_card;    // 哪张卡片发起的（直接调 action+model 跑时为空）
     long long script_elapsed_ms = 0;
     long long script_calls = 0;                  // 原语调用计数（看脚本有没有在动）
     std::string script_action;                   // 最近一次动作
@@ -185,24 +187,29 @@ bool build_stream_jpeg_rgb(AppContext& ctx, const csrc::Camera::RgbFrame& rgb,
 /// 必须校验 —— 名字会拼进文件路径，否则 `?model=../../etc/passwd` 就是任意文件读取。
 bool valid_model_name(const std::string& name);
 
-// ── demo 资源路径（全部在 `$AKA_HOME/demo/` 下，见 cpp/README.md 的部署布局）──
+// ── demo 资源（全部在 `$AKA_HOME/demo/` 下，见 cpp/README.md 的部署布局）──
 //
-//   demo/<名字>.lua          流程脚本（平铺，不分子目录；一个 demo 一个，名字与模型对齐）
-//   demo/models/*.cvimodel   模型库（= demo 列表来源）
-//   demo/configs/<名字>.json 运行参数（一个模型一个文件，只在保存过之后才存在）
+//   demo/<动作>.lua            **动作脚本**（预定义、与模型无关，模型从 params().model 读）
+//   demo/models/*.cvimodel     模型库
+//   demo/configs/<卡片名>.json  **卡片定义**：{"action":..,"model":..,+ 四个参数}
 //
-// 路径**只有这两个函数和 demo_config_path() 三处在拼**——以前 models 被拼了三遍、
-// 三套口径，改目录时漏一处就是"模型传上去了但检测不到"。
+// 一张 demo 卡片 = 动作 × 模型（用户自己在界面上建，名字自由）；跑的时候宿主读卡片拿到
+// 动作和模型，跑 demo/<动作>.lua 并把 params.model 注入成卡片里的模型。
+// 注意卡片名**只当文件名用**（可能是中文），别拿它去拼模型路径 —— 这是最容易犯、
+// 报错又最误导的一处（会变成"注册模型失败：…/demo/models/追网球接近.cvimodel"）。
 
 /// `$AKA_HOME/demo/models`
 std::string model_dir(AppContext& ctx);
 /// `$AKA_HOME/demo/models/<name>.cvimodel`
 std::string model_path(AppContext& ctx, const std::string& name);
 
-/// `$AKA_HOME/demo/<name>.lua` —— 一个 demo 一个脚本，名字与模型/参数对齐
-std::string demo_script_path(AppContext& ctx, const std::string& name);
-/// 这份脚本在不在（demo 列表用它标 script 字段，跑之前也用它先挡一道）
-bool script_file_exists(AppContext& ctx, const std::string& name);
+/// `$AKA_HOME/demo/<动作>.lua`（参数是**动作名**，不是卡片名、更不是模型名）
+std::string action_script_path(AppContext& ctx, const std::string& name);
+/// 这个动作脚本在不在（列表用它标 script 字段，跑之前也用它先挡一道）
+bool action_script_exists(AppContext& ctx, const std::string& name);
+
+/// 卡片名是否合法：只有文件系统层面的限制（允许中文），见实现里的说明
+bool valid_card_name(const std::string& name);
 
 /// 把上传上来的模型内容写进 `model_path()`（**同名覆盖**）。
 /// 给"平台推模型"用：content 就是请求体。落地前校验（`CviModel` 魔数 + 大小上限）

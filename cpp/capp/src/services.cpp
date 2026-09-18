@@ -597,12 +597,12 @@ std::string model_path(AppContext& ctx, const std::string& name) {
     return model_dir(ctx) + "/" + name + ".cvimodel";
 }
 
-std::string demo_script_path(AppContext& ctx, const std::string& name) {
+std::string action_script_path(AppContext& ctx, const std::string& name) {
     return ctx.app_dir + "/demo/" + name + ".lua";
 }
 
-bool script_file_exists(AppContext& ctx, const std::string& name) {
-    return access(demo_script_path(ctx, name).c_str(), F_OK) == 0;
+bool action_script_exists(AppContext& ctx, const std::string& name) {
+    return access(action_script_path(ctx, name).c_str(), F_OK) == 0;
 }
 
 csrc::Json save_model_upload(AppContext& ctx, const std::string& name, const std::string& content) {
@@ -657,6 +657,19 @@ bool valid_model_name(const std::string& name) {
         const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
                         (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.';
         if (!ok) return false;
+    }
+    return true;
+}
+
+bool valid_card_name(const std::string& name) {
+    // 卡片名只当文件名用（demo/configs/<卡片名>.json），比 valid_model_name 宽松：
+    // 用户要能用「追网球接近」这种中文名。仍然要挡住路径穿越与怪字符。
+    if (name.empty() || name.size() > 64) return false;
+    if (name.front() == '.') return false;                          // 别造隐藏文件
+    if (name.find("..") != std::string::npos) return false;         // 路径穿越
+    for (unsigned char c : name) {
+        if (c == '/' || c == '\\') return false;
+        if (c < 0x20 || c == 0x7f) return false;                    // 控制字符
     }
     return true;
 }

@@ -80,13 +80,23 @@ export const demo = {
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({}),
     }).then(r => r.json()),
-    // 跑 demo 的参数（每个 demo 一份，存在板上的 demo_config.json）
+    // 一张 demo 卡片 = 动作 × 模型（+ 参数），配置存在 demo/configs/<卡片名>.json。
+    // getConfig 读一张；setConfig 既用来"新建卡片"（带 action/model）也用来改参数。
     getConfig: (name: string) => fetch(`/api/demo/config?name=${encodeURIComponent(name)}`).then(r => r.json()),
-    setConfig: (name: string, params: {target_size: number; speed: number; turn_speed: number; max_seconds: number}) =>
+    setConfig: (name: string,
+                params: {action?: string; model?: string; target_size: number; speed: number;
+                         turn_speed: number; max_seconds: number}) =>
         fetch("/api/demo/config", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({name, ...params}),
+        }).then(r => r.json()),
+    // 删一张卡片（配置一起删；动作脚本与模型文件不受影响）
+    remove: (name: string) =>
+        fetch("/api/demo/delete", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({name}),
         }).then(r => r.json()),
 };
 

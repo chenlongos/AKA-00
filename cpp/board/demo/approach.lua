@@ -1,22 +1,29 @@
--- tennis.lua — 追网球并抓起来（demo "tennis" 专用）
+-- name: 接近瞄准
 --
--- **一个 demo 一个脚本**：脚本名 = demo 名 = 模型名，三样东西按同一个名字对齐
--- （模型 demo/models/tennis.cvimodel、本脚本、参数 demo/configs/tennis.json）。
--- 好处是每个 demo 的判据可以各自调，改这里不影响别的 demo —— 想给方块单开一套
--- 就动 block.lua，两边互不干扰。
+-- approach.lua — **基础动作**：追到目标 → 对准 → **停在那儿，不夹**。
+--
+-- 与 grab.lua 的唯一区别就是最后那一步：这里到位即停并返回，不做夹取、也不等
+-- ZP10S 那套"伸下去→夹→抬起"的 4 秒。适合"先看看对准得准不准"、或者后面接人工/别的
+-- 动作（比如对准之后由人来按夹爪）。
+--
+-- 动作脚本是**通用**的：跟哪个模型无关，模型由宿主从卡片配置里注入到 params.model
+-- （见 cpp/README.md 的"动作 × 模型"一节）。所以同一份脚本对所有模型都能跑，
+-- 想换行为就再加一份动作脚本，不用给每个模型复制一遍。
 --
 -- 用法:
---   POST /api/demo/init {"name":"tennis"}     ← 界面上的"开始"走这条
+--   POST /api/demo/init {"name":"追网球"}                      ← 跑界面上的卡片
+--   POST /api/demo/init {"action":"grab","model":"tennis"}     ← 直接指定，不用建卡
 --   POST /api/script/run
---   {"script":"tennis", "max_seconds":30, "params":{"target_size":300, "speed":20}}
+--   {"script":"grab", "max_seconds":30, "params":{"model":"tennis","target_size":300}}
 --
--- 参数（从 params() 里读，界面 Demo 页每个卡片可调、存在 demo/configs/tennis.json）:
+-- 参数（从 params() 里读；卡片里那份存在 demo/configs/<卡片名>.json）:
+--   model        必填，用哪个模型找目标（demo/models/<model>.cvimodel）
 --   target_size  必填，目标框宽（原图像素）；框宽达到它就认为到位
 --   speed        直线速度百分比，默认 20（宿主还会再 clamp 到 ≤70）
 --   turn_speed   转弯速度百分比，默认跟直线一样
 --
--- 这套判据与参数照搬隔壁仓库 aka0/tennis.cpp（那个预编译 demo 二进制的源码，
--- 实机调过参）：面积最大的框当目标 → 偏出居中带先原地转（脉冲时长与偏离成正比）
+-- 这套判据与参数照搬隔壁仓库 aka0 那个预编译追物 demo 的源码（实机调过参）：
+-- 面积最大的框当目标 → 偏出居中带先原地转（脉冲时长与偏离成正比）
 -- → 对准但还不够大就前进一小段 → 够大且居中就抓。三处不同：
 --   1. 用框宽像素判定（本项目的口径），不是框面积占比；
 --   2. 不做 demo 那种"抓前左转 3 次"的爪子偏置补偿（实测夹空再加）；
@@ -25,12 +32,13 @@
 -- 安全：这里没有、也不可能有"解除限速"的办法 —— 速度、总时长、内存、以及
 -- "人的指令一进来就必须交还控制权"全在宿主（capp/script.cpp）里强制。
 
--- 模型写死在这里（不再从 params.model 读）：脚本与模型一一对应，写死就不会拼错、
--- 也不会出现"拿着 A 的脚本去找 B 的模型"。params 里照旧带着 model 字段（兼容
--- /api/script/run 的老用法），但这里不信它。
-local model = "tennis"
-
 local p = params() or {}
+-- 模型来自卡片配置 / 请求参数（动作脚本通用，不写死）。缺了就直接说清楚 ——
+-- 不 then 的话 detect() 会拿 nil 去开模型，报错很难懂。
+local model = p.model
+if type(model) ~= "string" or model == "" then
+    fail("params.model 必填：这张卡片要用哪个模型找目标")
+end
 local target = tonumber(p.target_size)
 local speed = tonumber(p.speed) or 20                 -- 直线速度
 local turn_speed = tonumber(p.turn_speed) or speed    -- 转弯速度（没配就跟直线一样）
@@ -97,14 +105,13 @@ while true do
         -- 转向方向一律是"把目标送到 GRAB_OFFSET 那个位置"：目标偏左就左转（视角随之右移）
         local align_err = offset - GRAB_OFFSET
         if w >= target and math.abs(align_err) <= ALIGN_MARGIN then
-            -- 够大 + 对准夹爪 → 停稳 → 抓
+            -- 够大 + 对准夹爪 → 停稳，**不夹就走人**（这就是这个动作的全部）
             brake()
-            log("到位：框宽 %dpx（目标 %d）偏移 %d（夹爪位 %d，误差 %d）→ 抓取",
+            log("到位：框宽 %dpx（目标 %d）偏移 %d（夹爪位 %d，误差 %d）→ 只接近，不抓",
                 math.floor(w), math.floor(target), math.floor(offset), GRAB_OFFSET,
                 math.floor(align_err))
-            grab()
-            sleep_ms(4000)        -- 等 ZP10S 那套"伸下去→夹→抬起"走完（约 3.5s）
-            return "已抓取（是否夹到请看实物：夹爪没有反馈）"
+            return string.format("已到位（未抓取）：框宽 %dpx，偏移 %d，夹爪位 %d",
+                                 math.floor(w), math.floor(offset), GRAB_OFFSET)
         elseif math.abs(offset) > CENTER_MARGIN then
             -- 还差得远：大脉冲转向
             local pulse = math.floor(TURN_PULSE_K * math.abs(align_err))

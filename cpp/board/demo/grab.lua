@@ -1,28 +1,25 @@
--- [[TEMPLATE-ONLY
--- _template.lua 是**新 demo 的脚本模板**：训练平台上传模型时（POST /api/model/upload），
--- 车端拿这份文件生成 demo/<槽位名>.lua（把 __MODEL__ 换成槽位名）。
--- 所以这个文件本身不会被当脚本跑，改了它才会影响**今后新生成的** demo；
--- 已经生成的那些不受影响（要改就改它们各自那份）。
--- 下面这段 TEMPLATE-ONLY 注释，生成时会被删掉。
--- ]]
--- __MODEL__.lua — 追物抓取脚本（demo "__MODEL__" 专用）
+-- name: 追到就夹
 --
--- 一个 demo 一个脚本：脚本名 = demo 名 = 模型名，三样东西按同一个名字对齐
--- （模型 demo/models/<名字>.cvimodel、脚本 demo/<名字>.lua、参数 demo/configs/<名字>.json）。
--- 这份脚本由训练平台上传模型时自动生成，之后随便改 —— 只影响 __MODEL__ 这个槽位。
+-- grab.lua — **基础动作**：追到目标 → 对准 → 抓起来。
+--
+-- 动作脚本是**通用**的：跟哪个模型无关，模型由宿主从卡片配置里注入到 params.model
+-- （见 cpp/README.md 的"动作 × 模型"一节）。所以同一份脚本对所有模型都能跑，
+-- 想换行为就再加一份动作脚本，不用给每个模型复制一遍。
 --
 -- 用法:
---   POST /api/demo/init {"name":"<槽位名>"}     ← 界面上的"开始"走这条
+--   POST /api/demo/init {"name":"追网球"}                      ← 跑界面上的卡片
+--   POST /api/demo/init {"action":"grab","model":"tennis"}     ← 直接指定，不用建卡
 --   POST /api/script/run
---   {"script":"<槽位名>", "max_seconds":30, "params":{"target_size":300, "speed":20}}
+--   {"script":"grab", "max_seconds":30, "params":{"model":"tennis","target_size":300}}
 --
--- 参数（从 params() 里读，界面 Demo 页每个卡片可调、存在 demo/configs/<槽位名>.json）:
+-- 参数（从 params() 里读；卡片里那份存在 demo/configs/<卡片名>.json）:
+--   model        必填，用哪个模型找目标（demo/models/<model>.cvimodel）
 --   target_size  必填，目标框宽（原图像素）；框宽达到它就认为到位
 --   speed        直线速度百分比，默认 20（宿主还会再 clamp 到 ≤70）
 --   turn_speed   转弯速度百分比，默认跟直线一样
 --
--- 这套判据与参数照搬隔壁仓库 aka0 那个预编译追物 demo 的源码（
--- 实机调过参）：面积最大的框当目标 → 偏出居中带先原地转（脉冲时长与偏离成正比）
+-- 这套判据与参数照搬隔壁仓库 aka0 那个预编译追物 demo 的源码（实机调过参）：
+-- 面积最大的框当目标 → 偏出居中带先原地转（脉冲时长与偏离成正比）
 -- → 对准但还不够大就前进一小段 → 够大且居中就抓。三处不同：
 --   1. 用框宽像素判定（本项目的口径），不是框面积占比；
 --   2. 不做 demo 那种"抓前左转 3 次"的爪子偏置补偿（实测夹空再加）；
@@ -31,12 +28,13 @@
 -- 安全：这里没有、也不可能有"解除限速"的办法 —— 速度、总时长、内存、以及
 -- "人的指令一进来就必须交还控制权"全在宿主（capp/script.cpp）里强制。
 
--- 模型写死在这里（不再从 params.model 读）：脚本与模型一一对应，写死就不会拼错、
--- 也不会出现"拿着 A 的脚本去找 B 的模型"。params 里照旧带着 model 字段（兼容
--- /api/script/run 的老用法），但这里不信它。
-local model = "__MODEL__"
-
 local p = params() or {}
+-- 模型来自卡片配置 / 请求参数（动作脚本通用，不写死）。缺了就直接说清楚 ——
+-- 不 then 的话 detect() 会拿 nil 去开模型，报错很难懂。
+local model = p.model
+if type(model) ~= "string" or model == "" then
+    fail("params.model 必填：这张卡片要用哪个模型找目标")
+end
 local target = tonumber(p.target_size)
 local speed = tonumber(p.speed) or 20                 -- 直线速度
 local turn_speed = tonumber(p.turn_speed) or speed    -- 转弯速度（没配就跟直线一样）

@@ -41,7 +41,7 @@ cpp/
 ├── board/                    ← 板上目录的实体文件（打包时原样收进 dist/AKA-00/，见下）
 │   ├── config.toml  init.sh  stop.sh  init_ap_web.sh  https_init.sh
 │   ├── arm_angles*.json  speed_config.json  VERSION  start_img.jpg
-│   └── demo/                 流程脚本（*.lua）+ 模型（models/）+ 参数（configs/）
+│   └── demo/                 动作脚本（grab.lua / approach.lua）+ 模型（models/）+ 卡片（configs/）
 ├── scripts/                  build-libjpeg.sh / build-mbedtls.sh / build-lua.sh / build-ota.sh
 └── README.md
 ```
@@ -120,7 +120,7 @@ make clean                # 清理全部构建产物
 板上要什么由**实体文件**说了算：`cpp/board/` 就是 `$AKA_HOME/` 的镜像 ——
 `config.toml`、`init.sh`/`stop.sh`/`init_ap_web.sh`、`https_init.sh`、
 `arm_angles*.json`、`speed_config.json`、`VERSION`、`start_img.jpg`、
-以及 `demo/`（脚本 + 模型 + 参数）全部躺在那儿。想改板上哪个文件就直接改那里的实体文件，
+以及 `demo/`（动作脚本 + 模型 + 卡片配置）全部躺在那儿。想改板上哪个文件就直接改那里的实体文件，
 不用碰构建脚本。
 
 `make package` 只做三件事：
@@ -148,10 +148,10 @@ $AKA_HOME/
 ├── speed_config.json         # 行驶速度配置
 ├── VERSION                   # 版本文件（OTA 用）
 ├── demo/                     # demo 相关全在这一个目录下（仓库 demo/ 整目录照搬）
-│   ├── tennis.lua            #   流程脚本（一个 demo 一个，平铺；demo 名=模型名=脚本名）
-│   ├── block.lua             #   （同上，各自写死自己的模型，互不影响）
-│   ├── models/*.cvimodel     #   模型库（= demo 列表来源，demo 名就是模型名）
-│   └── configs/<模型名>.json  #   运行参数（一个模型一个文件，**只在界面保存过之后才有**）
+│   ├── grab.lua              #   **动作脚本**（预定义、与模型无关，模型从 params.model 读）
+│   ├── approach.lua          #   另一个动作：只接近瞄准、不夹取
+│   ├── models/*.cvimodel     #   模型库
+│   └── configs/<卡片名>.json  #   **卡片**：{"action":..,"model":..,+ 四个参数}（用户建的）
 ├── init.sh                   # 启动（自愈循环）
 ├── stop.sh                   # 停止
 └── init_ap_web.sh            # AP 热点 + 开机自启配置（开机广播 AP，访问 192.168.4.1）
@@ -314,8 +314,8 @@ capp 同时支持 HTTP 和 HTTPS：默认 `:80` 与 `:443` 共存。443 是浏�
 | `GET /api/camera/status` `POST /api/camera/open|close` `GET /api/camera/stream|snapshot|speed|all_status` | 摄像头 |
 | `GET /api/detect?model=<名字>&conf=&iou=` | 单帧推理：取当前帧跑一次模型，只回框的四个角（原像素坐标）。模型必填、裸名字映射 `demo/models/<名字>.cvimodel`；`conf`/`iou` 可选（默认 0.25 / 0.45） |
 | `POST /api/models/upload?name=<名字>` | 模型上传：平台把模型文件推到 `demo/models/`（body 为文件；同名覆盖、覆盖即生效） |
-| `POST /api/script/run` `GET /api/script/status` `POST /api/script/stop` | 跑 Lua 流程脚本（`demo/*.lua`，如 tennis=追网球抓取）。安全兜底（限速/超时/被接管/掉线/内存）在宿主里 |
-| `GET /api/demo/list|name|config` `POST /api/demo/init|stop|config` | demo（config = 跑 demo 的参数，一个模型一份 `demo/configs/<名字>.json`） |
+| `POST /api/script/run` `GET /api/script/status` `POST /api/script/stop` | 跑**动作脚本**（`demo/grab.lua`、`demo/approach.lua`；模型用 `params.model` 传）。安全兜底（限速/超时/被接管/掉线/内存）在宿主里 |
+| `GET /api/demo/list|name|config` `POST /api/demo/init|stop|config|delete` | demo 卡片 = **动作 × 模型**（用户建，一份配置一张卡 `demo/configs/<卡片名>.json`）。init 两种形状：`{"name":卡片名}` 或 `{"action":..,"model":..}` |
 | `GET /api/ota/version|status|check|upgrade/progress` `POST /api/ota/upgrade|update` | OTA |
 | `GET /api/system/info|ip|heartbeat` | 系统 |
 | `GET /api/wifi/ip|status|scan` `POST /api/wifi/connect` | WiFi |

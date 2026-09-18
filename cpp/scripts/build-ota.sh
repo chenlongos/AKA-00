@@ -25,8 +25,8 @@
 #   4) 换包用 staging + 目录改名（尽量原子），旧目录留成 .old 作为回滚点；
 #      并默认保留用户运行时文件（config.toml / speed_config.json / arm_angles.json /
 #      cert.pem / key.pem —— 换包是整目录替换，不在这个名单里的现场数据一律会没），
-#      以及 demo/models/ 里用户上传的模型（与包内模型取并集）。demo/configs/ 不保留
-#      （以仓库为唯一真源），细节见下面 KEEP_FILES 处的注释。
+#      以及 demo/models/ 里用户上传的模型（与包内模型取并集）、demo/configs/ 里用户
+#      新建的卡片（**板上优先**）。细节见下面 KEEP_FILES 与 swap_in 处的注释。
 # =============================================================================
 set -e
 
@@ -75,9 +75,12 @@ PAYLOAD_OFFSET=0000000
 # ——换包是整目录替换，**不在这里的文件一律丢**。历史上漏过 demo_config.json
 # 和 cert.pem/key.pem（自签证书：丢了 HTTPS 就起不来），以后新加"写在 AKA_HOME
 # 里的现场文件"时，记得同步加到这个名单。
-# 注意 `demo/configs/`（每个模型一份的运行参数）**故意不在保留之列**：那份以仓库为
-# 唯一真源，升级按包里带的结算（界面上调的值要正式生效，得抄回仓库再部署）。
-# `demo/models/` 相反要保留 —— 那里面可能有平台运行时推上来的模型，仓库管不到。
+# `demo/configs/`（一张 demo 卡片一份：动作 + 模型 + 参数）**不在这个名单里**，但
+# 也不是丢弃 —— 它是目录，在 swap_in 里单独按"**板上优先**"保留（用户在界面上新建的
+# 卡片不能被升级冲掉）。`demo/models/` 同理单独处理，那边是"包里的优先"。
+# `demo/*.lua` 是**动作脚本**（grab/approach…，与模型无关），同样不在保留之列：
+# 它是仓库里的代码，升级按包里的结算 —— 想按模型/按卡片调参，**改 demo/configs/ 里的
+# 卡片配置，别改动作脚本**，否则升级就丢了。（configs 是"板上优先"，见 swap_in。）
 KEEP_FILES="config.toml speed_config.json arm_angles.json cert.pem key.pem"
 
 extract_payload() {
@@ -123,6 +126,18 @@ swap_in() {
                 fi
             fi
         done
+        # demo/configs/：**用户新建的卡片与调过的参数必须留着** —— 跟上面 models 的
+        # 方向相反：这里**板上优先**（升级不能把用户在界面上建的东西冲掉），包里带的
+        # 那些只在板上没有同名时才落地（当出厂预设）。
+        if [ -d "$AKA_HOME/demo/configs" ]; then
+            mkdir -p "$_new/demo/configs"
+            for _c in "$AKA_HOME"/demo/configs/*.json; do
+                [ -f "$_c" ] || continue
+                _b="${_c##*/}"
+                cp -f "$_c" "$_new/demo/configs/$_b" && echo "[ota] 保留 demo 卡片: $_b"
+            done
+        fi
+
         # demo/models/ 是目录，上面那圈只认文件，得单独处理：不能整个照搬（包里自带的
         # 模型是要更新的），也不能整个丢（用户经 /api/models/upload 传上来的只存在
         # 板上，包里没有 → 丢了就得重传）。所以按文件名取并集：同名用包里的新模型，

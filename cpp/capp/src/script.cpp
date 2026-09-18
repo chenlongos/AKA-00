@@ -236,6 +236,13 @@ int l_detect(lua_State* L) {
     RunCtx* r = RC(L);
     check_interrupt(L, r);
     const char* model = luaL_checkstring(L, 1);
+    // 模型名现在多半来自 params().model（外部可控），必须校验 —— 它会拼进
+    // demo/models/<名字>.cvimodel。`/api/detect` 有这道校验，Lua 这条路以前没有。
+    if (!valid_model_name(model)) {
+        lua_pushnil(L);
+        lua_pushfstring(L, "模型名非法（只允许字母数字与 _ - .）：%s", model);
+        return 2;
+    }
 
     // 可选阈值：detect(model, {conf = 0.6, iou = 0.3})；不给就用默认 0.25 / 0.45。
     // 想按模型分别调又不改脚本，可以从 params() 里读：
@@ -513,8 +520,8 @@ void script_worker(AppContext& ctx, std::string name, csrc::Json params, long lo
         finish(why, "");
     };
 
-    // 读脚本（路径与 demo 列表/接口用的是同一个函数，别再手拼一遍）
-    const std::string path = demo_script_path(ctx, name);
+    // 读**动作脚本**（参数是动作名；路径与 demo 列表/接口用同一个函数，别再手拼一遍）
+    const std::string path = action_script_path(ctx, name);
     std::string src;
     {
         std::ifstream f(path, std::ios::binary);
@@ -573,6 +580,13 @@ csrc::Json script_run(AppContext& ctx, const std::string& name, const csrc::Json
     if (max_seconds < kScriptMinSeconds) max_seconds = kScriptMinSeconds;
     if (max_seconds > kScriptMaxSeconds) max_seconds = kScriptMaxSeconds;
 
+    // 入口就把"动作脚本不存在"挡掉：以前是异步失败（先回 ok:true 再变 failed），
+    // 动作名打错一个字母要过一会儿才看得出来
+    if (!action_script_exists(ctx, name)) {
+        j["ok"] = false;
+        j["error"] = "动作脚本不存在：demo/" + name + ".lua";
+        return j;
+    }
     {
         std::lock_guard<std::mutex> lk(ctx.script_mu);
         if (ctx.script_running) {
@@ -585,6 +599,8 @@ csrc::Json script_run(AppContext& ctx, const std::string& name, const csrc::Json
         ctx.script_state = "running";
         ctx.script_message = "启动";
         ctx.script_name = name;
+        ctx.script_model = params.gets("model");   // 卡片里的模型（直接跑时是请求里给的）
+        ctx.script_card = params.gets("card");     // 卡片名；直接 action+model 跑时为空
         ctx.script_calls = 0;
         ctx.script_action.clear();
         ctx.script_notes.clear();
@@ -646,7 +662,9 @@ csrc::Json script_status(AppContext& ctx) {
     csrc::Json j;
     std::lock_guard<std::mutex> lk(ctx.script_mu);
     j["state"] = ctx.script_state;
-    j["script"] = ctx.script_name;
+    j["script"] = ctx.script_name;       // 动作名（demo/<动作>.lua）
+    j["model"] = ctx.script_model;       // 在追哪个模型
+    j["card"] = ctx.script_card;         // 哪张卡片（空 = 直接 action+model 跑的）
     j["message"] = ctx.script_message;
     j["calls"] = csrc::Json((int64_t)ctx.script_calls);
     j["action"] = ctx.script_action;
