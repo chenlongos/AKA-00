@@ -37,6 +37,13 @@ if [ ! -x "$BIN" ]; then
     exit 1
 fi
 
+# config.toml 必须是可用文件：空文件 = 所有配置项静默取默认值。
+# 踩过：一次 OTA 换包中途断电把 config.toml 写成 0 字节，车于是按默认配置跑
+# （当时 motor 默认还是 dev → 整台车是 mock，车不动，界面也没提示）。
+if [ ! -s "$AKA_HOME/config.toml" ]; then
+    echo "[init] !!! $AKA_HOME/config.toml 不存在或为空 —— 所有配置项会取默认值，先查这个" >&2
+fi
+
 # 摄像头分辨率环境（可选，config.toml 也控制）
 CAM_WIDTH=$(grep -E '^\s*width\s*=' "$AKA_HOME/config.toml" 2>/dev/null | grep -oE '[0-9]+' | head -1)
 CAM_HEIGHT=$(grep -E '^\s*height\s*=' "$AKA_HOME/config.toml" 2>/dev/null | grep -oE '[0-9]+' | head -1)

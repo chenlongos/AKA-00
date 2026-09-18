@@ -101,11 +101,26 @@ swap_in() {
     _old="$AKA_HOME.old"
     rm -rf "$_new" "$_old"
     extract_payload "$_new"
+    # 换包前自检：包里的 config.toml 必须存在且非空。缺了/空了说明包本身坏了
+    # （或者解包中断），这时候**别动现场目录**，直接中止并留着老版本跑。
+    if [ ! -s "$_new/config.toml" ]; then
+        echo "[ota] 错误：解出来的包缺 config.toml 或它是空的 —— 中止换包，现场目录未改动" >&2
+        rm -rf "$_new"
+        exit 1
+    fi
     if [ "${AKA_OTA_RESET_CONFIG:-0}" != "1" ]; then
         for _f in $KEEP_FILES; do
             if [ -f "$AKA_HOME/$_f" ]; then
-                cp -f "$AKA_HOME/$_f" "$_new/$_f"
-                echo "[ota] 保留用户文件: $_f"
+                # **空文件不保留**：现场踩过 —— 一次换包中途断电把 config.toml 写成了
+                # 0 字节，保留逻辑忠实地把它留下来，于是所有配置静默取默认值
+                # （当时 motor 默认还是 dev → 整台车是 mock，车不动、界面也不提示）。
+                # 空的就用包里带的那份：宁可回到出厂配置，也别留一个坏文件在现场。
+                if [ -s "$AKA_HOME/$_f" ]; then
+                    cp -f "$AKA_HOME/$_f" "$_new/$_f"
+                    echo "[ota] 保留用户文件: $_f"
+                else
+                    echo "[ota] ! $_f 是空文件 → 不保留，用包里带的那份"
+                fi
             fi
         done
         # demo/models/ 是目录，上面那圈只认文件，得单独处理：不能整个照搬（包里自带的
