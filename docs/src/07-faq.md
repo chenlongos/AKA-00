@@ -56,16 +56,12 @@ pip install -r requirements.txt
 
 ### Q: 如何开启 HTTPS？
 
-1. 生成证书：
-```bash
-openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 3650 -nodes
-```
+**不用手工做**：`cpp/board/https_init.sh` 会在 capp 启动前自动生成自签证书
+（EC prime256v1，10 年有效期；openssl 没编 EC 时退回 RSA-2048），缺一才生成 ——
+已有的证书不会被覆盖。生成位置固定 `$AKA_HOME/cert.pem` / `key.pem`。
 
-2. 配置环境变量：
-```bash
-export APP_CERT_PATH=/path/to/cert.pem
-export APP_KEY_PATH=/path/to/key.pem
-```
+要手工换证书（比如换成 CA 签发的），把这两个文件放到 `$AKA_HOME/` 即可，
+端口在 `config.toml` 的 `[web] https_port`（默认 443）。
 
 ### Q: 如何设置开机自启？
 

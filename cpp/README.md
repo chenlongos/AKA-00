@@ -147,7 +147,7 @@ $AKA_HOME/
 ├── arm_angles_default.json   # 默认角度
 ├── speed_config.json         # 行驶速度配置
 ├── VERSION                   # 版本文件（OTA 用）
-├── demo/                     # demo 相关全在这一个目录下（仓库 demo/ 整目录照搬）
+├── demo/                     # demo 相关全在这一个目录下（仓库 cpp/board/demo/ 镜像过来）
 │   ├── grab.lua              #   **动作脚本**（预定义、与模型无关，模型从 params.model 读）
 │   ├── approach.lua          #   另一个动作：只接近瞄准、不夹取
 │   ├── models/*.cvimodel     #   模型库
@@ -223,10 +223,10 @@ $HOME/AKA-00/init_ap_web.sh            # = install + 立即启动
 
 ```toml
 [camera]
-width = 320
-height = 240
-fps = 24
-jpeg_quality = 30
+width = 640          # 必须用原生可出流的档（320x240 是假档，勿用）
+height = 360
+fps = 15
+jpeg_quality = 75
 
 [motor]
 backend = "tt_pid"      # 只认 "tt_pid"（mock 已删除：连不上会明确报错）
@@ -256,18 +256,18 @@ gear_ratio = 90
 level = "info"
 ```
 
-找不到 config.toml 时 motor/arm 全部走 mock（不控制硬件），Web 仍可启动，方便调试。
+找不到 config.toml 时按**默认值**跑（motor=tt_pid `/dev/ttyS1`、arm=zp10s `/dev/ttyS2`），仍然去连真硬件；连不上只打 ERROR、不假装能动，Web 照常启动。
 
 ### 底盘自动重连（motor backend=tt_pid）
 
 底盘 UART 不再作为服务启动的硬依赖（否则 ESP32 上电晚几百 ms 就会导致服务
-起不来 / 静默降级 mock 后永远连不上）：
+起不来 / 驱动永久不可用）：
 
 - 服务启动**不阻塞、不抛异常**：构造 `create_motor_pair` 即返回
   `AutoReconnectMotorPair` 代理，后台线程按退避策略（0.5s→1s→…→30s 封顶）
-  持续尝试 INIT/CONFIG 握手，连上即自动切换为真实驱动；期间命令落到 mock。
+  持续尝试 INIT/CONFIG 握手，连上即自动切换为真实驱动；**没连上期间指令被丢弃**（`active_` 为空），日志打 ERROR、`/api/motor/status` 报 `connected=false`。
 - 已连接后每 ~1.5s 一次 `GET_STATUS` 心跳探活，连续 2 次失败判定掉线 →
-  自动换回 mock 并重连（ESP32 意外重启/掉线可自愈）。
+  自动断开真实链路（`active_` 置空）并按退避重连（ESP32 意外重启/掉线可自愈）。
   心跳**不仅看"有应答"，还校验固件状态 ≥ READY**：ESP32 重启后处于
   UNINIT(0) 也会应答 GET_STATUS，但固件对速度命令要求 READY，未就绪照样
   判定掉线并自动重连（否则车不动，只能靠手动 reinitialize 才能恢复）。
@@ -314,7 +314,7 @@ capp 同时支持 HTTP 和 HTTPS：默认 `:80` 与 `:443` 共存。443 是浏�
 | `GET /api/camera/status` `POST /api/camera/open|close` `GET /api/camera/stream|snapshot|speed|all_status` | 摄像头 |
 | `GET /api/detect?model=<名字>&conf=&iou=` | 单帧推理：取当前帧跑一次模型，只回框的四个角（原像素坐标）。模型必填、裸名字映射 `demo/models/<名字>.cvimodel`；`conf`/`iou` 可选（默认 0.25 / 0.45） |
 | `POST /api/models/upload?name=<名字>` | 模型上传：平台把模型文件推到 `demo/models/`（body 为文件；同名覆盖、覆盖即生效） |
-| `POST /api/demo/run` `GET /api/demo/status` `POST /api/demo/stop` | 跑**动作脚本**（`demo/grab.lua`、`demo/approach.lua`；模型用 `params.model` 传）。安全兜底（限速/超时/被接管/掉线/内存）在宿主里 |
+| `POST /api/demo/run` `GET /api/demo/status` `POST /api/demo/stop` | 跑**动作脚本**（`demo/grab.lua`、`demo/approach.lua`；模型用 `params.model` 传）。安全兜底（限速/被接管/掉线/内存）在宿主里；执行方式 `mode=once|loop`，**没有总时长上限** |
 | `GET /api/demo/list|name|config` `POST /api/demo/init|stop|config|delete` | demo 卡片 = **动作 × 模型**（用户建，一份配置一张卡 `demo/configs/<卡片名>.json`）。init 两种形状：`{"name":卡片名}` 或 `{"action":..,"model":..}` |
 | `GET /api/ota/version|status|check|upgrade/progress` `POST /api/ota/upgrade|update` | OTA |
 | `GET /api/system/info|ip|heartbeat` | 系统 |
@@ -436,9 +436,9 @@ cover 裁切、盒式平均效果、越界写与异常输入，共 21 项断言�
 **浏览器优先（CPU 竞争）**：单核 SoC 上"屏显示 + 浏览器取流"同时跑会 CPU 饱和
 （显示每帧 RGB565 转换 + SPI 写屏约 20ms，15fps ≈ 30% 单核；驱动推屏还有内核侧开销），
 会明显拖慢网页看摄像头的帧率与延迟。因此 `/api/camera/stream` 有客户端连接时会把
-显示线程降到 `[display] fps_streaming`（默认 5；**设为 0 = 有人看流时完全暂停屏显示**），
+显示线程降到 `[display] fps_streaming`（默认 3；**设为 0 = 有人看流时完全暂停屏显示**），
 断开后自动恢复 `[display] fps`。仍嫌不够时用 `[display] scale` 缩小显示区域
-（scale=3 → 写屏字节约 1/2，转换像素约 1/2）。
+（显示区 = 屏幕 1/scale：scale=2 是 1/4 屏，scale=3 约 1/9 屏）。
 
 ## 与原 Python 版本的差异（有意为之）
 
@@ -449,7 +449,7 @@ cover 裁切、盒式平均效果、越界写与异常输入，共 21 项断言�
    riscv64 musl 静态编译最简单。
 3. **https**：服务端走 mbedTLS（HTTPS 监听 + TLS 终止，跨编译进 riscv64 musl 静态二进制）；
    客户端（`https://` 出栈请求：OTA 检查、状态上报）走 `curl -sS` 兜底，板上需装 curl。
-   纯 `http://` 走内置 socket 客户端（demo 模型下载、OTA 固件下载）。
+   纯 `http://` 走内置 socket 客户端（OTA 固件下载）。
 4. **摇杆换算**：WS joystick 用差速转向公式（左 = y+x，右 = y-x，±100 限幅），
    与前端 ControlSocket 契约一致。
 5. **OTA 重启脚本**：进程名默认 `aka-capp`（`AKA_SERVER_NAME` 可覆盖），固件仍是

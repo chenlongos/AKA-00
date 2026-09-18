@@ -1,7 +1,7 @@
 // csrc/config.hpp — 机器人配置（对应原 Python app/config.py 的 HardwareConfig）
 //
 // 读取 config.toml（TOML 子集，单 key 单 value），搜索顺序：
-//   1. $AKA_HOME/etc/config.toml（生产部署）
+//   1. $AKA_HOME/etc/config.toml（旧布局；当前打包布局是 $AKA_HOME/config.toml，见 1b）
 //   2. 可执行文件所在目录的 ../etc/config.toml（bin/aka-capp → ../etc/config.toml）
 //   3. CWD 下的 config.toml（开发）
 // 都找不到则用默认值（motor 默认 tt_pid —— mock 已删除，连不上会明确报错；

@@ -46,7 +46,7 @@ std::unique_ptr<Gripper> create_gripper(const std::string& driver,
                                         int baudrate = 115200);
 
 /// 解析 servo key 中的舵机 ID："xxx.servoN" → N；"servoN_..." → N；"servoN" → N。
-/// gripper_open/gripper_close 无 ID（返回 -1，由调用方按 driver 决定夹爪舵机 ID）。
+/// gripper_open/gripper_close 没有 ID 段，直接返回调用方传进来的 `gripper_servo`。
 int resolve_servo_id(const std::string& key, int gripper_servo);
 
 }  // namespace csrc

@@ -38,24 +38,26 @@ python run.py
 
 ## 打包部署到控制板
 
-使用 `build_release.sh` 将整个项目打包为单个自解压可执行文件 `aka-server`，然后拷贝到 SG2002 控制板即可运行。
+使用 `make -C cpp ota` 将整个项目打包为单个自解压可执行文件 `aka-00-server`，然后拷贝到 SG2002 控制板即可运行。
 
 ```bash
 # 构建（在开发机上执行）
-./build_release.sh              # 使用已有静态文件
-./build_release.sh --rebuild    # 自动构建前端后打包
+make -C cpp ota                 # 打包（用已有前端产物）
+cd frontend && npm run build    # 需要重建前端时先跑这个
+make -C cpp ota                 # 再打包
 
-# 输出: dist/aka-server (约 9MB)
+# 输出: cpp/dist/aka-00-server（约 9MB 自解压安装器）
+#       cpp/dist/AKA-00/（部署目录，就是板上 $AKA_HOME 的样子）
 ```
 
 ### 首次部署
 
 ```bash
-# 1. 拷贝 aka-server 到控制板
-scp dist/aka-server root@<robot>:/usr/local/bin/
+# 1. 拷贝 aka-00-server 到控制板
+scp cpp/dist/aka-00-server root@<robot>:/usr/local/bin/
 
 # 2. 一键初始化（解压 + 热点 + 开机自启）
-ssh root@<robot> 'aka-server --init'
+ssh root@<robot> 'aka-00-server --init'
 ```
 
 ### 更新部署
@@ -63,13 +65,13 @@ ssh root@<robot> 'aka-server --init'
 清除旧数据后重新运行：
 
 ```bash
-scp dist/aka-server root@<robot>:
-ssh root@<robot> 'rm -rf $HOME/AKA-00 && aka-server'
+scp cpp/dist/aka-00-server root@<robot>:
+ssh root@<robot> 'aka-00-server --update'
 ```
 
 ### 工作原理
 
-`aka-server` 是一个自解压程序：
+`aka-00-server` 是一个自解压程序：
 1. 首次运行时自动解压项目文件到 `${AKA_HOME:-$HOME/AKA-00}`
 2. 执行 `uart_init.sh` 初始化串口（如果存在）
 3. 启动 `python3 run.py` 运行 Web 服务

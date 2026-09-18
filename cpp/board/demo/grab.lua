@@ -10,7 +10,7 @@
 --   POST /api/demo/init {"name":"追网球"}                      ← 跑界面上的卡片
 --   POST /api/demo/init {"action":"grab","model":"tennis"}     ← 直接指定，不用建卡
 --   POST /api/demo/run
---   {"script":"grab", "max_seconds":30, "params":{"model":"tennis","target_size":300}}
+--   {"script":"grab", "params":{"model":"tennis","target_size":300,"mode":"once"}}
 --
 -- 参数（从 params() 里读；卡片里那份存在 demo/configs/<卡片名>.json）:
 --   model        必填，用哪个模型找目标（demo/models/<model>.cvimodel）
@@ -26,8 +26,8 @@
 --   3. 丢目标就收工，不做没有超时的原地找球；
 --   4. 凑太近（框宽超过目标 1.5 倍）会先退一小段，而不是硬贴上去。
 --
--- 安全：这里没有、也不可能有"解除限速"的办法 —— 速度、总时长、内存、以及
--- "人的指令一进来就必须交还控制权"全在宿主（capp/script.cpp）里强制。
+-- 安全：这里没有、也不可能有"解除限速"的办法 —— 速度、执行方式（跑一遍还是循环）、
+-- 内存预算、以及"人的指令一进来就必须交还控制权"，全在宿主（capp/script.cpp）里强制。
 
 local p = params() or {}
 -- 模型来自卡片配置 / 请求参数（动作脚本通用，不写死）。缺了就直接说清楚 ——

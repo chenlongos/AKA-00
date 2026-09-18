@@ -16,27 +16,30 @@
 
 ## 3. 部署（首次/更新）
 
-项目以单文件 `aka-server` 分发，拷贝到控制板：
+项目以单文件 `aka-00-server` 分发，拷贝到控制板：
 
 ```bash
 # 打包（在开发机上）
-./build_release.sh              # 使用已有静态文件
-./build_release.sh --rebuild    # 自动构建前端后打包
+make -C cpp ota                 # 打包（用已有前端产物）
+cd frontend && npm run build    # 需要重建前端时先跑这个
+make -C cpp ota                 # 再打包
 
 # 拷贝到控制板
-scp dist/aka-server root@<robot>:
+scp cpp/dist/aka-00-server root@<robot>:
 
 # 首次部署：一键初始化（解压 + 热点 + 自启）
-ssh root@<robot> 'aka-server --init'
+ssh root@<robot> 'aka-00-server --init'
 
 # 之后每次开机自动启动，也可手动运行
-ssh root@<robot> 'aka-server'
+ssh root@<robot> 'aka-00-server'
 ```
 
-更新部署时清除旧数据后重新运行：
+更新部署（**保留** `config.toml`、证书、demo 卡片等现场数据）：
 ```bash
-ssh root@<robot> 'rm -rf $HOME/AKA-00 && aka-server'
+scp cpp/dist/aka-00-server root@<robot>:/tmp/
+ssh root@<robot> 'chmod +x /tmp/aka-00-server && /tmp/aka-00-server --update'
 ```
+> 想让本次带的默认配置连 `config.toml` 一起覆盖，用 `AKA_OTA_RESET_CONFIG=1 ...--update`。
 
 ## 4. 修改代码常用命令
 
@@ -45,10 +48,10 @@ ssh root@<robot> 'rm -rf $HOME/AKA-00 && aka-server'
 ssh root@<机器人IP>
 
 # 本地修改代码后，重新打包并部署
-./build_release.sh && scp dist/aka-server root@<robot>:/usr/local/bin/
+make -C cpp ota && scp cpp/dist/aka-00-server root@<robot>:/usr/local/bin/
 
 # 在控制板上重启服务
-ssh root@<robot> 'rm -rf $HOME/AKA-00 && aka-server'
+ssh root@<robot> 'aka-00-server --update'
 ```
 
 ## 5. 使用

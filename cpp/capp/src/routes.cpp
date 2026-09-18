@@ -145,7 +145,7 @@ std::vector<ActionInfo> list_actions(AppContext& ctx) {
     while (struct dirent* e = readdir(d)) {
         const std::string n = e->d_name;
         if (n.size() <= 4 || n.compare(n.size() - 4, 4, ".lua") != 0) continue;
-        if (n[0] == '_') continue;                        // _template.lua 之类
+        if (n[0] == '_') continue;                        // 下划线开头的是模板/草稿，不算一个动作
         const std::string id = n.substr(0, n.size() - 4);
         if (!valid_model_name(id)) continue;              // 动作名要能拼进路径
         ActionInfo a;
@@ -846,7 +846,8 @@ void register_routes(Router& router, AppContext& ctx) {
     });
 
     // 单帧推理：取当前帧跑一次模型，只回框的四个角（原图像素坐标）。
-    // 模型必填（裸名字 → $AKA_HOME/demo/models/<名字>.cvimodel），先不做阈值等 query 覆盖。
+    // 模型必填（裸名字 → $AKA_HOME/demo/models/<名字>.cvimodel）；可选阈值 ?conf=&iou=
+    // （不给用默认 0.25 / 0.45，给错值直接 400）。
     router.add("GET", "/api/detect", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
         const std::string model = req.query_param("model");
         if (model.empty()) {
@@ -931,8 +932,9 @@ void register_routes(Router& router, AppContext& ctx) {
     //
     // 与上面 `/api/models/upload` 的区别：那个是"平台/curl 推模型"（名字走 query，body 就是
     // 文件裸内容，响应 {ok,name,path,size}）；这个是**浏览器表单直传**（multipart 两个字段
-    // file+name，响应 {status,name,size}），而且会**顺手给新槽位生成一份脚本** ——
-    // 不然模型传上来了，Demo 页点开始只会报"还没有流程脚本"。
+    // file+name，响应 {status,name,size}）。
+    // **不再给模型生成脚本**：动作脚本是预定义、与模型无关的，传完模型后在 Demo 页建一张卡
+    // （动作 × 这个模型），或直接 POST /api/demo/init {"action":"grab","model":"<名字>"}。
     //
     // CORS 与 OPTIONS 预检不在这里处理：http_server 在路由之前就统一应答了（所有响应也
     // 自动带 Access-Control-Allow-Origin: *），浏览器跨域直传本来就要求那样。

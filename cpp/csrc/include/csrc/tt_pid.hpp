@@ -3,7 +3,7 @@
 // 对应 src/base_control/tt_pid/__init__.py 的 TtPidChassis。
 // 帧格式: 0xAA 0x55 <cmd> <len> <payload...> <chk>，chk = cmd ^ len ^ payload[0..]
 //
-// 实现 MotorPair 接口（见 motor_pair.hpp），可与 Mock 互换。
+// 实现 MotorPair 接口（见 motor_pair.hpp），可与其它 MotorPair 实现互换。
 
 #pragma once
 

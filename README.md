@@ -52,20 +52,21 @@ QQ群：901307286
 
 ```bash
 # 构建（在开发机上执行）
-./build_release.sh              # 使用已有前端
-./build_release.sh --rebuild    # 重新构建前端后打包
+make -C cpp ota                 # 打包（用已有前端产物）
+cd frontend && npm run build    # 需要重建前端时先跑这个
+make -C cpp ota                 # 再打包
 
-# 输出: dist/aka-server (约 9MB 自解压可执行文件)
+# 输出: cpp/dist/aka-00-server（约 9MB 自解压安装器；--update 升级、--init 首次部署）
 ```
 
 ### 首次部署
 
 ```bash
-# 1. 拷贝 aka-server 到控制板
-scp dist/aka-server root@<robot>:/usr/local/bin/
+# 1. 拷贝 aka-00-server 到控制板
+scp cpp/dist/aka-00-server root@<robot>:/usr/local/bin/
 
 # 2. 运行首次初始化（解压 + 配置热点 + 开机自启）
-ssh root@<robot> 'aka-server --init'
+ssh root@<robot> 'aka-00-server --init'
 ```
 
 `--init` 会自动完成：
@@ -78,8 +79,8 @@ ssh root@<robot> 'aka-server --init'
 
 ```bash
 # 重新构建并拷贝，然后清除旧数据重启
-scp dist/aka-server root@<robot>:/usr/local/bin/
-ssh root@<robot> 'rm -rf $HOME/AKA-00 && aka-server'
+scp cpp/dist/aka-00-server root@<robot>:/usr/local/bin/
+ssh root@<robot> 'aka-00-server --update'
 ```
 
 ### 热点信息
@@ -104,13 +105,13 @@ ssh root@<robot> 'rm -rf $HOME/AKA-00 && aka-server'
 ```
 AKA-00/
 ├── run.py                # Web 服务器入口
-├── build_release.sh      # 打包为单文件可执行程序
+├── build_release.sh      # Python 时代遗留，勿用（正式构建走 make -C cpp ota）
 ├── init_ap_web.sh        # 热点 + 自启配置脚本
 ├── tennis_hunter.py      # 机器人主程序
 ├── app/                  # Flask Web 应用
 ├── src/                  # 硬件控制模块（机械臂、电机、摄像头）
 ├── frontend/             # React 前端
-└── models/               # YOLOv8 模型文件
+└── cpp/board/demo/models/ # 模型库（*.cvimodel，按「动作 × 模型」组 demo 卡片）
 
 详细说明见 [文档](./docs/src/06-development/structure.md)
 ```
@@ -144,12 +145,18 @@ AKA-00/
 
 ## 环境变量
 
+> 下面这几个 `APP_*` 是 **Python 时代**的变量，当前 C++ 版（`cpp/`）**不读它们** ——
+> 端口在 `$AKA_HOME/config.toml` 的 `[web] port` / `https_port`，证书固定读
+> `$AKA_HOME/cert.pem` / `key.pem`（缺了由 `init.sh` 自动生成，见 `cpp/README.md`）。
+> 当前版本认的环境变量：`AKA_HOME`、`AKA_SERVER_NAME`、`ARM_ANGLES_PATH`、
+> `OTA_CHECK_URL`、`STATUS_REPORT_URL` / `STATUS_REPORT_INTERVAL`。
+
 | 变量名 | 默认值 | 说明 |
 |--------|--------|------|
-| `APP_HTTP_PORT` | 80 (Linux) / 5000 (Windows) | HTTP 服务端口 |
-| `APP_HTTPS_PORT` | 443 (Linux) / 5443 (Windows) | HTTPS 服务端口 |
-| `APP_CERT_PATH` | ~/AKA-00/cert.pem | HTTPS 证书路径 |
-| `APP_KEY_PATH` | ~/AKA-00/key.pem | HTTPS 密钥路径 |
+| `APP_HTTP_PORT` | 80 (Linux) / 5000 (Windows) | HTTP 服务端口（**已废弃**） |
+| `APP_HTTPS_PORT` | 443 (Linux) / 5443 (Windows) | HTTPS 服务端口（**已废弃**，改用 config.toml） |
+| `APP_CERT_PATH` | ~/AKA-00/cert.pem | HTTPS 证书路径（**已废弃**） |
+| `APP_KEY_PATH` | ~/AKA-00/key.pem | HTTPS 密钥路径（**已废弃**） |
 
 ## API 接口
 

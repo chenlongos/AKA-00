@@ -17,18 +17,16 @@ D = m / P + c
 
 ## 标定参数
 
-标定参数 `m` 和 `c` 配置在 `app/config.py` 的 `HardwareConfig` 中：
+标定参数 `m` 和 `c` 是 **C++ 侧的编译期常量**，在 `cpp/csrc/include/csrc/config.hpp`：
 
-```python
-@dataclass(frozen=True)
-class HardwareConfig:
-    # ...
-    # 距离标定: D = m / P + c
-    calib_m: float = 2671.82
-    calib_c: float = -2.82
+```cpp
+// 距离标定: D = m / P + c
+double calib_m = 2671.82;
+double calib_c = -2.82;
 ```
 
-修改后重启小车服务即可生效。
+> 注意：**它们不在 `config.toml` 里**，改了要重新交叉编译 + 部署（`make -C cpp ota`）
+> 才生效 —— 不像相机/电机那些参数改配置文件重启就行。
 
 > **如何标定**：将目标物体（如网球）放在已知距离处，在画面中测量其像素尺寸 `P`，代入公式反算出适合自己场景的 `m` 和 `c` 值。
 
@@ -45,8 +43,8 @@ GET /api/camera/snapshot
 ```json
 {
   "image": "<base64 jpeg>",
-  "width": 320,
-  "height": 240,
+  "width": 640,
+  "height": 360,
   "format": "jpeg",
   "m": 2671.82,
   "c": -2.82
@@ -55,7 +53,7 @@ GET /api/camera/snapshot
 
 | 字段 | 说明 |
 |------|------|
-| image | 320×240 的 JPEG 图片（letterbox 等比缩放） |
+| image | 640×360 的 JPEG 图片（采集分辨率，letterbox 等比缩放） |
 | m | 标定乘数 |
 | c | 标定偏移 |
 
@@ -89,7 +87,7 @@ python tests/server_dashboard.py --model tests/model/tennis.onnx --port 8080
 | 距离显示 | 实时显示计算出的距离值（cm） |
 | 标定参数 | 显示当前使用的 m、c 值 |
 | P 值 | 显示检测框的像素尺寸 |
-| 图片 | 320×240 画面，检测框以绿色矩形标注 |
+| 图片 | 640×360 画面，检测框以绿色矩形标注 |
 
 ### 参数说明
 

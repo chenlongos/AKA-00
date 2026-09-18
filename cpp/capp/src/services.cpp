@@ -348,7 +348,7 @@ csrc::Json move_distance(AppContext& ctx, const std::string& direction, double v
 
         int st = mp->move_state();
         if (st < 0) {
-            // mock 或无状态源（含等待中链路掉线切回 mock）：无法精确判定，
+            // 无状态源（底盘没连上 / 链路等待中掉线）：无法精确判定，
             // 退化为短等停稳直接返回（设备侧结果以 ESP32 自检为准）
             bool moved = false;
             if (base < 0) {

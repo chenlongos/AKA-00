@@ -80,12 +80,13 @@ long long now_ms(const RunCtx* r) {
                std::chrono::steady_clock::now() - r->t0).count();
 }
 
-/// 底盘是否真在线。掉线时 AutoReconnectMotorPair 会静默退回 mock（车不动却没错误码），
+/// 底盘是否真在线。掉线时 AutoReconnectMotorPair 会把 `active_` 置空 —— 指令被丢弃、
+/// `/api/motor/status` 报 connected=false（不再有 mock 兜底，车不动必有错误码/日志），
 /// 所以每一拍都得主动查，否则就是"对着空气跑"。
 bool motor_ok(AppContext& ctx) { return motor_status_json(ctx).getb("connected", false); }
 
 /// 所有"该打断"的条件集中在这里；命中就 luaL_error（longjmp，脚本接不住）。
-/// 顺序有意为之：先看人为的停止，再看超时/接管/硬件。
+/// 顺序有意为之：先看人为的停止，再看接管/硬件。（没有超时这一条 —— 执行方式由 mode 决定）
 void check_interrupt(lua_State* L, RunCtx* r) {
     if (!r->reason.empty()) luaL_error(L, "%s", r->reason.c_str());
     if (r->ctx->script_abort) {
@@ -468,7 +469,9 @@ void classify(const std::string& reason, const std::string& ret, std::string& st
         message = ret.empty() ? "脚本正常结束" : ret;
         return;
     }
-    if (reason.rfind("failed:", 0) == 0 || reason.rfind("timeout:", 0) == 0 ||
+    // 没有 "timeout:" 这一支 —— 脚本没有总时长上限（执行方式由 mode 决定），
+    // 宿主不会再产生这个前缀
+    if (reason.rfind("failed:", 0) == 0 ||
         reason.rfind("motor:", 0) == 0 || reason.rfind("error:", 0) == 0) {
         state = "failed";
     } else {

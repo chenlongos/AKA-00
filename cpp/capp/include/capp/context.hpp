@@ -4,7 +4,7 @@
 //   - 硬件: MotorPair / Gripper / Camera（csrc）
 //   - 状态采集: StateCollector（csrc 单例）
 //   - 控制服务: 定时停线程 / 夹爪锁
-//   - demo: 就是"拿某个模型跑一遍 Lua 流程"（薄封装，见 routes.cpp）
+//   - demo: 卡片 = 动作 × 模型（跑 demo/<动作>.lua，模型由宿主注入 params.model；见 routes.cpp）
 //   - 脚本: Lua 流程宿主（$AKA_HOME/demo/*.lua）
 //   - ota: 升级任务
 //   - 云端上报: 命令日志
@@ -49,7 +49,7 @@ struct AppContext {
     // 单帧推理（GET /api/detect）：懒加载的模型 + 一把锁。
     // 同步跑（每请求一次推理），锁把"换模型 + 推理"整段罩住 —— TPU 是单实例、
     // YoloDetector 非线程安全；脚本并发由 script_running 串行（同一时刻只有一个流程）。
-    // Lua 流程脚本（demo/*.lua）—— 状态由工作线程写、接口读，都用 script_mu 保护；
+    // ── Lua 动作脚本（demo/*.lua）── 状态由工作线程写、接口读，都用 script_mu 保护；
     // script_abort 是给"立即停"用的（原子，免得停止请求要等锁）。
     std::mutex script_mu;
     /// 脚本工作线程（pthread 而不是 std::thread：**要显式指定栈大小**）。
@@ -67,7 +67,6 @@ struct AppContext {
     std::string script_card;    // 哪张卡片发起的（直接调 action+model 跑时为空）
     bool script_repeat = false; // 循环执行（mode=loop）：跑完一轮接着下一轮，直到被停
     int script_round = 0;       // 已跑到第几轮（once 恒为 1）
-    long long script_elapsed_ms = 0;
     long long script_calls = 0;                  // 原语调用计数（看脚本有没有在动）
     std::string script_action;                   // 最近一次动作
     std::vector<std::pair<std::string, std::string>> script_notes;   // 脚本 note() 发布的字段
@@ -93,10 +92,6 @@ struct AppContext {
     /// "自己发起的运动是否已被后续指令取代"（被取代则不再自动停车）
     int motion_seq = 0;
     std::mutex arm_mu;   // grab/release 串行
-
-    // demo 模型下载进度: task_id → Json{progress, status, error}
-    std::mutex dl_mu;
-    std::map<std::string, csrc::Json> downloads;
 
     // ota 任务: task_id → Json{progress, status, message}
     std::mutex ota_mu;
@@ -222,7 +217,7 @@ csrc::Json save_model_upload(AppContext& ctx, const std::string& name, const std
 // ── Lua 流程脚本（$AKA_HOME/demo/*.lua，实现在 capp/script.cpp）──
 //
 // 把"看→对准→靠近→抓"这类**要反复调参的流程**从 C++ 搬到脚本里：改一行存盘重跑，
-// 不用交叉编译 + 部署 + 重启。脚本只拿得到有上限的原语；超时/限速/被抢占地接管/
+// 不用交叉编译 + 部署 + 重启。脚本只拿得到有上限的原语；限速/被抢占的接管/
 // 底盘掉线这些**安全兜底全在宿主**（见 script.cpp 的注释与文档）。
 
 /// 跑一个动作脚本（异步；同一时刻只允许一个）。params 会以 Lua table 的形式给脚本读。
@@ -232,7 +227,8 @@ csrc::Json save_model_upload(AppContext& ctx, const std::string& name, const std
 csrc::Json script_run(AppContext& ctx, const std::string& name, const csrc::Json& params);
 /// 停止当前脚本：置中止标志并立刻刹车（不等脚本配合）。
 csrc::Json script_stop(AppContext& ctx);
-/// 当前状态：state / script / message / elapsed_ms / calls / action / notes
+/// 当前状态：state / script（动作名）/ mode / round / model / card / message /
+/// calls / action / notes
 csrc::Json script_status(AppContext& ctx);
 
 /// 取当前摄像头帧跑一次推理。

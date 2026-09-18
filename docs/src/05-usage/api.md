@@ -409,9 +409,9 @@ curl -F "file=@model.cvimodel" -F "name=orange" "http://<ip>/api/model/upload"
 落盘与副作用：
 
 - 模型 → `demo/models/<name>.cvimodel`（**同名覆盖**，原子换入，坏包不会顶掉正在用的）
-- 脚本 → `demo/<name>.lua`：拿 `demo/_template.lua` 把 `__MODEL__` 换成槽位名生成一份。
-  **已存在则不动** —— 那份脚本可能已经手调过，重传模型不该把它冲掉。
-  生成之后这个槽位在 Demo 页就能直接跑（模型 + 脚本 + 参数三样同名齐了）。
+- 脚本：**不再生成**。动作脚本是仓库里预定义的 `demo/grab.lua` / `demo/approach.lua`，
+  与模型无关；传完模型后要么在 Demo 页新建一张卡片（动作 × 这个模型），要么直接
+  `POST /api/demo/init {"action":"grab","model":"<名字>"}` 跑一下。
 - CORS 与 `OPTIONS` 预检由服务器统一处理（所有响应带 `Access-Control-Allow-Origin: *`，
   预检回 200），浏览器跨域直传不需要额外配置。
 
