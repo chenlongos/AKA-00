@@ -16,10 +16,10 @@ cpp/
 │   │   ├── config.hpp        配置（config.toml 子集解析）
 │   │   ├── angle_config.hpp  arm_angles.json 读写/迁移（对应 angle_config.py）
 │   │   ├── tt_pid.hpp        TT 马达 ESP32 底盘 UART 协议（对应 tt_pid/__init__.py）
-│   │   ├── motor_pair.hpp    MotorPair 接口 + 工厂 + Mock（对应 base_control/interfaces.py）
+│   │   ├── motor_pair.hpp    MotorPair 接口 + 工厂（自动重连；**无 mock**，连不上即报错）
 │   │   ├── zp10s.hpp         ZP10S 舵机驱动（对应 zl/zp10s/uart_control.py）
 │   │   ├── sts3215.hpp       STS3215 总线舵机驱动（对应 sts3215/__init__.py）
-│   │   ├── gripper.hpp       Gripper 接口 + 适配器 + 工厂（对应 arm_control/interfaces.py）
+│   │   ├── gripper.hpp       Gripper 接口 + 适配器 + 工厂（**无 mock**，接不上即报错）
 │   │   ├── camera.hpp        V4L2 + libjpeg 摄像头（参考 tests/demo_camera.c）
 │   │   ├── screen_display.hpp 摄像头画面 → 板载 SPI 屏（/dev/fb0，ST7796S 320x480）
 │   │   ├── state.hpp         RobotStatus + StateCollector（对应 src/state/__init__.py）
@@ -229,13 +229,13 @@ fps = 24
 jpeg_quality = 30
 
 [motor]
-backend = "tt_pid"      # "tt_pid" 真实硬件 / "dev" 开发 mock
+backend = "tt_pid"      # 只认 "tt_pid"（mock 已删除：连不上会明确报错）
 port = "/dev/ttyS1"
 baudrate = 115200
 ppr = 4680
 
 [arm]
-backend = "zp10s"       # "zp10s" / "sts3215" / "dev"
+backend = "zp10s"       # "zp10s" / "sts3215"（mock 已删除）
 port = "/dev/ttyS2"
 baudrate = 115200
 

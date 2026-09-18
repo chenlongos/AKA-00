@@ -129,8 +129,21 @@ Config Config::load() {
     Config cfg;
     std::string path = find_config_path();
     if (path.empty()) {
-        CAM_WARN("config.toml not found (tried AKA_HOME, ../etc, cwd); using defaults (backend=dev)");
+        CAM_ERROR("找不到 config.toml（试过 AKA_HOME、../etc、cwd）—— 全部走默认值："
+                  "底盘会去连默认串口 %s，连不上只会报错、不会假装能动",
+                  cfg.motor.port.c_str());
         return cfg;
+    }
+    {
+        // 空文件是踩过的坑：OTA 换包中途断电，config.toml 被写成 0 字节，
+        // 于是所有配置项静默取默认值（当时 motor.backend 默认还是 "dev" → 整台车是个 mock，
+        // 车不动而界面没提示）。这里必须吵一句。
+        std::ifstream probe(path, std::ios::binary | std::ios::ate);
+        if (probe && probe.tellg() == std::streamoff(0)) {
+            CAM_ERROR("config.toml 是空文件（%s）—— 全部走默认值，请检查是不是换包中途断电了",
+                      path.c_str());
+            return cfg;
+        }
     }
 
     TomlReader toml(path);

@@ -120,7 +120,7 @@ struct AppContext {
 
 // ── 控制服务（对应 app/services/control_service.py）──
 
-/// 初始化硬件服务（启动 StateCollector）。返回 false 表示全部 mock。
+/// 初始化硬件服务（启动 StateCollector）。返回值恒为 true（底盘已无 mock，见 motor_pair.hpp）。
 bool init_services(AppContext& ctx);
 
 /// 动作控制: action = up/down/left/right/stop/grab/release

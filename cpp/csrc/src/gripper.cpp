@@ -16,19 +16,25 @@ namespace csrc {
 
 namespace {
 
-// ── Mock ──
-class MockGripper : public Gripper {
+// ── 没有可用夹爪时的占位（**不是 mock**）──
+//
+// 与删除前那个 MockGripper 的区别：它从不假装成功 —— 状态恒为 Unknown、每个动作都打
+// ERROR，接口/界面看到的就是"夹爪没接上"。MockGripper 的问题是 close() 打完日志就
+// 把状态改成 Closed，于是"夹爪没动"和"夹爪动了"在外部完全分不出来。
+// 保留一个对象（而不是让工厂返回 nullptr）只是为了调用方不用到处判空。
+class UnavailableGripper : public Gripper {
 public:
-    void open() override { CAM_INFO("[MockGripper] open()"); status_ = GripperStatus::Open; }
-    void close() override { CAM_INFO("[MockGripper] close()"); status_ = GripperStatus::Closed; }
-    GripperStatus get_status() override { return status_; }
+    explicit UnavailableGripper(std::string why) : why_(std::move(why)) {}
+    void open() override { CAM_ERROR("[gripper] open 被丢弃：%s", why_.c_str()); }
+    void close() override { CAM_ERROR("[gripper] close 被丢弃：%s", why_.c_str()); }
+    GripperStatus get_status() override { return GripperStatus::Unknown; }
     void update_angles(const Json&) override {}
     void preview_angle(const std::string& key, int angle) override {
-        CAM_INFO("[MockGripper] preview_angle(%s=%d)", key.c_str(), angle);
+        CAM_ERROR("[gripper] preview_angle(%s=%d) 被丢弃：%s", key.c_str(), angle, why_.c_str());
     }
 
 private:
-    GripperStatus status_ = GripperStatus::Unknown;
+    std::string why_;
 };
 
 // ── ZP10S 适配器 ──
@@ -36,8 +42,16 @@ class ZP10SGripperAdapter : public Gripper {
 public:
     explicit ZP10SGripperAdapter(std::unique_ptr<ZP10S> zp10s) : zp10s_(std::move(zp10s)) {}
 
-    void open() override { zp10s_release(*zp10s_); status_ = GripperStatus::Open; }
-    void close() override { zp10s_grab(*zp10s_); status_ = GripperStatus::Closed; }
+    void open() override {
+        if (!zp10s_->ok()) { CAM_ERROR("[gripper] open 被丢弃：zp10s 没连上（%s）", zp10s_->error().c_str()); return; }
+        zp10s_release(*zp10s_);
+        status_ = GripperStatus::Open;
+    }
+    void close() override {
+        if (!zp10s_->ok()) { CAM_ERROR("[gripper] close 被丢弃：zp10s 没连上（%s）", zp10s_->error().c_str()); return; }
+        zp10s_grab(*zp10s_);
+        status_ = GripperStatus::Closed;
+    }
     GripperStatus get_status() override { return status_; }
     void update_angles(const Json& angles) override { zp10s_->update_angles(angles); }
     void preview_angle(const std::string& key, int angle) override {
@@ -94,24 +108,26 @@ int resolve_servo_id(const std::string& key, int gripper_servo) {
 
 std::unique_ptr<Gripper> create_gripper(const std::string& driver,
                                         const std::string& port, int baudrate) {
+    // 注意：**设备打不开也不再退回 mock**（2026-09-18 删除）—— 那样只会让"夹爪没动"
+    // 和"夹爪动了"在外部完全分不出来。打不开就照实报错，让 /api/*/status 里的
+    // gripper_status 停在 unknown、每次动作打 ERROR。
     if (driver == "zp10s") {
         auto zp10s = std::make_unique<ZP10S>(port, baudrate);
         if (!zp10s->ok()) {
-            CAM_WARN("[gripper] zp10s init failed (%s), falling back to mock", zp10s->error().c_str());
-            return std::make_unique<MockGripper>();
+            CAM_ERROR("[gripper] zp10s 打不开（%s）—— 夹爪不会动", zp10s->error().c_str());
         }
         return std::make_unique<ZP10SGripperAdapter>(std::move(zp10s));
     }
     if (driver == "sts3215") {
         auto servo = std::make_unique<STS3215>(port, baudrate);
         if (!servo->ok()) {
-            CAM_WARN("[gripper] sts3215 init failed (%s), falling back to mock", servo->error().c_str());
-            return std::make_unique<MockGripper>();
+            CAM_ERROR("[gripper] sts3215 打不开（%s）—— 夹爪不会动", servo->error().c_str());
         }
         return std::make_unique<STS3215GripperAdapter>(std::move(servo));
     }
-    CAM_INFO("[gripper] driver=%s → mock", driver.c_str());
-    return std::make_unique<MockGripper>();
+    CAM_ERROR("[gripper] driver=\"%s\" 不支持（mock 已移除，只认 zp10s / sts3215）—— 夹爪不会动",
+              driver.c_str());
+    return std::make_unique<UnavailableGripper>("driver=\"" + driver + "\" 不支持（mock 已移除）");
 }
 
 }  // namespace csrc

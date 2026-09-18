@@ -48,16 +48,25 @@ AutoReconnectMotorPair::AutoReconnectMotorPair(std::string port, int baudrate, i
       port_(std::move(port)),
       baudrate_(baudrate),
       ppr_(ppr) {
-    mock_ = std::make_shared<MockMotorPair>();
-    active_ = mock_;
-    enabled_ = (backend_ == "tt_pid");
-    if (enabled_) {
+    // active_ 初始就是空的 —— **没有 mock 兜底**（2026-09-18 删除）。
+    // 以前这里塞的是 MockMotorPair：配置坏了（config.toml 为空 → backend 取默认 "dev"）
+    // 或者串口连不上时，指令全被 mock 吞掉，车不动而界面/接口都不报错。
+    // 现在"没有真底盘"就是一个可观测的状态：指令丢弃 + ERROR + /api/motor/status 报未连接。
+    if (backend_ == "tt_pid") {
+        enabled_ = true;
         // 后台立刻尝试首次连接（构造不阻塞、不抛异常 → 服务必然能起）
         worker_ = std::thread([this] { worker_loop(); });
         CAM_INFO("[motor] auto-reconnect enabled (port=%s baud=%d ppr=%d)",
                  port_.c_str(), baudrate_, ppr_);
     } else {
-        CAM_INFO("[motor] backend=%s → mock (auto-reconnect off)", backend_.c_str());
+        // 不认识的 backend（含老配置里的 "dev"）：明确报错，绝不"假装能动"。
+        // enabled_ 仍置 true，是为了让 /api/motor/status 报出"未连接"这一状态 ——
+        // 界面只在 enabled && !connected 时才提示"底盘未连接"，否则又是一次静默失败。
+        std::lock_guard<std::mutex> lk(mu_);
+        enabled_ = true;
+        error_ = "backend=\"" + backend_ + "\" 不支持（mock 已移除，只认 tt_pid）";
+        CAM_ERROR("[motor] backend=\"%s\" 不支持：mock 已移除，只认 tt_pid —— 不会驱动底盘",
+                  backend_.c_str());
     }
 }
 
@@ -68,57 +77,64 @@ std::shared_ptr<MotorPair> AutoReconnectMotorPair::active() const {
     return active_;
 }
 
-// ── 转发方法：active() 永不为空（无真实驱动时为 mock），无需判空 ──
+// ── 转发方法：active() 可能为空（底盘没连上）—— 空就丢弃指令并告警，绝不假装能动 ──
 
-void AutoReconnectMotorPair::warn_if_mock_drive(const char* what) {
+void AutoReconnectMotorPair::warn_if_no_chassis(const char* what) {
     bool should_log = false;
     {
         std::lock_guard<std::mutex> lk(mu_);
         auto now = std::chrono::steady_clock::now();
-        if (now - mock_warn_at_ >= std::chrono::seconds(1)) {
-            mock_warn_at_ = now;
+        if (now - no_chassis_warn_at_ >= std::chrono::seconds(1)) {
+            no_chassis_warn_at_ = now;
             should_log = true;
         }
     }
     if (should_log)
-        CAM_WARN("[motor] %s while chassis DISCONNECTED (active=mock) — 指令被丢弃，车不动",
-                 what);
+        CAM_ERROR("[motor] %s 被丢弃：底盘未连接（%s）—— 车不会动", what, port_.c_str());
 }
 
 void AutoReconnectMotorPair::set_speed(int left, int right) {
     auto p = active();
-    if (p == mock_ && (left != 0 || right != 0)) warn_if_mock_drive("set_speed");
+    if (!p) {
+        if (left != 0 || right != 0) warn_if_no_chassis("set_speed");
+        return;
+    }
     p->set_speed(left, right);
 }
 
 void AutoReconnectMotorPair::get_speeds(int& l, int& r) {
     auto p = active();
+    if (!p) { l = 0; r = 0; return; }
     p->get_speeds(l, r);
 }
 
 void AutoReconnectMotorPair::brake() {
     auto p = active();
+    if (!p) return;   // 没连上就没什么可刹的（真实底盘失联时它自己会停）
     p->brake();
 }
 
 void AutoReconnectMotorPair::sleep() {
     auto p = active();
+    if (!p) return;
     p->sleep();
 }
 
 void AutoReconnectMotorPair::get_encoder(int& c1, int& c2) {
     auto p = active();
+    if (!p) { c1 = 0; c2 = 0; return; }
     p->get_encoder(c1, c2);
 }
 
 void AutoReconnectMotorPair::move_distance(uint8_t dir, uint8_t speed, int32_t target) {
     auto p = active();
-    if (p == mock_) warn_if_mock_drive("move_distance");
+    if (!p) { warn_if_no_chassis("move_distance"); return; }
     p->move_distance(dir, speed, target);
 }
 
 void AutoReconnectMotorPair::send_cmd_noresp(uint8_t cmd, const uint8_t* payload, size_t len) {
     auto p = active();
+    if (!p) return;
     p->send_cmd_noresp(cmd, payload, len);
 }
 
@@ -128,13 +144,15 @@ MotorLinkStatus AutoReconnectMotorPair::link_status() const {
     st.backend = backend_;
     st.enabled = enabled_;
     st.connected = connected_;
-    st.state = connected_ ? "connected" : (enabled_ ? "reconnecting" : "disabled");
+    // state：connected / reconnecting（tt_pid 正在重连）/ error（backend 就不对）
+    st.state = connected_ ? "connected"
+                          : (backend_ == "tt_pid" ? "reconnecting" : "error");
     st.attempts = attempts_;
     st.error = error_;
     return st;
 }
 
-/// 断开当前真实驱动并换回 mock（连接状态清零）。
+/// 断开当前真实驱动（active_ 置空、连接状态清零）。
 /// expected=nullptr 无条件断；非空时仅当 active_ 仍是 expected 才断（防误杀新链）。
 bool AutoReconnectMotorPair::drop(const std::shared_ptr<MotorPair>& expected) {
     std::shared_ptr<MotorPair> old;
@@ -142,10 +160,10 @@ bool AutoReconnectMotorPair::drop(const std::shared_ptr<MotorPair>& expected) {
         std::lock_guard<std::mutex> lk(mu_);
         if (expected && active_ != expected) return false;  // 已被他人重连/替换
         old = std::move(active_);
-        active_ = mock_;
+        active_ = nullptr;
         connected_ = false;
     }
-    if (old && old != mock_) {
+    if (old) {
         CAM_INFO("[motor] link dropped");
         old->close();
     }
@@ -165,15 +183,16 @@ void AutoReconnectMotorPair::request_reconnect() {
 
 bool AutoReconnectMotorPair::reinitialize() {
     // 语义：已连上 → 原地重发 INIT/CONFIG（清 PID/编码器，不掉线不打断运行）；
-    // 未连上或原地重发失败 → 断开并完整重连一次（自愈）。纯 mock 直接成功。
-    if (!enabled_) return true;
+    // 未连上或原地重发失败 → 断开并完整重连一次（自愈）。
+    // backend 不对（含老配置的 "dev"）没什么可重连的：mock 已移除，只有真底盘一条路。
+    if (backend_ != "tt_pid") return false;
     std::lock_guard<std::mutex> attempt_lk(attempt_mu_);
     std::shared_ptr<MotorPair> cur;
     {
         std::lock_guard<std::mutex> lk(mu_);
         if (connected_) cur = active_;
     }
-    if (cur && cur != mock_ && cur->reinitialize()) {
+    if (cur && cur->reinitialize()) {
         return true;  // 链路健康：原地 INIT/CONFIG 成功
     }
     drop(cur);  // 仅当还是同一条链才断（防误杀并发重连的新链）
@@ -218,7 +237,7 @@ bool AutoReconnectMotorPair::try_connect() {
         attempts_ = 0;
         error_.clear();
     }
-    if (old && old != mock_) old->close();
+    if (old) old->close();   // 换掉的那条旧链路（以前这里还要排除 mock）
     CAM_INFO("[motor] ✓ real chassis connected (%s)", port_.c_str());
     return true;
 }
@@ -301,11 +320,9 @@ void AutoReconnectMotorPair::worker_loop() {
 std::unique_ptr<MotorPair> create_motor_pair(const std::string& port,
                                              const std::string& backend,
                                              int baudrate, int ppr) {
-    if (backend == "tt_pid") {
-        return std::make_unique<AutoReconnectMotorPair>(port, baudrate, ppr, backend);
-    }
-    CAM_INFO("[motor] backend=%s → mock", backend.c_str());
-    return std::make_unique<MockMotorPair>();
+    // mock 已删除：只认 tt_pid。其它值直接交给代理去报错（"不假装能动"），
+    // 而不是像以前那样静默换成一个吞指令的 mock。
+    return std::make_unique<AutoReconnectMotorPair>(port, baudrate, ppr, backend);
 }
 
 }  // namespace csrc

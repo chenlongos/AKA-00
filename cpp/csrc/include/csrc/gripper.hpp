@@ -2,7 +2,7 @@
 //
 // 对应 src/arm_control/interfaces.py：
 //   - GripperProtocol: open / close / get_status / update_angles / preview_angle
-//   - ZP10SGripperAdapter / STS3215GripperAdapter / MockGripper
+//   - ZP10SGripperAdapter / STS3215GripperAdapter（mock 已删除：接不上就明确报错）
 //   - create_gripper(driver, port, baudrate)
 
 #pragma once
@@ -39,7 +39,8 @@ public:
     virtual void send_raw_cmd(const std::string&) {}
 };
 
-/// 创建夹爪驱动。driver: "zp10s" | "sts3215" | "dev"（mock）
+/// 创建夹爪驱动。driver 只认 "zp10s" | "sts3215"；其它值不会退化成 mock（已删除），
+/// 而是返回一个"每次都打 ERROR"的占位（状态恒为 Unknown）。
 std::unique_ptr<Gripper> create_gripper(const std::string& driver,
                                         const std::string& port = "/dev/ttyS2",
                                         int baudrate = 115200);

@@ -200,11 +200,11 @@ bool init_services(AppContext& ctx) {
     });
     ctx.collector.start();
 
-    bool real = ctx.config.motor.backend != "dev" || ctx.config.arm.backend != "dev";
-    CAM_INFO("[app] services ready (motor=%s arm=%s)%s",
-             ctx.config.motor.backend.c_str(), ctx.config.arm.backend.c_str(),
-             real ? "" : " — all mock (backend=dev)");
-    return real;
+    // 底盘和夹爪都没有 mock 了（2026-09-18 删除）：接不上就是明确报错 + 状态里体现，
+    // 不再有"假装能动"的路径。返回值（"是否全是 mock"）恒为 true（没有 mock 可退）。
+    CAM_INFO("[app] services ready (motor=%s arm=%s)",
+             ctx.config.motor.backend.c_str(), ctx.config.arm.backend.c_str());
+    return true;
 }
 
 // ═══════════════════════ 控制服务 ═══════════════════════
@@ -441,19 +441,24 @@ csrc::Json reinitialize_motor_pair(AppContext& ctx) {
 csrc::Json motor_status_json(AppContext& ctx) {
     csrc::Json j;
     j["backend"] = ctx.config.motor.backend;
-    bool enabled = ctx.config.motor.backend != "dev";
-    j["enabled"] = enabled;
     bool connected = false;
     std::string state = "disabled";
     int attempts = 0;
     std::string error;
+    // enabled 以**底盘自己的状态**为准，不再用 `backend != "dev"` 推：
+    // 界面只在 enabled && !connected 时才提示"底盘未连接"，而配置一旦写成 dev
+    // （或配置为空让默认值生效），按老算法 enabled=false → 车不动却一声不吭（踩过）。
+    // mock 已删除，这个值现在恒为 true：要么连上，要么明确报未连接。
+    bool enabled = true;
     if (ctx.motor_link) {
         csrc::MotorLinkStatus st = ctx.motor_link->link_status();
+        enabled = st.enabled;
         connected = st.connected;
         state = st.state;
         attempts = st.attempts;
         error = st.error;
     }
+    j["enabled"] = enabled;
     j["connected"] = connected;
     j["state"] = state;
     j["attempts"] = csrc::Json((int64_t)attempts);

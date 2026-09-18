@@ -4,7 +4,8 @@
 //   1. $AKA_HOME/etc/config.toml（生产部署）
 //   2. 可执行文件所在目录的 ../etc/config.toml（bin/aka-capp → ../etc/config.toml）
 //   3. CWD 下的 config.toml（开发）
-// 都找不到则用默认值（motor/arm backend=dev，不控制硬件）。
+// 都找不到则用默认值（motor 默认 tt_pid —— mock 已删除，连不上会明确报错；
+// arm 默认 zp10s）。
 
 #pragma once
 
@@ -33,14 +34,19 @@ struct CameraConfig {
 };
 
 struct MotorConfig {
-    std::string backend = "dev";   // "dev" (mock) | "tt_pid"
+    // mock 已删除（2026-09-18）：只认 "tt_pid"；其它值会被明确报错而不是静默不驱动。
+    // 默认值也从 "dev" 改成 "tt_pid" —— 配置缺失时宁可去连真底盘（连不上会报错），
+    // 也不要退成一个"看着在跑、其实不动"的状态。
+    std::string backend = "tt_pid";
     std::string port = "/dev/ttyS1";
     int baudrate = 115200;
     int ppr = 4680;
 };
 
 struct ArmConfig {
-    std::string backend = "dev";   // "dev" | "zp10s" | "sts3215"
+    // mock 已删除（2026-09-18）：只认 "zp10s" | "sts3215"；默认值跟着本仓库的
+    // config.toml 走（板和包的默认硬件都是 zp10s）。其它值不复位成 mock。
+    std::string backend = "zp10s";
     std::string port = "/dev/ttyS2";
     int baudrate = 115200;
 };
