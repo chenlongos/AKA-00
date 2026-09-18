@@ -7,6 +7,7 @@
 
 #include "capp/http_server.hpp"   // kMaxRequestBody（上传体上限，服务器与这里共用一个值）
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cmath>
@@ -715,13 +716,22 @@ bool detect_boxes(AppContext& ctx, const std::string& model_name, const csrc::De
     return ok;
 }
 
-csrc::Json detect_once(AppContext& ctx, const std::string& model_name) {
+csrc::DecodeOptions decode_options(double conf, double iou) {
+    csrc::DecodeOptions opt;   // 默认 conf=0.25 / iou=0.45
+    // 0 = 调用方没给；给了就夹到 0.01~0.99（0 会"什么都留"，1 会"什么都不要"，
+    // 两个极端都不是能用阈值，夹住比报错省事）
+    if (conf > 0) opt.conf = (float)std::min(0.99, std::max(0.01, conf));
+    if (iou > 0) opt.iou = (float)std::min(0.99, std::max(0.01, iou));
+    return opt;
+}
+
+csrc::Json detect_once(AppContext& ctx, const std::string& model_name,
+                       const csrc::DecodeOptions& opt) {
     csrc::Json j;
     std::vector<csrc::Detection> dets;
     int frame_w = 0;
     std::string err;
-    // conf=0.25 / iou=0.45（先不做 query 覆盖）
-    if (!detect_boxes(ctx, model_name, csrc::DecodeOptions{}, dets, frame_w, err)) {
+    if (!detect_boxes(ctx, model_name, opt, dets, frame_w, err)) {
         j["ok"] = false;
         j["error"] = err;
         return j;

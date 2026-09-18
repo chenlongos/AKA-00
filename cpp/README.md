@@ -312,7 +312,7 @@ capp 同时支持 HTTP 和 HTTPS：默认 `:80` 与 `:443` 共存。443 是浏�
 | `GET /api/motor/status` `GET /api/motor/direct?left=&right=&duration=` `GET /api/motor/raw_command?cmd=` | 电机 |
 | `GET/POST /api/arm/angles` `GET/POST /api/arm/angles/default` `POST /api/arm/angles/preview` | 机械臂 |
 | `GET /api/camera/status` `POST /api/camera/open|close` `GET /api/camera/stream|snapshot|speed|all_status` | 摄像头 |
-| `GET /api/detect?model=<名字>` | 单帧推理：取当前帧跑一次模型，只回框的四个角（原图像素坐标）。模型必填、裸名字映射 `demo/models/<名字>.cvimodel` |
+| `GET /api/detect?model=<名字>&conf=&iou=` | 单帧推理：取当前帧跑一次模型，只回框的四个角（原像素坐标）。模型必填、裸名字映射 `demo/models/<名字>.cvimodel`；`conf`/`iou` 可选（默认 0.25 / 0.45） |
 | `POST /api/models/upload?name=<名字>` | 模型上传：平台把模型文件推到 `demo/models/`（body 为文件；同名覆盖、覆盖即生效） |
 | `POST /api/script/run` `GET /api/script/status` `POST /api/script/stop` | 跑 Lua 流程脚本（`demo/*.lua`，如 tennis=追网球抓取）。安全兜底（限速/超时/被接管/掉线/内存）在宿主里 |
 | `GET /api/demo/list|name|config` `POST /api/demo/init|stop|config` | demo（config = 跑 demo 的参数，一个模型一份 `demo/configs/<名字>.json`） |

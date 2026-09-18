@@ -229,7 +229,14 @@ csrc::Json script_status(AppContext& ctx);
 /// 取当前摄像头帧跑一次推理。
 /// 成功：{"ok":true,"count":N,"boxes":[{"x1","y1","x2","y2"}...]}（原图像素坐标）
 /// 失败：{"ok":false,"error":"..."}（HTTP 码由路由决定）
-csrc::Json detect_once(AppContext& ctx, const std::string& model_name);
+/// 从 conf / iou 构造解码参数：0 表示"没给"→ 用默认（0.25 / 0.45），
+/// 给了就夹到 0.01~0.99。/api/detect 的 ?conf=&iou= 与脚本的 detect(model, {conf=,iou=})
+/// 都走这里，免得两处各写一套边界。
+csrc::DecodeOptions decode_options(double conf, double iou);
+
+/// 单帧推理（/api/detect 用）。opt 不给就用默认阈值（conf 0.25 / iou 0.45）。
+csrc::Json detect_once(AppContext& ctx, const std::string& model_name,
+                       const csrc::DecodeOptions& opt = {});
 
 // ── 板载屏显示服务 ──
 

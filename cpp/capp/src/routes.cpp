@@ -845,7 +845,26 @@ void register_routes(Router& router, AppContext& ctx) {
             resp.set_json(j, 400);
             return;
         }
-        const Json j = detect_once(ctx, model);
+        // 可选阈值：?conf=0.6&iou=0.3（不给就用默认 0.25 / 0.45 = 与以前完全一样）。
+        // 给错值直接报错而不是悄悄用默认 —— 调参时最怕"以为生效了其实没生效"。
+        double conf = 0, iou = 0;   // 0 = 没给，交给 decode_options 取默认
+        auto read_thresh = [&](const char* key, double& out) -> bool {
+            const std::string v = req.query_param(key);
+            if (v.empty()) return true;
+            char* end = nullptr;
+            const double d = std::strtod(v.c_str(), &end);
+            if (end == v.c_str() || *end != '\0' || d <= 0 || d >= 1) return false;
+            out = d;
+            return true;
+        };
+        if (!read_thresh("conf", conf) || !read_thresh("iou", iou)) {
+            Json j;
+            j["ok"] = false;
+            j["error"] = "conf / iou 要在 0~1 之间（如 ?conf=0.6&iou=0.3）；不给就用默认 0.25 / 0.45";
+            resp.set_json(j, 400);
+            return;
+        }
+        const Json j = detect_once(ctx, model, decode_options(conf, iou));
         resp.set_json(j, j.getb("ok") ? 200 : 500);
     });
 

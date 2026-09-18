@@ -237,10 +237,24 @@ int l_detect(lua_State* L) {
     check_interrupt(L, r);
     const char* model = luaL_checkstring(L, 1);
 
+    // 可选阈值：detect(model, {conf = 0.6, iou = 0.3})；不给就用默认 0.25 / 0.45。
+    // 想按模型分别调又不改脚本，可以从 params() 里读：
+    //   local p = params() or {}
+    //   detect(model, {conf = p.conf, iou = p.iou})
+    double conf = 0, iou = 0;
+    if (lua_istable(L, 2)) {
+        lua_getfield(L, 2, "conf");
+        if (lua_isnumber(L, -1)) conf = lua_tonumber(L, -1);
+        lua_pop(L, 1);
+        lua_getfield(L, 2, "iou");
+        if (lua_isnumber(L, -1)) iou = lua_tonumber(L, -1);
+        lua_pop(L, 1);
+    }
+
     std::vector<csrc::Detection> dets;
     int frame_w = 0;
     std::string err;
-    if (!detect_boxes(*r->ctx, model, csrc::DecodeOptions{}, dets, frame_w, err)) {
+    if (!detect_boxes(*r->ctx, model, decode_options(conf, iou), dets, frame_w, err)) {
         // "no frame"（相机刚开、这一拍还没出帧）对视觉伺服来说等价于"这拍没看到目标"，
         // 返回空列表让脚本走它自己的丢帧分支；其余（模型加载失败/相机不可用/填张量失败）
         // 才是硬错误，返回 nil + err 由脚本 fail 掉。
