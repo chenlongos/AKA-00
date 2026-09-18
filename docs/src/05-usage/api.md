@@ -488,7 +488,7 @@ POST /api/demo/delete  {"name":"追网球接近"}
 | target_size | 目标框宽（原图像素）——框宽达到它就认为到位 |
 | speed | 直线速度百分比（宿主还会再 clamp 到 ≤70） |
 | turn_speed | 转弯速度百分比（同样 clamp 到 ≤70）—— 和直线分开：转弯要的占空比不同 |
-| mode | 执行方式：`once`（默认，跑一遍就结束）/ `loop`（跑完接着跑，**直到你按停止**）。没有超时 |
+| mode | 执行方式：`once`（默认，跑一遍就结束，**最多 5 分钟**）/ `loop`（跑完接着跑，**直到你按停止**，没有时长上限） |
 
 > **POST 就是"新建或覆盖一张卡片"**：界面上的"新建"与"保存"走的是同一个接口
 > （改参数时要把 `action`/`model` 一起回传，否则会当成新建）。改名 = 用新名字 POST 一份、
@@ -501,18 +501,26 @@ POST /api/demo/delete  {"name":"追网球接近"}
 > `demo/*.lua`（动作脚本）相反是仓库里的代码，升级按包里结算 —— 想调参就改卡片配置，
 > **别改动作脚本**，否则升级会丢。
 
-### 用"动作 + 模型"直接跑（不建卡）
+### 临时组装一个 demo 直接跑（不建卡）
 
-刚传上来一个新模型、想立刻试一下的时候用这条：
+**"模型 + 动作 + 那几个值"凑齐就是一次完整的 demo 请求**，不用先建卡。刚传上来一个新
+模型想立刻试、或者要把一条命令发给别人让他在板上按自己的参数跑一遍，都用这条：
 
 ```bash
 curl -X POST http://<ip>/api/demo/init \
      -H 'Content-Type: application/json' \
-     -d '{"action":"approach","model":"apple","target_size":300,"speed":30,"mode":"loop"}'
+     -d '{"action":"approach","model":"apple","target_size":320,"speed":30,"turn_speed":20,"mode":"once"}'
 ```
 
+| 字段 | 含义 |
+|------|------|
+| action | 动作脚本名（`demo/<action>.lua`）—— 做什么 |
+| model | 模型名（`demo/models/<model>.cvimodel`）—— 认什么 |
+| target_size / speed / turn_speed | 与卡片里同名，缺省 300 / 25 / 25 |
+| mode | `once`（默认，跑一遍）/ `loop`（跑完接着跑，直到 `POST /api/demo/stop`） |
+
 效果与建一张卡再跑一样（宿主会把 `model=apple` 注入给动作脚本）；区别是不落盘、
-不会在 Demo 页留下卡片。
+不会在 Demo 页留下卡片。想让它出现在页面上反复用，再按上面的卡片配置建成卡片。
 
 ### 跑完再返回（**默认行为**）
 
@@ -526,8 +534,16 @@ curl -X POST -H 'Content-Type: application/json' \
 ```
 
 `completed: false` 时 `error` 说明原因（脚本 `fail` / 丢目标 / 被人的指令接管 /
-`timeout: 等了 120 秒还没跑完`）。过程中发生了什么看 `/api/demo/status` 的
+`timeout: 到最大执行时间（5 分钟）`）。过程中发生了什么看 `/api/demo/status` 的
 `state` / `message` / `round` / `notes`。
+
+> **执行一次（`mode: "once"`）有 5 分钟上限**，到点宿主自己收工（停电机、状态落 `aborted`、
+> `error` 写"到最大执行时间"）—— 所以 `wait` 的请求最多 5 分钟必定有结论。
+> 循环执行不受它管：`loop` 本来就不该自己结束，等不到就去 `POST /api/demo/stop`。
+>
+> 唯一的例外是脚本卡在**不调用任何原语的死循环**里（宿主只在原语入口查打断）：
+> 那时请求会等到 310 秒回一条 `timeout: 等了 310 秒还没跑完…`，脚本仍在跑，
+> 但 `POST /api/demo/stop` 会在它下一次调原语时生效。
 
 **想立刻返回**（不等，自己轮询状态 —— 界面就是这么用的）就显式传 `"wait": false`，
 此时响应是 `{"status":"started", "name":…, "script":…}`：
@@ -573,7 +589,7 @@ POST /api/demo/stop
 |------|------|
 | script | **动作名**，读 `$AKA_HOME/demo/<动作>.lua`（`grab` / `approach` …）。只允许字母数字与 `_ - .` |
 | params | 传给脚本的参数（脚本用 `params()` 读），任意扁平/嵌套表 |
-| params.mode | `once`（默认）跑一遍就结束 / `loop` 跑完接着跑直到被停。**没有超时** |
+| params.mode | `once`（默认）跑一遍就结束，**最多 5 分钟**（到点宿主收工）/ `loop` 跑完接着跑直到被停，没有时长上限 |
 
 | state | 含义 |
 |-------|------|
@@ -610,7 +626,7 @@ POST /api/demo/stop
 | 约束 | 由谁强制 |
 |------|---------|
 | 速度上限 ±70% | 宿主 clamp 每个驱动原语的参数 |
-| 执行方式 | `mode`：跑一遍 / 循环跑；**没有总时长上限** —— 停不停由你按停止决定 |
+| 执行方式 | `mode`：`once` 跑一遍，**最多 5 分钟**（到点宿主收工）；`loop` 循环跑，没有总时长上限 —— 停不停由你按停止决定 |
 | 被人的指令取代 | 脚本一驱动，宿主就记下指令代际号；摇杆/`/api/control` 一进来代际号就变，脚本立刻被中断并交出控制权 |
 | stop / 服务退出 / 底盘掉线 | 同上，立刻中断 |
 | 内存 | Lua VM 用带预算的分配器（4MB），脚本狂建 table 也吃不光板子内存 |

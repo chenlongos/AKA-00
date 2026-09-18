@@ -61,9 +61,12 @@ constexpr int kDemoSpeedDefault = 25;        // 直线速度（%）
 constexpr int kDemoTurnSpeedDefault = 25;    // 转弯速度（%）—— 和直线分开：转弯要的占空比不同
 // 执行方式（卡片上一个字段）：跑一遍就结束 / 跑完接着跑直到被停
 constexpr const char* kDemoModeDefault = "once";
-// "等它跑完再返回"（请求里带 "wait": true）最多等多久 —— 超时就回 timeout + 当前状态，
-// 不无限挂着（脚本本身没有时长上限，客户端得自己决定还等不等）
-constexpr double kDemoWaitMaxSeconds = 120.0;
+// "等它跑完再返回"（默认就等）最多等多久 —— 超时就回 timeout + 当前状态，不无限挂着。
+// 这个数要**比脚本自己的"执行一次"时限（script.cpp 的 kScriptMaxOnceSeconds）略大**：
+// 那样到点的正常路径是脚本先收工、请求拿到真实原因（"到最大执行时间"），而不是请求先不等了、
+// 留一辆还在动的车。多出来的 10 秒就是给这条留的余量。
+// 循环执行不受它影响：loop 默认就不等（等了也不会自己结束）。
+constexpr double kDemoWaitMaxSeconds = 310.0;
 
 /// 一张卡片（= 一份 configs/<卡片名>.json）
 struct DemoCard {
@@ -1066,7 +1069,9 @@ void register_routes(Router& router, AppContext& ctx) {
         Json out;
         out["completed"] = done && st.gets("state") == "done";
         if (!out.getb("completed")) {
-            out["error"] = done ? st.gets("message") : "timeout: 等了 120 秒还没跑完";
+            out["error"] = done ? st.gets("message")
+                                : "timeout: 等了 " + std::to_string((long long)kDemoWaitMaxSeconds) +
+                                      " 秒还没跑完（脚本卡在不调原语的死循环里？试 POST /api/demo/stop）";
         }
         resp.set_json(out);
     });
@@ -1262,7 +1267,9 @@ void register_routes(Router& router, AppContext& ctx) {
         Json out;
         out["completed"] = done && st.gets("state") == "done";
         if (!out.getb("completed")) {
-            out["error"] = done ? st.gets("message") : "timeout: 等了 120 秒还没跑完";
+            out["error"] = done ? st.gets("message")
+                                : "timeout: 等了 " + std::to_string((long long)kDemoWaitMaxSeconds) +
+                                      " 秒还没跑完（脚本卡在不调原语的死循环里？试 POST /api/demo/stop）";
         }
         resp.set_json(out);
     });

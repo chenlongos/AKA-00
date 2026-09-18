@@ -9,8 +9,9 @@
 // 脚本只能拿到「有上限的原语」，下面这些由宿主强制，脚本绕不过去（连 pcall 都不给，
 // 所以它也吞不掉宿主的打断）：
 //   · 速度上限       drive/forward/... 的参数一律 clamp 到 ±kScriptMaxSpeed
-//   · 执行方式       params.mode：once（跑一遍）/ loop（跑完接着跑）—— **没有总时长上限**，
-//                    停不停由 stop / 人的指令接管 / 服务退出决定
+//   · 执行方式       params.mode：once（跑一遍，**最多 kScriptMaxOnceSeconds**，到点宿主自己
+//                    收工）/ loop（跑完接着跑，**没有总时长上限**，停不停由 stop / 人的指令
+//                    接管 / 服务退出决定）
 //   · 被人的指令取代 有人推进了 motion_seq（摇杆/HTTP 指令）→ 立刻报错退出，交还控制权
 //   · stop / 服务退出 / 底盘掉线 —— 同上，立刻退出
 //   · 内存上限       自定义分配器给 Lua VM 设预算，脚本狂建 table 也吃不光板子的内存
@@ -51,6 +52,11 @@ namespace {
 // 一模一样 —— 全被砍成 35，看起来就像"配置的速度没生效"），所以放宽到 70。
 // 留着它是因为这是唯一拦在"脚本乱发速度"和电机之间的东西，别顺手删。
 constexpr int kScriptMaxSpeed = 70;
+// **执行一次（mode=once）的最大执行时间**：到点宿主自己收工（等价于按了停止 —— 停电机、
+// 状态落 aborted、消息写清楚原因）。循环执行（loop）**不设这个上限**：它本来就该一直跑，
+// 停不停由人决定。有了它，"跑一次"才是一个有结论的请求 —— 给别人一条 URL 时，
+// 最多 5 分钟必定结束，不会回完 timeout 还留一辆正在动的车。
+constexpr double kScriptMaxOnceSeconds = 300.0;   // 5 分钟
 // 循环执行时每轮之间的间隔（毫秒）：停一下车、也给 stop/人的指令留响应窗口
 constexpr int kScriptLoopGapMs = 200;
 constexpr size_t kScriptMemBytes = 4 * 1024 * 1024;   // 脚本 VM 内存预算
@@ -67,6 +73,7 @@ struct RunCtx {
 
     int64_t own_seq = 0;    // 本脚本最近一次推进的指令代际号（用来发现"被接管"）
     bool claimed = false;   // 是否动过电机（没动过就不该误判"被接管"）
+    bool once = false;      // 执行一次（true 才受 kScriptMaxOnceSeconds 管；loop 不管）
     bool moving = false;    // 发过速度且还没回静止 → 收尾兜底要停
     int last_left = 0, last_right = 0;   // 当前发给底盘的速度（保活重发用）
     long long last_keepalive_ms = 0;
@@ -87,7 +94,8 @@ long long now_ms(const RunCtx* r) {
 bool motor_ok(AppContext& ctx) { return motor_status_json(ctx).getb("connected", false); }
 
 /// 只**判定**打断（命中就把原因写进 r->reason），不抛 —— 抛由调用方决定怎么抛。
-/// 顺序有意为之：先看人为的停止，再看接管/硬件。（没有超时这一条 —— 执行方式由 mode 决定）
+/// 顺序有意为之：先看人为的停止，再看接管/硬件，最后才是我们自己的时限。
+/// 超时只有一条：**执行一次的到点收工**（kScriptMaxOnceSeconds）；循环执行没有时限。
 void detect_interrupt(RunCtx* r) {
     if (!r->reason.empty()) return;   // 已经判定过了
     if (r->ctx->script_abort) {
@@ -98,6 +106,9 @@ void detect_interrupt(RunCtx* r) {
         r->reason = "superseded: 被新的运动指令取代（人接管）";
     } else if (!motor_ok(*r->ctx)) {
         r->reason = "motor: 底盘掉线";
+    } else if (r->once && now_ms(r) >= (long long)(kScriptMaxOnceSeconds * 1000.0)) {
+        r->reason = "timeout: 到最大执行时间（" +
+                    std::to_string((long long)(kScriptMaxOnceSeconds / 60.0)) + " 分钟）";
     }
     if (!r->reason.empty()) CAM_WARN("[script] 打断：%s", r->reason.c_str());
 }
@@ -509,8 +520,7 @@ void classify(const std::string& reason, const std::string& ret, std::string& st
         message = ret.empty() ? "脚本正常结束" : ret;
         return;
     }
-    // 没有 "timeout:" 这一支 —— 脚本没有总时长上限（执行方式由 mode 决定），
-    // 宿主不会再产生这个前缀
+    // "timeout:"（执行一次到点收工）落进下面的 aborted —— 它不是脚本失败，是被宿主收工
     if (reason.rfind("failed:", 0) == 0 ||
         reason.rfind("motor:", 0) == 0 || reason.rfind("error:", 0) == 0) {
         state = "failed";
@@ -541,6 +551,7 @@ void script_worker(AppContext& ctx, std::string name, csrc::Json params, bool re
     RunCtx r;
     r.ctx = &ctx;
     r.t0 = std::chrono::steady_clock::now();
+    r.once = !repeat;   // 执行一次才有时限；loop 一直跑，由人停
 
     // 收尾（无论从哪条路出去都要走）：停电机 + 落状态 + 清理线程句柄
     auto finish = [&](const std::string& reason, const std::string& ret) {
@@ -589,6 +600,7 @@ void script_worker(AppContext& ctx, std::string name, csrc::Json params, bool re
     // 一轮 = 一份干净 VM 跑一遍脚本。
     // 循环执行（卡片上选"循环"）：跑完一轮接着下一轮，直到被停（stop / 人的指令接管 /
     // 服务退出）—— **没有总时长上限**，停不停由你决定。
+    // 执行一次：整趟最多 kScriptMaxOnceSeconds，到点由 detect_interrupt 收工（见那里）。
     std::string ret;
     int round = 0;
     while (true) {
@@ -615,7 +627,8 @@ void script_worker(AppContext& ctx, std::string name, csrc::Json params, bool re
         if (repeat) {
             CAM_INFO("[script] 跑 %s（第 %d 轮，循环执行）", path.c_str(), round);
         } else {
-            CAM_INFO("[script] 跑 %s", path.c_str());
+            CAM_INFO("[script] 跑 %s（执行一次，最多 %d 分钟）", path.c_str(),
+                     (int)(kScriptMaxOnceSeconds / 60.0));
         }
         // 错误信息带 Lua 调用栈：脚本报错只给一句 "error: xxx" 时根本不知道是哪一行。
     // （沙箱里没有 debug 库，但宿主自己可以调 luaL_traceback。）
@@ -677,8 +690,8 @@ csrc::Json script_run(AppContext& ctx, const std::string& name, const csrc::Json
         j["error"] = "动作名非法（只允许字母数字与 _ - .）：" + name;
         return j;
     }
-    // 执行方式：params.mode = "once"（默认，跑一遍就结束）| "loop"（跑完接着跑，直到被停）。
-    // **没有总时长上限** —— 跑多久由这个模式 + 你什么时候按停止决定。
+    // 执行方式：params.mode = "once"（默认，跑一遍就结束，最多 kScriptMaxOnceSeconds）|
+    // "loop"（跑完接着跑，直到被停 —— 这条没有总时长上限，本来就不该自己结束）。
     const bool repeat = params.gets("mode") == "loop";
 
     // 入口就把"动作脚本不存在"挡掉：以前是异步失败（先回 ok:true 再变 failed），
