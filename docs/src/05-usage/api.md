@@ -18,16 +18,16 @@ GET /api/control?action=<action>&speed=<speed>&time=<time>&distance=<distance>&a
 
 > **优先级**：`distance`/`angle` > `time`。传了 distance 或 angle 就忽略 time。
 >
-> **所有"会动"的请求都回一个 `completed` 布尔**（true = 这次动作执行完了，异常/超时/被中止
-> 一律 false，原因看 `status` / `message`）。三个入口都有：
+> **所有"会动"的请求都只回一个 `completed`**（true = 这次动作执行完了，失败时多一个
+> `error` 说明原因；细节看 `/api/motor/status` 或日志）。三个入口一致：
 > `?distance=`/`?angle=`、`?time=`、以及 `POST /api/demo/init|run` 带 `"wait": true`。
 >
 > 返回时机：
 >
 > | 请求 | 何时返回 | 返回 |
 > |---|---|---|
-> | `?distance=` / `?angle=` | **阻塞**到 ESP32 固件闭环报结果（最多 30s） | `{status: completed\|aborted\|timeout, direction, target, unit, moved, elapsed_ms}`（`unit` 回显请求单位：cm / deg；`moved` = 固件是否真的报过"运行中"） |
-> | `?...&time=` | **阻塞**到动作做完并自动停车 | `{status: success, mode: "completed", duration, left_speed, right_speed}` |
+> | `?distance=` / `?angle=` | **阻塞**到 ESP32 固件闭环报结果（最多 30s） | `{"completed": …}` |
+> | `?...&time=` | **阻塞**到动作做完并自动停车 | `{"completed": …}` |
 > | `?action=up`（不给 distance/time） | **立刻返回**（持续运动，靠 `?action=stop` 停） | `{status: success}` |
 >
 > `distance`/`angle` 的结论来自固件（它自己闭环 + 回状态），不是主机猜的 ——
@@ -519,8 +519,8 @@ curl -X POST -H 'Content-Type: application/json' \
   -d '{"name":"追网球接近","wait":true}' http://<ip>/api/demo/init
 ```
 
-返回的字段与 `/api/demo/status` 一致，外加一个 `status`：`finished`（跑完了，看 `state`/
-`message` 是正常结束还是失败）或 `timeout`（等了 120 秒还在跑，接口不会无限挂着）。
+返回 `{"completed": true}`（跑完了；过程中发生了什么看 `/api/demo/status` 的
+`state`/`message`/`notes`）或 `{"completed": false, "error": "…"}`（失败原因，或
 
 > `mode=loop`（循环执行）**不会自己结束**，所以 `wait` 对它没有意义 —— 这种请求直接 400，
 > 不会让你挂在连接上。要停就 `POST /api/demo/stop`。

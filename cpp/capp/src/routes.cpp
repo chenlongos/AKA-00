@@ -509,7 +509,16 @@ void register_routes(Router& router, AppContext& ctx) {
                 return;
             }
         }
-        resp.set_json(result);
+        // **精简返回**：客户端（含嵌入式调用方）只需要"做完了没有"这一个标志，
+        // 省得为了一堆字段写解析。细节要看就去 /api/motor/status 或日志。
+        // completed=false 时附一句 error（否则出问题只能靠猜）。
+        Json out;
+        out["completed"] = result.getb("completed", false);
+        if (!out.getb("completed")) {
+            const std::string why = result.gets("message");
+            out["error"] = why.empty() ? result.gets("status") : why;
+        }
+        resp.set_json(out);
     });
 
     // ── /api/motor ──
@@ -1038,10 +1047,13 @@ void register_routes(Router& router, AppContext& ctx) {
             return;
         }
         const bool done = wait_script_done(ctx, kDemoWaitMaxSeconds);
-        Json out = script_status(ctx);
-        out["status"] = done ? "finished" : "timeout";   // 都回 200，看 status 字段
-        // 统一的"执行完成"标志（与 /api/control 的 completed 同一个含义）
-        out["completed"] = done && out.gets("state") == "done";
+        const Json st = script_status(ctx);
+        // 同样精简到一个标志（与 /api/control 的 completed 同一个含义）
+        Json out;
+        out["completed"] = done && st.gets("state") == "done";
+        if (!out.getb("completed")) {
+            out["error"] = done ? st.gets("message") : "timeout: 等了 120 秒还没跑完";
+        }
         resp.set_json(out);
     });
 
@@ -1230,9 +1242,12 @@ void register_routes(Router& router, AppContext& ctx) {
         }
         // 跑完再返回：字段与 /api/demo/status 一致 + status（finished / timeout）+ completed
         const bool done = wait_script_done(ctx, kDemoWaitMaxSeconds);
-        Json out = script_status(ctx);
-        out["status"] = done ? "finished" : "timeout";
-        out["completed"] = done && out.gets("state") == "done";
+        const Json st = script_status(ctx);
+        Json out;
+        out["completed"] = done && st.gets("state") == "done";
+        if (!out.getb("completed")) {
+            out["error"] = done ? st.gets("message") : "timeout: 等了 120 秒还没跑完";
+        }
         resp.set_json(out);
     });
 
