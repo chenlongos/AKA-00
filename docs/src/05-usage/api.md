@@ -449,7 +449,7 @@ curl -F "file=@model.cvimodel" -F "name=orange" "http://<ip>/api/model/upload"
 GET  /api/demo/list                     → {"demos":[...], "actions":[...], "models":[...]}
 POST /api/demo/init {"name":"追网球接近"}              → 跑存下来的那张卡片
 POST /api/demo/init {"action":"grab","model":"tennis"} → 直接跑，不用建卡
-POST /api/demo/init {"name":"追网球接近","wait":true}  → **等它跑完再返回**
+POST /api/demo/init {"name":"追网球接近"}              → **默认等它跑完再返回**
 POST /api/demo/stop                     → 停
 ```
 
@@ -514,21 +514,34 @@ curl -X POST http://<ip>/api/demo/init \
 效果与建一张卡再跑一样（宿主会把 `model=apple` 注入给动作脚本）；区别是不落盘、
 不会在 Demo 页留下卡片。
 
-### 等它跑完再返回（`"wait": true`）
+### 跑完再返回（**默认行为**）
 
-默认 `POST /api/demo/init` / `/api/demo/run` **立刻**返回 `{status:"started"}`（界面靠轮询
-`/api/demo/status` 跟进度）。脚本化调用想要"跑完再拿结果"，请求里加 `"wait": true`：
+`POST /api/demo/init` / `/api/demo/run` **默认等这次跑完才返回**，直接给完成标志：
 
 ```bash
 curl -X POST -H 'Content-Type: application/json' \
-  -d '{"name":"追网球接近","wait":true}' http://<ip>/api/demo/init
+  -d '{"name":"追网球接近"}' http://<ip>/api/demo/init
+# → {"completed": true}
+# → {"completed": false, "error": "目标丢失（1520ms 没看到目标）"}
 ```
 
-返回 `{"completed": true}`（跑完了；过程中发生了什么看 `/api/demo/status` 的
-`state`/`message`/`notes`）或 `{"completed": false, "error": "…"}`（失败原因，或
+`completed: false` 时 `error` 说明原因（脚本 `fail` / 丢目标 / 被人的指令接管 /
+`timeout: 等了 120 秒还没跑完`）。过程中发生了什么看 `/api/demo/status` 的
+`state` / `message` / `round` / `notes`。
 
-> `mode=loop`（循环执行）**不会自己结束**，所以 `wait` 对它没有意义 —— 这种请求直接 400，
-> 不会让你挂在连接上。要停就 `POST /api/demo/stop`。
+**想立刻返回**（不等，自己轮询状态 —— 界面就是这么用的）就显式传 `"wait": false`，
+此时响应是 `{"status":"started", "name":…, "script":…}`：
+
+```bash
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"name":"追网球接近","wait":false}' http://<ip>/api/demo/init
+curl http://<ip>/api/demo/status          # 边跑边看
+```
+
+> **`mode=loop`（循环执行）例外**：它不会自己结束，所以默认**不等**（立刻回 `started`，
+> 否则等于把连接挂死）；对它显式传 `"wait": true` 会被 **400** 拒掉
+> （`loop 模式不会自己结束，wait 没有意义（要停就 POST /api/demo/stop）`）。要停就
+> `POST /api/demo/stop`。
 
 | 失败 | HTTP | 响应 |
 |------|------|------|

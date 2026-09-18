@@ -1044,12 +1044,16 @@ void register_routes(Router& router, AppContext& ctx) {
         }
         // params 原样给脚本（含 mode=once|loop）；**没有 max_seconds**，跑多久看模式与停止
         const Json* params = payload.get("params");
-        // "wait": true = 等这次跑完再返回（默认立刻回 started）
-        const bool wait = payload.getb("wait", false);
-        if (wait && params && params->gets("mode") == "loop") {
+        // **默认就等它跑完**（调用方一个请求就能拿到"做完了没有"）；显式传 "wait": false 才立刻返回。
+        // 但 loop 模式不会自己结束 —— 那种情况默认**不等**（否则等于把连接挂死），
+        // 只有显式要求 wait 才 400（那是真没意义）。
+        const bool has_wait = payload.get("wait") != nullptr;
+        const bool loop_mode = params && params->gets("mode") == "loop";
+        if (loop_mode && has_wait && payload.getb("wait", true)) {
             resp.set_error("loop 模式不会自己结束，wait 没有意义（要停就 POST /api/demo/stop）", 400);
             return;
         }
+        const bool wait = loop_mode ? false : (has_wait ? payload.getb("wait", true) : true);
         Json r = script_run(ctx, name, params ? *params : Json());
         if (!r.getb("ok") || !wait) {
             if (r.getb("ok")) r["completed"] = false;   // 只是"起来了"，还没跑完
@@ -1212,13 +1216,15 @@ void register_routes(Router& router, AppContext& ctx) {
         if (payload.get("turn_speed")) params["turn_speed"] = Json(payload.geti("turn_speed", kDemoTurnSpeedDefault));
         if (payload.get("mode")) params["mode"] = payload.gets("mode");
 
-        // "wait": true = 等这次跑完再返回。loop 模式（跑完接着跑）不会自己结束，
-        // 等它没意义 —— 直接在启动前拒掉，别让客户端挂在这儿
-        const bool wait = payload.getb("wait", false);
-        if (wait && params.gets("mode") == "loop") {
+        // **默认等它跑完**（一个请求拿到完成标志）；显式 "wait": false 才立刻回 started。
+        // loop 模式不会自己结束：默认不等（否则挂死连接），只有显式要求才 400。
+        const bool has_wait = payload.get("wait") != nullptr;
+        const bool loop_mode = params.gets("mode") == "loop";
+        if (loop_mode && has_wait && payload.getb("wait", true)) {
             resp.set_error("loop 模式不会自己结束，wait 没有意义（要停就 POST /api/demo/stop）", 400);
             return;
         }
+        const bool wait = loop_mode ? false : (has_wait ? payload.getb("wait", true) : true);
 
         // ★ 模型来自卡片/请求，**不是卡片名** —— 搞错的话脚本会去开
         //   demo/models/<卡片名>.cvimodel，报错长成"注册模型失败"，极具误导性
