@@ -429,7 +429,7 @@ curl -F "file=@model.cvimodel" -F "name=orange" "http://<ip>/api/model/upload"
 GET  /api/demo/list                     → {"demos":[...], "actions":[...], "models":[...]}
 POST /api/demo/init {"name":"追网球接近"}              → 跑存下来的那张卡片
 POST /api/demo/init {"action":"grab","model":"tennis"} → 直接跑，不用建卡
-POST /api/demo/stop                     → 停（等于 /api/script/stop）
+POST /api/demo/stop                     → 停
 ```
 
 `GET /api/demo/list` 一次给全三份数据（列表 + 可用的动作 + 可用的模型，新建表单直接用）：
@@ -509,13 +509,13 @@ curl -X POST http://<ip>/api/demo/init \
 **原语在 C++（快、稳），流程在 `$AKA_HOME/demo/*.lua`（好改）**。
 
 ```
-POST /api/script/run     {"script":"grab", "max_seconds":30,
+POST /api/demo/run       {"script":"grab", "max_seconds":30,
                           "params":{"model":"tennis","target_size":300,"speed":20}}
      → {"ok":true,"state":"running","script":"grab","max_seconds":30}
-GET  /api/script/status
+GET  /api/demo/status
      → {"state":"running","script":"grab","model":"tennis","card":"追网球","message":"","calls":42,"action":"forward",
         "notes":{"box_w":"212","offset":"-33"}}
-POST /api/script/stop
+POST /api/demo/stop
      → {"ok":true,"state":"aborted"}（立刻刹车，不等脚本配合）
 ```
 
@@ -531,7 +531,7 @@ POST /api/script/stop
 | `running` | 正在跑 |
 | `done` | 脚本正常结束（`message` 是脚本的返回值） |
 | `failed` | 失败：脚本 `fail()`、推理/相机出错、脚本语法错、超时、底盘掉线 |
-| `aborted` | 被停止：`/api/script/stop`、人的运动指令接管、服务退出 |
+| `aborted` | 被停止：`/api/demo/stop`、人的运动指令接管、服务退出 |
 
 ### 脚本能用的原语（全部只有这些）
 
@@ -545,7 +545,7 @@ POST /api/script/stop
 | `elapsed_ms()` | 本脚本已跑的毫秒数 |
 | `motor_connected()` | 底盘是否真在线（掉线时驱动是空操作，脚本可据此提前收手） |
 | `abort_requested()` | 是否收到 stop（脚本可选择优雅收尾） |
-| `note(k, v)` | 往 `/api/script/status` 的 `notes` 里发布一个可观测字段（调参用） |
+| `note(k, v)` | 往 `/api/demo/status` 的 `notes` 里发布一个可观测字段（调参用） |
 | `log(fmt, ...)` | 写日志（`print` 也是它） |
 | `fail(msg)` | 脚本主动判定失败 |
 | `params()` | 启动时传进来的参数表 |
@@ -574,9 +574,9 @@ curl -X POST http://<ip>/api/camera/open
 curl "http://<ip>/api/detect?model=tennis"      # 先看框多大，据此定 target_size
 curl -X POST -H 'Content-Type: application/json' \
   -d '{"script":"grab","max_seconds":30,"params":{"model":"tennis","target_size":300,"speed":20}}' \
-  http://<ip>/api/script/run
-curl http://<ip>/api/script/status              # 边跑边看 action/notes
-curl -X POST http://<ip>/api/script/stop        # 随时打断
+  http://<ip>/api/demo/run
+curl http://<ip>/api/demo/status                # 边跑边看 action/notes
+curl -X POST http://<ip>/api/demo/stop          # 随时打断
 ```
 
 判据与参数照搬隔壁仓库 `aka0/tennis.cpp`(那个预编译 demo 的源码，实机调过参)：取面积最大的框当

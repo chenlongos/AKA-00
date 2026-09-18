@@ -998,10 +998,14 @@ void register_routes(Router& router, AppContext& ctx) {
         resp.set_json(j);
     });
 
-    // ── 流程脚本（demo/*.lua）──
+    // ── 动作脚本（demo/*.lua）── 接口都挂在 /api/demo 下（跟卡片/配置同一套命名）
+    //
+    // `/api/demo/run` 是**最底层**的那条：直接跑某个动作脚本 + 任意 params（不校验模型），
+    // 调试/一次性用；正常跑 demo 走 `/api/demo/init`（跑卡片，或 action+model，会先校验
+    // 动作脚本和模型文件都在）。
     // 把"看→对准→靠近→抓"这类要反复调参的流程写成脚本，改一行存盘重跑，不用重编部署。
     // 安全兜底（限速/总超时/被人的指令取代/底盘掉线/内存与卡死）全在宿主里，脚本绕不过去。
-    router.add("POST", "/api/script/run", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
+    router.add("POST", "/api/demo/run", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
         const Json payload = req.json();
         if (!payload.is_object()) {
             resp.set_error("json body is required", 400);
@@ -1018,13 +1022,10 @@ void register_routes(Router& router, AppContext& ctx) {
         resp.set_json(r, r.getb("ok") ? 200 : 400);
     });
 
-    router.add("GET", "/api/script/status", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
+    router.add("GET", "/api/demo/status", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
         resp.set_json(script_status(ctx));
     });
 
-    router.add("POST", "/api/script/stop", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
-        resp.set_json(script_stop(ctx));
-    });
 
     // ── 屏显示开关 ──
     // 为什么要有：全屏写屏很吃那颗单核 CPU（实测 /api/detect 从 120ms 涨到 340ms），

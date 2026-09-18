@@ -203,7 +203,7 @@ int l_brake(lua_State* L) {
     publish(r, "brake");
     return 0;
 }
-/// sleep_ms(ms)：切段睡，每段都查打断 —— 所以 /api/script/stop 不用等脚本醒
+/// sleep_ms(ms)：切段睡，每段都查打断 —— 所以 /api/demo/stop 不用等脚本醒
 int l_sleep_ms(lua_State* L) {
     RunCtx* r = RC(L);
     check_interrupt(L, r);
@@ -342,7 +342,7 @@ int l_log(lua_State* L) {
     CAM_INFO("[script] %s", msg.c_str());
     return 0;
 }
-/// note(key, value)：发布一个可观测字段给 /api/script/status（脚本自己的调参信息）
+/// note(key, value)：发布一个可观测字段给 /api/demo/status（脚本自己的调参信息）
 int l_note(lua_State* L) {
     RunCtx* r = RC(L);
     const char* k = luaL_checkstring(L, 1);
@@ -591,7 +591,7 @@ csrc::Json script_run(AppContext& ctx, const std::string& name, const csrc::Json
         std::lock_guard<std::mutex> lk(ctx.script_mu);
         if (ctx.script_running) {
             j["ok"] = false;
-            j["error"] = "已有脚本在跑（先 POST /api/script/stop）";
+            j["error"] = "已有脚本在跑（先 POST /api/demo/stop）";
             return j;
         }
         ctx.script_running = true;

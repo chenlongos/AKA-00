@@ -356,7 +356,7 @@ void ScreenDisplay::loop() {
         // **这里必须睡一下再 continue**：上面的"按距下次该处理还有多久"在"相机出帧比显示
         // 间隔慢"时恒为 0（last_push 只在真处理了帧时才更新），裸 continue 就变成
         // 100% 占满单核的死循环 —— 板上实测：显示线程烧掉 90 秒 CPU、load 4.8，
-        // 连脚本线程都被拖到不响应 /api/script/stop（表现为"脚本卡在 detect 里出不来"）。
+        // 连脚本线程都被拖到不响应 /api/demo/stop（表现为"脚本卡在 detect 里出不来"）。
         uint64_t ts = cam.latest_ts();
         if (ts == 0 || ts == last_ts) {
             std::this_thread::sleep_for(std::chrono::milliseconds(3));

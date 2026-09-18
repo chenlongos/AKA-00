@@ -9,7 +9,7 @@
 -- 用法:
 --   POST /api/demo/init {"name":"追网球"}                      ← 跑界面上的卡片
 --   POST /api/demo/init {"action":"grab","model":"tennis"}     ← 直接指定，不用建卡
---   POST /api/script/run
+--   POST /api/demo/run
 --   {"script":"grab", "max_seconds":30, "params":{"model":"tennis","target_size":300}}
 --
 -- 参数（从 params() 里读；卡片里那份存在 demo/configs/<卡片名>.json）:
