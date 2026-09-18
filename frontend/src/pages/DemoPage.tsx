@@ -90,6 +90,26 @@ const DemoPage = () => {
 
     useEffect(() => { fetchDemoList(); }, [fetchDemoList]);
 
+    // 运行状态**以后端为准**（原来是纯本地 state）：轮询 /api/script/status，
+    // 这样切到别的页面再回来、刷新浏览器、甚至脚本是别的客户端起的，都能正确显示
+    // "哪张卡片在跑"并给出停止按钮（此前只在本地记，刷新后界面以为没在跑，
+    // 而点别的卡片只会得到 409 "已有脚本在跑"，用户无从下手）。
+    useEffect(() => {
+        let alive = true;
+        const tick = () => {
+            api.demo.status().then((st: {state?: string; card?: string; script?: string}) => {
+                if (!alive) return;
+                // 卡片名优先；直接 action+model 跑的没有卡片名，就退化成动作名
+                const running = st?.state === "running" ? (st.card || st.script || "") : null;
+                setRunningDemo(running);
+                runningDemoRef.current = running;
+            }).catch(() => {});
+        };
+        tick();
+        const id = setInterval(tick, 2000);
+        return () => { alive = false; clearInterval(id); };
+    }, []);
+
     const runDemo = async (name: string) => {
         if (runningDemoRef.current !== null) {
             setDemoLoading(true);

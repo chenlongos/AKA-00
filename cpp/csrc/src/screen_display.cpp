@@ -351,15 +351,26 @@ void ScreenDisplay::loop() {
             continue;
         }
 
-        // 先做轻量时间戳判断：没有新帧就完全不拷贝、不解码（否则每 2ms 白拷一次帧）
+        // 先做轻量时间戳判断：没有新帧就完全不拷贝、不解码（否则每 2ms 白拷一次帧）。
+        //
+        // **这里必须睡一下再 continue**：上面的"按距下次该处理还有多久"在"相机出帧比显示
+        // 间隔慢"时恒为 0（last_push 只在真处理了帧时才更新），裸 continue 就变成
+        // 100% 占满单核的死循环 —— 板上实测：显示线程烧掉 90 秒 CPU、load 4.8，
+        // 连脚本线程都被拖到不响应 /api/script/stop（表现为"脚本卡在 detect 里出不来"）。
         uint64_t ts = cam.latest_ts();
-        if (ts == 0 || ts == last_ts) continue;
+        if (ts == 0 || ts == last_ts) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(3));
+            continue;
+        }
 
         // 复用 Camera 单例 + 共享解码缓存：同一帧屏幕与浏览器只解码一次。
         // 命中缓存时 dec 接近 0（说明浏览器已经解过这一帧）。
         auto t0 = std::chrono::steady_clock::now();
         Camera::RgbFrame rgb;
-        if (!cam.latest_rgb(cfg_.decode_max_w, rgb) || rgb.data.empty()) continue;
+        if (!cam.latest_rgb(cfg_.decode_max_w, rgb) || rgb.data.empty()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(3));   // 同上：别空转
+            continue;
+        }
         auto t1 = std::chrono::steady_clock::now();
         if (rgb.ts_ms == last_ts) continue;   // 竞态兜底：与上面判断之间换了帧也无妨
         last_ts = rgb.ts_ms;
