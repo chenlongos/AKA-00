@@ -43,7 +43,7 @@ CXXFLAGS := -std=c++17 -O3 -Wall -Wextra -mcpu=c906fdv -MMD -MP -mabi=lp64d \
 ARFLAGS   = rcs
 
 OBJDIR   := build-cross$(SCREEN_SUFFIX)
-SRCS := $(wildcard src/*.cpp)
+SRCS := $(wildcard src/*.cpp src/camera/*.cpp src/display/*.cpp)
 OBJS := $(SRCS:src/%.cpp=$(OBJDIR)/%.o)
 LIB  := $(OBJDIR)/libcsrc.a
 DEPS := $(OBJS:.o=.d)
@@ -77,6 +77,7 @@ $(TPU_STAMP):
 	@touch $@
 
 $(OBJDIR)/%.o: src/%.cpp $(TPU_STAMP) | $(OBJDIR)
+	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 $(LIB): $(OBJS)

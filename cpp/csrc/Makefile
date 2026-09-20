@@ -37,7 +37,7 @@ JPEG_INC := $(if $(wildcard $(JPEG_DIR)/include/jpeglib.h),-I$(JPEG_DIR)/include
 CXXFLAGS += $(JPEG_INC)
 
 OBJDIR := build$(SCREEN_SUFFIX)
-SRCS := $(wildcard src/*.cpp)
+SRCS := $(wildcard src/*.cpp src/camera/*.cpp src/display/*.cpp)
 OBJS := $(SRCS:src/%.cpp=$(OBJDIR)/%.o)
 LIB  := $(OBJDIR)/libcsrc.a
 DEPS := $(OBJS:.o=.d)
@@ -63,6 +63,7 @@ $(OBJDIR):
 	mkdir -p $(OBJDIR)
 
 $(OBJDIR)/%.o: src/%.cpp | $(OBJDIR)
+	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 $(LIB): $(OBJS)
