@@ -60,7 +60,7 @@ LUA_LINK := $(if $(wildcard $(LUA_DIR)/lib/liblua.a),-llua,)
 CXXFLAGS += $(LUA_INC)
 
 OBJDIR := build$(SCREEN_SUFFIX)
-SRCS := $(wildcard src/*.cpp src/routes/*.cpp)
+SRCS := $(wildcard src/*.cpp src/routes/*.cpp src/services/*.cpp)
 OBJS := $(SRCS:src/%.cpp=$(OBJDIR)/%.o)
 DEPS := $(OBJS:.o=.d)
 -include $(DEPS)

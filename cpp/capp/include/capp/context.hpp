@@ -264,6 +264,9 @@ csrc::Json set_display_enabled(AppContext& ctx, bool enabled);
 
 /// 启动屏显示（按 config.display；无 /dev/fb0 时返回 false 但不影响其它服务）
 bool ensure_display(AppContext& ctx);
+/// 在"摄像头已开"的前提下启动屏显示（不再回调 ensure_camera，避免递归）。
+/// ensure_display 与 ensure_camera（摄像头一开就跟着起屏）都要用，所以是跨文件的。
+bool start_display_locked_on_camera(AppContext& ctx);
 /// 停止屏显示并释放 framebuffer
 void close_display(AppContext& ctx);
 /// 屏显示状态（JSON：running/available/fps/frames/区域尺寸等）
