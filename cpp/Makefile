@@ -136,8 +136,8 @@ $(CAPP_BIN_NS): $(CSRC_LIB_NS) $(MBEDTLS) $(LUA) FORCE
 #       $(5)=部署内的二进制名 —— 两个版本都用 aka-capp：板上的 init.sh 写死了这个名字，
 #           带 -noscreen 后缀的话脚本会 "not found or not executable" 直接退出
 #           （构建产物本身仍区分：capp/bin/aka-capp 与 aka-capp-noscreen）
-#       $(6)=前端产物目录名（static / static-noscreen，见 frontend/vite.config.ts 的
-#           WITH_SCREEN 开关）—— 进包后统一叫 static/，页面的"有没有屏"与后端同源
+# 前端产物只有一份（仓库根 static/）：两个版本共用，所以**打包前要 build 对版本**
+#   （带屏 npm run build / 不带屏 npm run build:noscreen）。拿错版本这里会报警。
 define PACKAGE_RECIPE
 	@set -e; \
 	DIST="$(3)"; \
@@ -146,10 +146,19 @@ define PACKAGE_RECIPE
 	cp -r "$(CPP)/board" "$$DIST"; \
 	cp "$(2)" "$$DIST/$(5)"; \
 	chmod 755 "$$DIST/$(5)" "$$DIST"/*.sh; \
-	if [ -f "$(ROOT)/$(6)/index.html" ]; then \
-	    cp -r "$(ROOT)/$(6)" "$$DIST/static"; \
+	if [ -f "$(ROOT)/static/index.html" ]; then \
+	    cp -r "$(ROOT)/static" "$$DIST/static"; \
+	    if grep -q "__WITH_SCREEN__" "$$DIST/static/assets/index.js" 2>/dev/null; then _has=1; else _has=0; fi; \
+	    if [ "$(1)" = "0" ] && [ "$$_has" = "1" ]; then \
+	        echo "  警告: static/ 是**带屏版**的构建 —— 不带屏包里会出现屏开关"; \
+	        echo "        先 cd frontend && npm run build:noscreen 再重打"; \
+	    fi; \
+	    if [ "$(1)" = "1" ] && [ "$$_has" = "0" ]; then \
+	        echo "  警告: static/ 是**不带屏版**的构建 —— 带屏包里少了屏开关"; \
+	        echo "        先 cd frontend && npm run build 再重打"; \
+	    fi; \
 	else \
-	    echo "  警告: 缺 $(ROOT)/$(6)/index.html —— 这个包不会有前端页面"; \
+	    echo "  警告: 缺 $(ROOT)/static/index.html —— 这个包不会有前端页面"; \
 	    echo "        （前端不参与 make：先 cd frontend && npm run build$(if $(filter 0,$(1)),:noscreen,))"; \
 	fi; \
 	mkdir -p "$$DIST/tools"; \
@@ -170,11 +179,11 @@ endef
 
 # ── 打包：带屏版 → dist/AKA-00/（部署目录）──
 package: $(CAPP_BIN) tools demos
-	$(call PACKAGE_RECIPE,1,$(CAPP_BIN),$(DIST),$(OBJDIR),aka-capp,static)
+	$(call PACKAGE_RECIPE,1,$(CAPP_BIN),$(DIST),$(OBJDIR),aka-capp)
 
 # ── 打包：不带屏版 → dist-noscreen/AKA-00/ ──
 package-noscreen: $(CAPP_BIN_NS) tools-noscreen demos
-	$(call PACKAGE_RECIPE,0,$(CAPP_BIN_NS),$(DIST_NS),$(OBJDIR_NS),aka-capp,static-noscreen)
+	$(call PACKAGE_RECIPE,0,$(CAPP_BIN_NS),$(DIST_NS),$(OBJDIR_NS),aka-capp)
 
 clean:
 	$(ORB_RUN) "rm -rf $(CPP)/csrc/build-cross $(CPP)/csrc/build-cross-noscreen \

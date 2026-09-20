@@ -66,13 +66,20 @@ static/ (index.html + assets/)  --打包-->  板上 $AKA_HOME/static/
   `frontend/` 里重新 build 再重新打包即可
 - **前端也有"有没有屏"的编译开关**，与后端的 `AKA_WITH_SCREEN` 一一对应：
 
-  | 命令 | 开关 | 产物 | 界面差别 |
-  |---|---|---|---|
-  | `npm run build` | `WITH_SCREEN` 不设（=1） | `static/` | 设置页有「屏幕显示」开关 |
-  | `npm run build:noscreen` | `WITH_SCREEN=0` | `static-noscreen/` | **整块不存在**（不是显示了再隐藏） |
+  | 命令 | 开关 | 界面差别 |
+  |---|---|---|
+  | `npm run build` | `WITH_SCREEN` 不设（=1） | 设置页有「屏幕显示」开关 |
+  | `npm run build:noscreen` | `WITH_SCREEN=0` | **整块不存在**（不是显示了再隐藏） |
 
-  打包时按版本取对应那份（`cpp/Makefile` 的 PACKAGE_RECIPE），进包后统一叫 `static/`。
-  页面的"有没有屏"必须与二进制同一个决定 —— 一边编掉、另一边还显示开关就闹鬼了。
+  **两个版本共用同一个产物目录 `static/`**，所以打包前 build 对版本：
+
+  ```sh
+  cd frontend && npm run build            && cd .. && make -C cpp ota              # 带屏
+  cd frontend && npm run build:noscreen   && cd .. && make -C cpp ota-noscreen     # 不带屏
+  ```
+
+  拿错版本时打包脚本会报警（`static/assets/index.js` 里的 `__WITH_SCREEN__` 标记 ——
+  带屏版才有；浏览器控制台里也能用它确认手上这个页面是哪版）。
 - 页面与 capp 的接口契约（REST + WS 二进制协议）见下节
 
 ## 构建

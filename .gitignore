@@ -1,7 +1,6 @@
 __pycache__/
 .idea
 static
-static-noscreen
 !dora/web-server/static/
 output/
 checkpoints/
