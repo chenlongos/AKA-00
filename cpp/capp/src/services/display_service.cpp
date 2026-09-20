@@ -10,6 +10,8 @@
 
 namespace capp {
 
+#if AKA_WITH_SCREEN
+
 // 在"摄像头已开"的前提下启动屏显示（不再回调 ensure_camera，避免递归）。
 // 不是 static：camera_service.cpp 里"摄像头一开就跟着起屏"也要用它（声明在 context.hpp）。
 bool start_display_locked_on_camera(AppContext& ctx) {
@@ -35,6 +37,17 @@ bool ensure_display(AppContext& ctx) {
     return start_display_locked_on_camera(ctx);
 }
 
+#else  // !AKA_WITH_SCREEN —— 不带屏版：这台机器没有"屏"这一层
+//
+// 签名保持不变（camera_service 的"开摄像头跟着起屏"、routes/display.cpp 都会调），
+// 但**什么都不做、也不打日志**。"有没有屏"对用户应当是透明的：日志里不该冒出屏相关的话，
+// 更不该因为一次 /api/display/enabled 就顺手把摄像头打开。
+
+bool start_display_locked_on_camera(AppContext&) { return false; }
+bool ensure_display(AppContext&) { return false; }
+
+#endif  // AKA_WITH_SCREEN
+
 void close_display(AppContext& ctx) { ctx.display.stop(); }
 
 csrc::Json display_config(AppContext& ctx) {
@@ -58,11 +71,15 @@ csrc::Json set_display_enabled(AppContext& ctx, bool enabled) {
     csrc::Json j;
     if (!enabled) {
         close_display(ctx);      // 立刻停屏（关摄像头路径也会调，幂等）
+#if AKA_WITH_SCREEN
         CAM_INFO("[display] 运行时关闭屏显示");
+#endif
     } else {
         // 打开：摄像头已开才会真的起屏（起不来不算错误，如实回报 running=false）
         ensure_display(ctx);
+#if AKA_WITH_SCREEN
         CAM_INFO("[display] 运行时打开屏显示 (running=%d)", (int)ctx.display.running());
+#endif
     }
     j["ok"] = true;
     j["enabled"] = ctx.config.display.enabled;

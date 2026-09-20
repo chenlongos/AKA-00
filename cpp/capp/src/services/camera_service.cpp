@@ -18,13 +18,17 @@ bool ensure_camera(AppContext& ctx) {
     bool ok = ctx.camera.open(ctx.config.camera.width, ctx.config.camera.height,
                               ctx.config.camera.fps);
     ctx.camera_on = ok;
-    // 屏显示跟随摄像头（固定行为）：摄像头一开，屏就出图
+    // 屏显示跟随摄像头（固定行为）：摄像头一开，屏就出图。
+    // **不带屏版整段编掉**：这台机器没有屏这层，走到这里只会打一句"屏开始显示"的假日志，
+    // 然后一路掉进 csrc 的桩里 —— 对用户来说"有没有屏"应该是透明的，日志里不该出现屏。
+#if AKA_WITH_SCREEN
     if (ok && ctx.config.display.enabled) {
         if (!ctx.display.running()) {
             CAM_INFO("[display] 摄像头已开 → 屏开始显示");
             start_display_locked_on_camera(ctx);
         }
     }
+#endif
     return ok;
 }
 
