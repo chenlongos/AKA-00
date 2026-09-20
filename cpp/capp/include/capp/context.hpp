@@ -273,6 +273,10 @@ void close_display(AppContext& ctx);
 
 // ── 状态上报（对应 app/services/status_reporter.py）──
 
+/// 读 $AKA_HOME/VERSION（"v1.2.3@1722169200" 或 "v1.2.3 1722169200"）→ 版本号 + 时间戳。
+/// 状态上报与 OTA 比版本都用它（**只有这一份解析**）。
+void read_version_file(AppContext& ctx, std::string& ver, int64_t& ts);
+
 /// 启动云端状态上报线程（URL 为空则不启动）
 void start_status_reporter(AppContext& ctx);
 /// 立即上报一次（boot/heartbeat）

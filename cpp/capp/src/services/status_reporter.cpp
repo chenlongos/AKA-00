@@ -17,20 +17,36 @@
 
 namespace capp {
 
-namespace {
-
-std::string read_version(AppContext& ctx) {
+// VERSION 文件: "v1.2.3@1722169200" 或 "v1.2.3 1722169200"
+// **一处解析**：状态上报只要版本号，OTA 还要那个时间戳（比"谁的包更新"）。以前是两份
+// （capp/services 一份、capp/routes/ota.cpp 一份），分家之后改一处漏一处，所以合成一个。
+void read_version_file(AppContext& ctx, std::string& ver, int64_t& ts) {
+    ver = "unknown";
+    ts = 0;
     std::ifstream f(ctx.app_dir + "/VERSION");
-    if (!f) return "unknown";
+    if (!f) return;
     std::string raw;
     std::getline(f, raw);
-    size_t at = raw.find('@');
-    if (at != std::string::npos) return raw.substr(0, at);
-    size_t sp = raw.find(' ');
-    if (sp != std::string::npos) return raw.substr(0, sp);
-    return raw.empty() ? "unknown" : raw;
+    if (raw.empty()) return;
+    const char sep = raw.find('@') != std::string::npos ? '@' : ' ';
+    const size_t pos = raw.rfind(sep);
+    if (pos != std::string::npos) {
+        ver = raw.substr(0, pos);
+        ts = (int64_t)atoll(raw.substr(pos + 1).c_str());
+    } else {
+        ver = raw;
+    }
 }
 
+namespace {
+
+/// 只要版本号（状态上报用；要那个时间戳的走 read_version_file）
+std::string read_version(AppContext& ctx) {
+    std::string ver;
+    int64_t ts = 0;
+    read_version_file(ctx, ver, ts);
+    return ver;
+}
 
 
 // ── 跨 TU 的控制原语 ──

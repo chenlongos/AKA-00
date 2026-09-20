@@ -23,24 +23,7 @@ namespace routes {
 
 using HttpResult = csrc::HttpResult;   // csrc::http_get/http_download 的返回类型（只有这个域用）
 
-// VERSION 文件: "v1.2.3@1722169200" 或 "v1.2.3 1722169200"
-void read_version_file(AppContext& ctx, std::string& ver, int64_t& ts) {
-    ver = "unknown";
-    ts = 0;
-    std::ifstream f(ctx.app_dir + "/VERSION");
-    if (!f) return;
-    std::string raw;
-    std::getline(f, raw);
-    if (raw.empty()) return;
-    char sep = raw.find('@') != std::string::npos ? '@' : ' ';
-    size_t pos = raw.rfind(sep);
-    if (pos != std::string::npos) {
-        ver = raw.substr(0, pos);
-        ts = (int64_t)atoll(raw.substr(pos + 1).c_str());
-    } else {
-        ver = raw;
-    }
-}
+// VERSION 解析统一在 capp/services/status_reporter.cpp（read_version_file，声明在 context.hpp）
 
 // ── OTA: semver 解析 ──
 // "v1.2.3" → (1,2,3,0)；"v1.2.3-4-gabc" → (1,2,3,4)；解析失败返回空

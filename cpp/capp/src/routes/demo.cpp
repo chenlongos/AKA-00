@@ -15,6 +15,25 @@ namespace routes {
 
 // ── Demo 卡片与动作脚本 ──
 
+namespace {
+
+/// 跑完再返回：等脚本结束，**只回一个"完成没有"的结论**（字段与 /api/demo/status 一致）。
+/// init 与 run 两条路由的收尾一模一样 —— 抽出来，别再抄第二份（上次改超时文案就得改两处）。
+void finish_wait(AppContext& ctx, HttpResponse& resp) {
+    const bool done = wait_script_done(ctx, kDemoWaitMaxSeconds);
+    const Json st = script_status(ctx);
+    Json out;
+    out["completed"] = done && st.gets("state") == "done";
+    if (!out.getb("completed")) {
+        out["error"] = done ? st.gets("message")
+                            : "timeout: 等了 " + std::to_string((long long)kDemoWaitMaxSeconds) +
+                                  " 秒还没跑完（脚本卡在不调原语的死循环里？试 POST /api/demo/stop）";
+    }
+    resp.set_json(out);
+}
+
+}  // namespace
+
 void register_demo_routes(Router& router, AppContext& ctx) {
 
 
@@ -54,17 +73,8 @@ void register_demo_routes(Router& router, AppContext& ctx) {
             resp.set_json(r, r.getb("ok") ? 200 : 400);
             return;
         }
-        const bool done = wait_script_done(ctx, kDemoWaitMaxSeconds);
-        const Json st = script_status(ctx);
         // 同样精简到一个标志（与 /api/control 的 completed 同一个含义）
-        Json out;
-        out["completed"] = done && st.gets("state") == "done";
-        if (!out.getb("completed")) {
-            out["error"] = done ? st.gets("message")
-                                : "timeout: 等了 " + std::to_string((long long)kDemoWaitMaxSeconds) +
-                                      " 秒还没跑完（脚本卡在不调原语的死循环里？试 POST /api/demo/stop）";
-        }
-        resp.set_json(out);
+        finish_wait(ctx, resp);
     });
 
     router.add("GET", "/api/demo/status", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
@@ -223,17 +233,8 @@ void register_demo_routes(Router& router, AppContext& ctx) {
             resp.set_json(j);                 // 默认：立刻回 started，界面靠 /api/demo/status 轮询
             return;
         }
-        // 跑完再返回：字段与 /api/demo/status 一致 + status（finished / timeout）+ completed
-        const bool done = wait_script_done(ctx, kDemoWaitMaxSeconds);
-        const Json st = script_status(ctx);
-        Json out;
-        out["completed"] = done && st.gets("state") == "done";
-        if (!out.getb("completed")) {
-            out["error"] = done ? st.gets("message")
-                                : "timeout: 等了 " + std::to_string((long long)kDemoWaitMaxSeconds) +
-                                      " 秒还没跑完（脚本卡在不调原语的死循环里？试 POST /api/demo/stop）";
-        }
-        resp.set_json(out);
+        // 跑完再返回：字段与 /api/demo/status 一致 + completed
+        finish_wait(ctx, resp);
     });
 
     // 卡片配置：GET 读一张、POST 新建或覆盖（动作 + 模型 + 四个参数）
