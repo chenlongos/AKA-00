@@ -85,12 +85,13 @@ make ota                  # 只生成自解压安装器（内部先 package）
 
 # ── 不带屏版本（整个显示栈编译期裁掉）──
 make noscreen
-# → 产物: capp/bin/aka-capp-noscreen、dist-noscreen/AKA-00/（不带屏版本不生成安装器）
+# → 产物: capp/bin/aka-capp-noscreen、dist-noscreen/AKA-00/、
+#   dist-noscreen/aka-00-server（自解压安装器，与带屏版是同一份脚本，只有 payload 不同）
 
 make libjpeg              # 交叉编译 libjpeg（首次自动下载源码）
 make mbedtls              # 交叉编译 mbedTLS（首次自动下载源码，HTTPS 用）
 make csrc | capp | tools | package                      # 带屏版各步骤
-make csrc-noscreen | capp-noscreen | package-noscreen   # 不带屏版各步骤
+make csrc-noscreen | capp-noscreen | package-noscreen | ota-noscreen   # 不带屏版各步骤
 make clean                # 清理全部构建产物
 ```
 
@@ -102,7 +103,7 @@ make clean                # 清理全部构建产物
 | 二进制 | `bin/aka-capp` | `bin/aka-capp-noscreen` |
 | 部署后的名字 | `aka-capp` | **也叫 `aka-capp`**（`init.sh` 写死了这个名字；带 `-noscreen` 后缀会起不来） |
 | 构建目录 | `build-cross/` | `build-cross-noscreen/` |
-| 部署产物 | `dist/AKA-00/` + `dist/aka-00-server` | `dist-noscreen/AKA-00/`（**文件集合与带屏包完全相同**，只有 `aka-capp`、`tools/screen_test` 这两个二进制的内容不同） |
+| 部署产物 | `dist/AKA-00/` + `dist/aka-00-server` | `dist-noscreen/AKA-00/` + `dist-noscreen/aka-00-server`（**文件集合与带屏包完全相同**，只有 `aka-capp`、`tools/screen_test` 这两个二进制的内容不同） |
 | 工具 | `tt_pid_test` / `cam_probe` / `screen_test` | **同一套**（`screen_test` 编出来是桩：能跑，但不碰屏） |
 | 屏显示 | 摄像头画面 → /dev/fb0 | **整个显示栈不参与编译**（二进制里无 `/dev/fb0`，`[display]` 配置被忽略） |
 

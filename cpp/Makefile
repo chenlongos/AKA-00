@@ -16,6 +16,7 @@
 # ── 两个版本（编译期开关 AKA_WITH_SCREEN，构建目录/产物完全隔离，互不覆盖）──
 #   make / make screen     带屏版本：bin/aka-capp + dist/AKA-00/（+ make ota 时再出安装器）
 #   make noscreen          不带屏版本：bin/aka-capp-noscreen + dist-noscreen/AKA-00/
+#                          + dist-noscreen/aka-00-server（自解压安装器，逻辑与带屏版同一份）
 #   （不带屏版本把整个显示栈（/dev/fb0）编译期裁掉：二进制更小、完全不碰 framebuffer，
 #     适合没有屏的机器；[display] 配置项在该版本中被忽略）
 #
@@ -54,7 +55,7 @@ CAPP_BIN_NS  := $(CPP)/capp/bin/aka-capp-noscreen
 DIST_NS      := $(CPP)/dist-noscreen/AKA-00
 OBJDIR_NS    := build-cross-noscreen
 
-.PHONY: all screen noscreen libjpeg mbedtls lua csrc capp tools package ota \
+.PHONY: all screen noscreen libjpeg mbedtls lua csrc capp tools package ota ota-noscreen \
         csrc-noscreen capp-noscreen tools-noscreen package-noscreen demos clean FORCE
 
 # 默认：只产出两样东西 —— dist/AKA-00/（部署目录）与 dist/aka-00-server（自解压安装器）
@@ -62,7 +63,9 @@ all: package ota
 screen: package
 ota: package
 	@$(ORB_RUN) "cd $(CPP) && sh scripts/build-ota.sh"
-noscreen: package-noscreen
+ota-noscreen: package-noscreen
+	@$(ORB_RUN) "cd $(CPP) && AKA_OTA_DIST=$(CPP)/dist-noscreen sh scripts/build-ota.sh"
+noscreen: package-noscreen ota-noscreen
 
 libjpeg: $(JPEG)
 mbedtls: $(MBEDTLS)
@@ -153,7 +156,7 @@ define PACKAGE_RECIPE
 	echo "   demo/：$$(ls "$$DIST/demo"/*.lua 2>/dev/null | wc -l | tr -d ' ') 个脚本、$$(find "$$DIST/demo/models" -name '*.cvimodel' 2>/dev/null | wc -l | tr -d ' ') 个模型、$$(ls "$$DIST/demo/configs"/*.json 2>/dev/null | wc -l | tr -d ' ') 份参数"; \
 	du -sh "$$DIST"; \
 	echo ""; \
-	echo "  部署到板子：make ota 生成 dist/aka-00-server，scp 过去后执行"; \
+	echo "  部署到板子：make ota（不带屏版 make ota-noscreen）生成 aka-00-server，scp 过去后执行"; \
 	echo "      ./aka-00-server --update                          # 升级（保 config.toml 等现场文件）"; \
 	echo "      AKA_OTA_RESET_CONFIG=1 ./aka-00-server --update   # 连 config.toml 一起换新"
 endef

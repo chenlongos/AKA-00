@@ -2,13 +2,15 @@
 # =============================================================================
 # build-ota.sh — 生成 cpp 版的自解压安装器（首次部署 + OTA 升级共用）
 #
-# 产物:  cpp/dist/aka-00-server
+# 产物:  cpp/dist/aka-00-server            （带屏版：make ota）
+#        cpp/dist-noscreen/aka-00-server    （不带屏版：make ota-noscreen）
 #   ./aka-00-server              正常启动（首次自动解包 → init.sh）
 #   ./aka-00-server --init       首次部署（解包 + AP/Web 初始化）
 #   ./aka-00-server --update     OTA 升级（保配置换包 + 重启服务）
 #   ./aka-00-server --extract    仅解包到 $AKA_HOME（不重启；验证/CI 用）
 #
-# 用法:  cd cpp && make ota      # 内部先 make package，再跑本脚本
+# 用法:  cd cpp && make ota                # 内部先 make package，再跑本脚本
+#        cd cpp && make ota-noscreen       # 不带屏版（先 package-noscreen）
 #        AKA_HOME=/tmp/x ./dist/aka-00-server --extract   # 本地验证
 #
 # 为什么是"自解压单文件"而不是 tar.gz：
@@ -31,9 +33,12 @@
 set -e
 
 CPP="$(cd "$(dirname "$0")/.." && pwd)"
-DIST="$CPP/dist"
+# 默认打带屏版；不带屏版由 `make ota-noscreen` 传 AKA_OTA_DIST=dist-noscreen 覆盖。
+# 两个版本的安装器**逻辑完全一样**（装的就是那个目录里的东西），只有 payload 里的
+# aka-capp 内容不同 —— 这也是"两份包只允许二进制内容有差别"的一部分。
+DIST="${AKA_OTA_DIST:-$CPP/dist}"
 SRC="$DIST/AKA-00"
-OUT="$DIST/aka-00-server"
+OUT="${AKA_OTA_OUT:-$DIST/aka-00-server}"
 
 if [ ! -x "$SRC/aka-capp" ]; then
     echo "错误: 缺少 $SRC/aka-capp —— 先跑 'make package'" >&2
