@@ -63,7 +63,16 @@ static/ (index.html + assets/)  --打包-->  板上 $AKA_HOME/static/
   `/assets/*` → 静态资源，非 API 路径 SPA fallback 回 `index.html`
 - 前端源码在仓库 `frontend/`（React + Vite，`src/api.ts` 调 `/api/*`、
   `src/ControlSocket` 连 `/ws/control`）；以后若需改页面，改完在
-  `frontend/` 里 `npm run build` 刷新根 `static/` 再重新打包即可
+  `frontend/` 里重新 build 再重新打包即可
+- **前端也有"有没有屏"的编译开关**，与后端的 `AKA_WITH_SCREEN` 一一对应：
+
+  | 命令 | 开关 | 产物 | 界面差别 |
+  |---|---|---|---|
+  | `npm run build` | `WITH_SCREEN` 不设（=1） | `static/` | 设置页有「屏幕显示」开关 |
+  | `npm run build:noscreen` | `WITH_SCREEN=0` | `static-noscreen/` | **整块不存在**（不是显示了再隐藏） |
+
+  打包时按版本取对应那份（`cpp/Makefile` 的 PACKAGE_RECIPE），进包后统一叫 `static/`。
+  页面的"有没有屏"必须与二进制同一个决定 —— 一边编掉、另一边还显示开关就闹鬼了。
 - 页面与 capp 的接口契约（REST + WS 二进制协议）见下节
 
 ## 构建
@@ -135,10 +144,10 @@ make clean                # 清理全部构建产物
 1. 把 `cpp/board/` 原样收进 `dist/AKA-00/`；
 2. 补三样**构建产物**：`capp/bin/aka-capp`、仓库根的 `static/`、`csrc/<builddir>/` 下的 `tools/`。
 
-两份包**只允许在二进制文件的内容上有差别**（编译期开关决定的那几个 ELF：`aka-capp`、
-`tools/*`）。文件集合、权限、以及所有文本文件（`config.toml`、`*.sh`、`*.json`、
-`demo/*.lua`、`static/`…）必须逐字节相同 —— 免得部署时才发现“这个包少了张图”
-或者“两个包的脚本不一样”。
+两份包**只允许编译产物的内容不同**：那几个 ELF（`aka-capp`、`tools/*`）与前端 bundle
+（`static/assets/index.js`）。文件集合、权限、以及其余一切文本文件（`config.toml`、
+`*.sh`、`*.json`、`demo/*.lua`、`static/index.html`…）必须逐字节相同 —— 免得部署时
+才发现“这个包少了张图”或者“两个包的脚本不一样”。
 
 所以"这个文件到底哪来的"这类问题，答案只有两种：要么在 `cpp/board/` 里，
 要么是编出来的（二进制 / 前端产物 / 板测工具）。
@@ -153,7 +162,7 @@ OTA 升级共用）。目标布局：
 $AKA_HOME/
 ├── aka-capp                  # riscv64 静态二进制（3.5MB，无任何依赖）
 ├── config.toml               # 配置（见下）
-├── static/                   # 前端构建产物（frontend → npm run build 产出）
+├── static/                   # 前端构建产物（带屏版 npm run build / 不带屏版 build:noscreen）
 ├── arm_angles.json           # 机械臂角度（可选，缺省用默认值）
 ├── arm_angles_default.json   # 默认角度
 ├── speed_config.json         # 行驶速度配置

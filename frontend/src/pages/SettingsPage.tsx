@@ -24,6 +24,7 @@ const SettingsPage = () => {
     const [screenBusy, setScreenBusy] = useState(false);
 
     useEffect(() => {
+        if (!__WITH_SCREEN__) return;   // 不带屏版：连问都不问（这块整个不存在）
         api.display.status().then(d => setScreenOn(!!d.enabled)).catch(() => setScreenOn(null));
     }, []);
 
@@ -68,8 +69,9 @@ const SettingsPage = () => {
                     </Card>
                 ))}
 
-                {/* 屏幕显示开关 */}
-                <Card marginBottom={10}>
+                {/* 屏幕显示开关 —— **不带屏版整块不存在**（不是"显示了再隐藏"：
+                    没有屏的机器上，用户不该看到一个拨了没反应的开关） */}
+                {__WITH_SCREEN__ && <Card marginBottom={10}>
                     <div style={{display: "flex", alignItems: "center", gap: scalePx(12), padding: `${scalePx(4)} 0`}}>
                         <span style={{fontSize: scalePx(24)}}>🖥️</span>
                         <div style={{flex: 1}}>
@@ -98,7 +100,7 @@ const SettingsPage = () => {
                             }}/>
                         </div>
                     </div>
-                </Card>
+                </Card>}
 
                 {/* 设备信息 */}
                 <Card marginBottom={10}>

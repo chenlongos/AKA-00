@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:noscreen": "tsc -b && WITH_SCREEN=0 vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },

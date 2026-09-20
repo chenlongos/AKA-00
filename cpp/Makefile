@@ -7,10 +7,10 @@
 #
 # 打包（package）只做两件事：把 cpp/board/（= 板上目录 $AKA_HOME/ 的实体文件镜像）
 # 原样收进 dist/AKA-00/，补三样构建产物（capp 二进制 / static / tools）。
-# **两份包只允许在“二进制文件的内容”上有差别**（编译期开关决定的那几个 ELF：
-#  aka-capp、tools/*）。文件集合、以及所有文本文件（config.toml、*.sh、*.json、
-#  demo/*.lua、static/…）必须逐字节相同 —— 部署时不该出现“这个包少张图、那个包多个
-#  文件”或“两个包的脚本不一样”的意外。
+# **两份包只允许“编译产物的内容”不同**：那几个 ELF（aka-capp、tools/*）与前端 bundle
+#  （static/assets/index.js，见 frontend 的 WITH_SCREEN 开关）。文件集合、以及其余
+#  一切文本文件（config.toml、*.sh、*.json、demo/*.lua、static/index.html…）必须逐字节
+#  相同 —— 部署时不该出现“这个包少张图、那个包多个文件”或“两个包的脚本不一样”的意外。
 # **板上要什么就改 cpp/board/ 里的实体文件**，这里不再有逐文件的拷贝清单。
 #
 # ── 两个版本（编译期开关 AKA_WITH_SCREEN，构建目录/产物完全隔离，互不覆盖）──
@@ -128,14 +128,16 @@ $(CAPP_BIN_NS): $(CSRC_LIB_NS) $(MBEDTLS) $(LUA) FORCE
 # 板上要什么是**实体文件**说了算：`cpp/board/` 就是 `$AKA_HOME/` 的镜像，
 # 想改 init.sh、config.toml、demo/*.lua 就直接改那里的文件，不用碰构建脚本。
 # 这里只做两件事：① 把 board/ 原样收过来 ② 补三样构建产物（aka-capp / static / tools）。
-# 两份包**只允许二进制文件的内容不同**（编译期开关决定的 ELF）；文件集合、权限、
-# 以及所有文本文件都要一致 —— 不带屏版用不到的 start_img.jpg 也照发，多占几百 KB，
-# 换的是“两个包除了编译产物之外没有任何意外差别”。
+# 两份包**只允许编译产物的内容不同**（ELF + 前端 bundle）；文件集合、权限、其余文本
+# 文件都要一致 —— 不带屏版用不到的 start_img.jpg 也照发，多占几百 KB，换的是
+# “两个包除了编译产物之外没有任何意外差别”。
 #
 # 参数：$(1)=带屏标志(1/0)  $(2)=capp 二进制  $(3)=部署目录  $(4)=csrc 构建目录
 #       $(5)=部署内的二进制名 —— 两个版本都用 aka-capp：板上的 init.sh 写死了这个名字，
 #           带 -noscreen 后缀的话脚本会 "not found or not executable" 直接退出
 #           （构建产物本身仍区分：capp/bin/aka-capp 与 aka-capp-noscreen）
+#       $(6)=前端产物目录名（static / static-noscreen，见 frontend/vite.config.ts 的
+#           WITH_SCREEN 开关）—— 进包后统一叫 static/，页面的"有没有屏"与后端同源
 define PACKAGE_RECIPE
 	@set -e; \
 	DIST="$(3)"; \
@@ -144,7 +146,12 @@ define PACKAGE_RECIPE
 	cp -r "$(CPP)/board" "$$DIST"; \
 	cp "$(2)" "$$DIST/$(5)"; \
 	chmod 755 "$$DIST/$(5)" "$$DIST"/*.sh; \
-	[ -f "$(ROOT)/static/index.html" ] && cp -r "$(ROOT)/static" "$$DIST/static"; \
+	if [ -f "$(ROOT)/$(6)/index.html" ]; then \
+	    cp -r "$(ROOT)/$(6)" "$$DIST/static"; \
+	else \
+	    echo "  警告: 缺 $(ROOT)/$(6)/index.html —— 这个包不会有前端页面"; \
+	    echo "        （前端不参与 make：先 cd frontend && npm run build$(if $(filter 0,$(1)),:noscreen,))"; \
+	fi; \
 	mkdir -p "$$DIST/tools"; \
 	for t in tt_pid_test cam_probe screen_test; do \
 	    [ -f "$(CPP)/csrc/$(4)/$$t" ] && cp "$(CPP)/csrc/$(4)/$$t" "$$DIST/tools/" || true; \
@@ -163,11 +170,11 @@ endef
 
 # ── 打包：带屏版 → dist/AKA-00/（部署目录）──
 package: $(CAPP_BIN) tools demos
-	$(call PACKAGE_RECIPE,1,$(CAPP_BIN),$(DIST),$(OBJDIR),aka-capp)
+	$(call PACKAGE_RECIPE,1,$(CAPP_BIN),$(DIST),$(OBJDIR),aka-capp,static)
 
 # ── 打包：不带屏版 → dist-noscreen/AKA-00/ ──
 package-noscreen: $(CAPP_BIN_NS) tools-noscreen demos
-	$(call PACKAGE_RECIPE,0,$(CAPP_BIN_NS),$(DIST_NS),$(OBJDIR_NS),aka-capp)
+	$(call PACKAGE_RECIPE,0,$(CAPP_BIN_NS),$(DIST_NS),$(OBJDIR_NS),aka-capp,static-noscreen)
 
 clean:
 	$(ORB_RUN) "rm -rf $(CPP)/csrc/build-cross $(CPP)/csrc/build-cross-noscreen \
