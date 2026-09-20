@@ -42,7 +42,7 @@ int main() {
     // 服务层（硬件 + 状态采集）
     capp::init_services(ctx);
 
-    // 板载屏显示（摄像头画面 → /dev/fb0；无屏板自动跳过）
+    // 板载屏显示（摄像头画面 → /dev/fb0）
     //
     // 屏跟随摄像头开关（固定行为，不是配置项）：
     //   开机时摄像头是关的 → 屏上显示熄屏待机图；
@@ -50,6 +50,11 @@ int main() {
     //   前端关闭摄像头（POST /api/camera/close）→ 回到待机图。
     // 显示与浏览器 /api/camera/stream 共享同一份解码结果（Camera::latest_rgb 缓存），
     // 因此开屏不会拖慢浏览器看摄像头的速度/效率。
+    //
+    // **不带屏版（AKA_WITH_SCREEN=0）整段编掉**：那块显示栈根本不存在（csrc 里全是桩），
+    // 留着的话还会打一条"当前屏显示熄屏待机图 …/start_img.jpg"的假日志 ——
+    // 不带屏包里连那张图都没打进去，排查时非常误导。
+#if AKA_WITH_SCREEN
     if (ctx.config.display.enabled) {
         if (ctx.camera_on) {
             capp::ensure_display(ctx);
@@ -64,6 +69,7 @@ int main() {
             CAM_INFO("[display] 等摄像头打开后出图（当前屏显示熄屏待机图 %s）", img.c_str());
         }
     }
+#endif  // AKA_WITH_SCREEN
 
     // 云端状态上报
     capp::start_status_reporter(ctx);

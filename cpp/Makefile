@@ -125,11 +125,14 @@ $(CAPP_BIN_NS): $(CSRC_LIB_NS) $(MBEDTLS) $(LUA) FORCE
 # ③ 不带屏版把 start_img.jpg 拿掉（显示栈整个不存在，留着没意义）。
 #
 # 参数：$(1)=带屏标志(1/0)  $(2)=capp 二进制  $(3)=部署目录  $(4)=csrc 构建目录
-#       $(5)=部署内的二进制名（不带屏版叫 aka-capp-noscreen）
+#       $(5)=部署内的二进制名 —— 两个版本都用 aka-capp：板上的 init.sh 写死了这个名字，
+#           带 -noscreen 后缀的话脚本会 "not found or not executable" 直接退出
+#           （构建产物本身仍区分：capp/bin/aka-capp 与 aka-capp-noscreen）
 define PACKAGE_RECIPE
 	@set -e; \
 	DIST="$(3)"; \
 	rm -rf "$$DIST"; \
+	mkdir -p "$$(dirname "$$DIST")"; \
 	cp -r "$(CPP)/board" "$$DIST"; \
 	cp "$(2)" "$$DIST/$(5)"; \
 	chmod 755 "$$DIST/$(5)" "$$DIST"/*.sh; \
@@ -157,7 +160,7 @@ package: $(CAPP_BIN) tools demos
 
 # ── 打包：不带屏版 → dist-noscreen/AKA-00/ ──
 package-noscreen: $(CAPP_BIN_NS) tools-noscreen demos
-	$(call PACKAGE_RECIPE,0,$(CAPP_BIN_NS),$(DIST_NS),$(OBJDIR_NS),aka-capp-noscreen)
+	$(call PACKAGE_RECIPE,0,$(CAPP_BIN_NS),$(DIST_NS),$(OBJDIR_NS),aka-capp)
 
 clean:
 	$(ORB_RUN) "rm -rf $(CPP)/csrc/build-cross $(CPP)/csrc/build-cross-noscreen \

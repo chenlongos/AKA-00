@@ -95,6 +95,7 @@ make clean                # 清理全部构建产物
 |---|---|---|
 | 编译宏 | `-DAKA_WITH_SCREEN=1` | `-DAKA_WITH_SCREEN=0` |
 | 二进制 | `bin/aka-capp` | `bin/aka-capp-noscreen` |
+| 部署后的名字 | `aka-capp` | **也叫 `aka-capp`**（`init.sh` 写死了这个名字；带 `-noscreen` 后缀会起不来） |
 | 构建目录 | `build-cross/` | `build-cross-noscreen/` |
 | 部署产物 | `dist/AKA-00/` + `dist/aka-00-server` | `dist-noscreen/AKA-00/` |
 | 工具 | 含 `screen_test` | 不含 |
