@@ -54,7 +54,7 @@ CXXFLAGS := -std=c++17 -O3 -Wall -Wextra -mcpu=c906fdv -MMD -MP -mabi=lp64d \
 LDFLAGS  := -static -L$(JPEG_DIR)/lib -L$(MBEDTLS_DIR)/lib -L$(LUA_DIR)/lib $(TPU_LDFLAGS)
 
 OBJDIR := build-cross$(SCREEN_SUFFIX)
-SRCS := $(wildcard src/*.cpp src/routes/*.cpp src/services/*.cpp)
+SRCS := $(wildcard src/*.cpp src/routes/*.cpp src/services/*.cpp src/http/*.cpp)
 OBJS := $(SRCS:src/%.cpp=$(OBJDIR)/%.o)
 DEPS := $(OBJS:.o=.d)
 -include $(DEPS)
