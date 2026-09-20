@@ -5,10 +5,13 @@
 # `orb run -p` 转发交叉编译（产物落在共享目录，两边路径一致）。
 # 前端不参与构建：直接用仓库根 static/（已构建产物）打包。
 #
-# 打包（package）只做三件事：把 cpp/board/（= 板上目录 $AKA_HOME/ 的实体文件镜像）
-# 原样收进 dist/AKA-00/，补三样构建产物（capp 二进制 / static / tools），
-# 不带屏版再删掉 start_img.jpg。**板上要什么就改 cpp/board/ 里的实体文件**，
-# 这里不再有逐文件的拷贝清单。
+# 打包（package）只做两件事：把 cpp/board/（= 板上目录 $AKA_HOME/ 的实体文件镜像）
+# 原样收进 dist/AKA-00/，补三样构建产物（capp 二进制 / static / tools）。
+# **两份包只允许在“二进制文件的内容”上有差别**（编译期开关决定的那几个 ELF：
+#  aka-capp、tools/*）。文件集合、以及所有文本文件（config.toml、*.sh、*.json、
+#  demo/*.lua、static/…）必须逐字节相同 —— 部署时不该出现“这个包少张图、那个包多个
+#  文件”或“两个包的脚本不一样”的意外。
+# **板上要什么就改 cpp/board/ 里的实体文件**，这里不再有逐文件的拷贝清单。
 #
 # ── 两个版本（编译期开关 AKA_WITH_SCREEN，构建目录/产物完全隔离，互不覆盖）──
 #   make / make screen     带屏版本：bin/aka-capp + dist/AKA-00/（+ make ota 时再出安装器）
@@ -121,8 +124,10 @@ $(CAPP_BIN_NS): $(CSRC_LIB_NS) $(MBEDTLS) $(LUA) FORCE
 # ── 打包 ──
 # 板上要什么是**实体文件**说了算：`cpp/board/` 就是 `$AKA_HOME/` 的镜像，
 # 想改 init.sh、config.toml、demo/*.lua 就直接改那里的文件，不用碰构建脚本。
-# 这里只做三件事：① 把 board/ 原样收过来 ② 补三样构建产物（aka-capp / static / tools）
-# ③ 不带屏版把 start_img.jpg 拿掉（显示栈整个不存在，留着没意义）。
+# 这里只做两件事：① 把 board/ 原样收过来 ② 补三样构建产物（aka-capp / static / tools）。
+# 两份包**只允许二进制文件的内容不同**（编译期开关决定的 ELF）；文件集合、权限、
+# 以及所有文本文件都要一致 —— 不带屏版用不到的 start_img.jpg 也照发，多占几百 KB，
+# 换的是“两个包除了编译产物之外没有任何意外差别”。
 #
 # 参数：$(1)=带屏标志(1/0)  $(2)=capp 二进制  $(3)=部署目录  $(4)=csrc 构建目录
 #       $(5)=部署内的二进制名 —— 两个版本都用 aka-capp：板上的 init.sh 写死了这个名字，
@@ -137,7 +142,6 @@ define PACKAGE_RECIPE
 	cp "$(2)" "$$DIST/$(5)"; \
 	chmod 755 "$$DIST/$(5)" "$$DIST"/*.sh; \
 	[ -f "$(ROOT)/static/index.html" ] && cp -r "$(ROOT)/static" "$$DIST/static"; \
-	if [ "$(1)" = "0" ]; then rm -f "$$DIST/start_img.jpg"; fi; \
 	mkdir -p "$$DIST/tools"; \
 	for t in tt_pid_test cam_probe screen_test; do \
 	    [ -f "$(CPP)/csrc/$(4)/$$t" ] && cp "$(CPP)/csrc/$(4)/$$t" "$$DIST/tools/" || true; \

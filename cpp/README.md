@@ -25,7 +25,7 @@ cpp/
 │   │   ├── state.hpp         RobotStatus + StateCollector（对应 src/state/__init__.py）
 │   │   ├── system_utils.hpp  IP / MAC / CPU / 内存 / 磁盘 / uptime
 │   │   └── http_client.hpp   极简 HTTP 客户端（https 走 curl 兜底）
-│   └── src/*.cpp
+│   └── src/*.cpp（camera/、display/ 下按“设备 I/O / 图像换算”分文件）
 ├── capp/                     ← app/ 的 C++ 移植（独立 HTTP+WS 服务）
 │   ├── include/capp/
 │   │   ├── context.hpp       应用共享状态（服务单例 + demo/ota 状态）
@@ -34,9 +34,14 @@ cpp/
 │   │   └── routes.hpp
 │   ├── src/
 │   │   ├── main.cpp          入口（初始化硬件 → 启动 HTTP）
-│   │   ├── services.cpp      控制服务 / 摄像头服务 / 云端状态上报
-│   │   ├── routes.cpp        全部路由（control/motor/arm/camera/demo/ota/system/wifi/config）
-│   │   └── websocket.cpp / http_server.cpp
+│   │   ├── routes.cpp        路由注册入口（按域调用 routes/ 下各文件）
+│   │   ├── routes/           一域一文件（对照 app/routes/*.py）：motor/arm/camera/
+│   │   │                     models/demo/display/ota/system/wifi/config/ws
+│   │   ├── services/         服务层（对照 app/services/*.py）：control/camera/detect/
+│   │   │                     demo_assets/display/status_reporter + waits/init
+│   │   ├── http/             HTTP 层：conn（连接+TLS BIO）/ message（报文）/
+│   │   │                     router（路由表）/ server（监听与请求循环）
+│   │   └── websocket.cpp
 │   └── Makefile / Makefile.cross（本机 dev / 交叉编译）
 ├── board/                    ← 板上目录的实体文件（打包时原样收进 dist/AKA-00/，见下）
 │   ├── config.toml  init.sh  stop.sh  init_ap_web.sh  https_init.sh
@@ -97,8 +102,8 @@ make clean                # 清理全部构建产物
 | 二进制 | `bin/aka-capp` | `bin/aka-capp-noscreen` |
 | 部署后的名字 | `aka-capp` | **也叫 `aka-capp`**（`init.sh` 写死了这个名字；带 `-noscreen` 后缀会起不来） |
 | 构建目录 | `build-cross/` | `build-cross-noscreen/` |
-| 部署产物 | `dist/AKA-00/` + `dist/aka-00-server` | `dist-noscreen/AKA-00/` |
-| 工具 | 含 `screen_test` | 不含 |
+| 部署产物 | `dist/AKA-00/` + `dist/aka-00-server` | `dist-noscreen/AKA-00/`（**文件集合与带屏包完全相同**，只有 `aka-capp`、`tools/screen_test` 这两个二进制的内容不同） |
+| 工具 | `tt_pid_test` / `cam_probe` / `screen_test` | **同一套**（`screen_test` 编出来是桩：能跑，但不碰屏） |
 | 屏显示 | 摄像头画面 → /dev/fb0 | **整个显示栈不参与编译**（二进制里无 `/dev/fb0`，`[display]` 配置被忽略） |
 
 给没有屏的机器用不带屏版：二进制更小、完全不碰 framebuffer，也彻底排除
@@ -124,11 +129,15 @@ make clean                # 清理全部构建产物
 以及 `demo/`（动作脚本 + 模型 + 卡片配置）全部躺在那儿。想改板上哪个文件就直接改那里的实体文件，
 不用碰构建脚本。
 
-`make package` 只做三件事：
+`make package` 只做两件事：
 
 1. 把 `cpp/board/` 原样收进 `dist/AKA-00/`；
-2. 补三样**构建产物**：`capp/bin/aka-capp`、仓库根的 `static/`、`csrc/<builddir>/` 下的 `tools/`；
-3. 不带屏版把 `start_img.jpg` 删掉（显示栈整个不存在）。
+2. 补三样**构建产物**：`capp/bin/aka-capp`、仓库根的 `static/`、`csrc/<builddir>/` 下的 `tools/`。
+
+两份包**只允许在二进制文件的内容上有差别**（编译期开关决定的那几个 ELF：`aka-capp`、
+`tools/*`）。文件集合、权限、以及所有文本文件（`config.toml`、`*.sh`、`*.json`、
+`demo/*.lua`、`static/`…）必须逐字节相同 —— 免得部署时才发现“这个包少了张图”
+或者“两个包的脚本不一样”。
 
 所以"这个文件到底哪来的"这类问题，答案只有两种：要么在 `cpp/board/` 里，
 要么是编出来的（二进制 / 前端产物 / 板测工具）。
@@ -406,7 +415,7 @@ screen_test camera [scale]  # 摄像头实时预览（默认 scale=2 半屏）
 待机图**总是铺满整屏**（不受 `[display] scale` 影响）；解码宽度上限是代码里的常量，
 不再作为配置项。
 
-打包：带屏版本的部署目录会带上 `start_img.jpg`（不带屏版本不带，显示栈已裁掉）。
+打包：`start_img.jpg` 两个版本的部署目录都带（不带屏版用不到它，但两份包的文件集合保持一致更重要）。
 开发机单测（不需要板子）：`make -C cpp/csrc test-standby`，覆盖旋转方向、orient 四个翻转、
 cover 裁切、盒式平均效果、越界写与异常输入，共 21 项断言。
 
