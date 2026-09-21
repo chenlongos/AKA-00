@@ -24,6 +24,7 @@
 - [WebSocket 控制接口](./05-usage/websocket.md)
 - [API 文档](./05-usage/api.md)
 - [检测 · 识别 · Demo 运行 API](./05-usage/vision-demo.md)
+- [底盘 · 电机控制 API](./05-usage/motor-control.md)
 - [距离标定](./05-usage/dist-calibration.md)
 
 ## 开发
