@@ -1,0 +1,121 @@
+#!/bin/sh
+# =============================================================================
+# S97akaap — AP 的**开机自举入口 + 锁的持有者**（AKA-00 / SG2002）
+#
+# 放哪儿：本文件随包发到 $AKA_HOME/S97akaap，**由镜像构建拷到 /etc/init.d/S97akaap**
+#         并 chmod 755。它必须在镜像里就存在，不能靠 init_ap_web.sh 生成 —— 见下。
+#
+# 职责划分（重要）：
+#   S97akaap      = 判断"装过没装过"（锁）+ 决定调不调 + 装完了上锁
+#   init_ap_web.sh = 无状态的安装器：谁调都装，自己不上锁（原版脚本，一个字没改）
+#                    本脚本调它时**不带参数** = 它原来的 `all` 模式（装配置 + 起 AP）
+#
+# 与 `aka-00-server --init` 的关系：**两条路是独立的**，--init 仍直接调
+# init_ap_web.sh（原版行为，没改）。所以 --init 装完不上锁，之后第一次开机本脚本
+# 会再装一遍（才上锁）。这是有意的取舍：--init 是操作者显式动作，不该被锁拦住；
+# 锁只管开机这条路。走"镜像预烤"路线的话根本不跑 --init，不存在这次重复。
+#
+# 为什么需要它：AP 的配置（/etc/hostapd.conf、/etc/dnsmasq.ap.conf）和开机脚本
+# S98apstart / S99webstart **都是 init_ap_web.sh 生成的**。板子上从没跑过它时，这些
+# 文件一个都没有 → 开机没有任何脚本会去调用它 → 死锁。把本脚本烤进镜像就绕开了。
+#
+# 为什么用独立名字而不是复用 S98apstart/S99webstart：那两个是 init_ap_web.sh 的
+# 产物。拿它们当自举入口，等于让安装脚本每次重写自己的入口。S97 不是它的产物，
+# 且每次都排在 S98/S99 前面跑，不存在这个冲突。
+#
+# 排序：S97 < S98apstart < S99webstart。
+#   - 第一次开机：本脚本装好配置并当场拉起 AP（安装脚本第 6 节），但当次 rcS 的
+#     S??* 列表已经展开过，新生成的 S98/S99 多半赶不上 —— 从第二次开机起它们接管。
+#   - 之后每次开机：有锁，no-op。
+# =============================================================================
+
+# ── 参数：本脚本是这些值的**权威来源**，会显式传给 init_ap_web.sh ──
+# （安装脚本里同名变量写成 ${X:-默认}，只在有人绕过本脚本直接调它时才当兜底。）
+AP_IFACE="${AP_IFACE:-wlan0}"
+STA_IFACE="${STA_IFACE:-wlan1}"
+AP_IP="${AP_IP:-192.168.4.1}"
+NETMASK="${NETMASK:-255.255.255.0}"
+DHCP_START="${DHCP_START:-192.168.4.100}"
+DHCP_END="${DHCP_END:-192.168.4.200}"
+CHANNEL="${CHANNEL:-6}"
+
+AKA_HOME="${AKA_HOME:-/root/AKA-00}"
+[ -d "$AKA_HOME" ] || AKA_HOME="${HOME:-/root}/AKA-00"
+
+LOG=/tmp/aka-ap-init.log
+
+# ── 锁 ──────────────────────────────────────────────────────────────────────
+# 放 /root —— **AKA-00 的上一级**，两个理由：
+#   1) OTA 的 --update 是 swap_in **整目录替换 $AKA_HOME**（板上 /root/AKA-00），
+#      锁在里面会被每次升级冲掉 → 升级完开机重装 AP、手改的 hostapd.conf 被覆盖。
+#      放在上一级就换不到它。
+#   2) 登 root 进去 `ls -a` 就看见，`rm -f /root/.aka-ap-provisioned` 直接删。
+#
+# 注意：**别把"和产物同生共死"当安全依据** —— 这个位置跟 /etc 里的产物不在一个
+# 生命周期上（比如 /root 是独立分区时，重刷固件清了 /etc 但 /root 还在）。
+# 真正兜底的是下面 artifacts_ok()：产物缺了或空了就当没装过，照样重装。
+#
+# 第一行是**参数指纹**：上面任一参数（或 AKA_HOME）变了，锁自动失效并重装。
+LOCK_FILE="${LOCK_FILE:-/root/.aka-ap-provisioned}"
+LOCK_STAMP="v1 iface=${AP_IFACE} sta=${STA_IFACE} ip=${AP_IP} mask=${NETMASK} dhcp=${DHCP_START}-${DHCP_END} ch=${CHANNEL} home=${AKA_HOME}"
+
+# 产物是否齐全**且非空**。用 -s（存在且非空）而不是 -f/-x：0 字节文件能骗过 -f/-x ——
+# 一个空的 /etc/hostapd.conf 会被当成装好了，然后 hostapd 拿着空配置起不来，板子静默
+# 没 AP。（0 字节是真实故障模式：写到一半断电/被 kill 就会留下这种文件。）
+artifacts_ok() {
+    [ -s /etc/hostapd.conf ] && [ -s /etc/dnsmasq.ap.conf ] \
+        && [ -s /etc/init.d/S98apstart ] && [ -x /etc/init.d/S98apstart ] \
+        && [ -s /etc/init.d/S99webstart ] && [ -x /etc/init.d/S99webstart ]
+}
+
+locked() {
+    [ -f "$LOCK_FILE" ] || return 1
+    [ "$(head -n1 "$LOCK_FILE" 2>/dev/null)" = "$LOCK_STAMP" ] || return 1
+    artifacts_ok
+}
+
+# 等 AP 接口就绪（最多 20s）。S97 在 rcS 里跑得比 S98apstart 还早，wifi 驱动可能
+# 还没建出 wlan0 —— 那时安装脚本里的 ifconfig/hostapd 会失败，**而它以前照样会上锁**，
+# 于是第一次开机就没有 AP（要等第二次开机 S98apstart 才拉起来）。所以先等接口。
+i=0
+while [ $i -lt 40 ]; do
+    [ -d /sys/class/net/$AP_IFACE ] && break
+    sleep 0.5
+    i=$((i+1))
+done
+
+# ── 判断 ────────────────────────────────────────────────────────────────────
+if locked; then
+    echo "[S97] AP 已配置过，跳过 —— 锁: $LOCK_FILE" | tee -a "$LOG"
+    exit 0
+fi
+
+# ── 安装 ────────────────────────────────────────────────────────────────────
+if [ ! -x "$AKA_HOME/init_ap_web.sh" ]; then
+    echo "[S97] 缺 $AKA_HOME/init_ap_web.sh，无法配置 AP" | tee -a "$LOG"
+    exit 0
+fi
+
+{
+    echo "[S97] 开始配置 AP: $AP_IFACE @ $AP_IP, channel $CHANNEL"
+    AKA_HOME="$AKA_HOME" \
+    AP_IFACE="$AP_IFACE" STA_IFACE="$STA_IFACE" AP_IP="$AP_IP" NETMASK="$NETMASK" \
+    DHCP_START="$DHCP_START" DHCP_END="$DHCP_END" CHANNEL="$CHANNEL" \
+        "$AKA_HOME/init_ap_web.sh"
+} 2>&1 | tee -a "$LOG"
+
+# ── 上锁：**装成功了才上锁** ────────────────────────────────────────────────
+# 判据是产物真的齐全非空，而不是安装脚本的退出码 —— 它没有 set -e，失败也多半返回 0。
+# 这样"有锁"就严格蕴含"配置可用"，半途断电/装失败留下的残局下次开机会自动重来。
+if artifacts_ok; then
+    {
+        echo "$LOCK_STAMP"
+        echo "# ssid=$(sed -n 's/^ssid=//p' /etc/hostapd.conf 2>/dev/null | head -1) installed=$(date '+%Y-%m-%d %H:%M:%S')"
+    } > "$LOCK_FILE"
+    echo "[S97] AP 配置完成，已上锁" | tee -a "$LOG"
+else
+    echo "[S97] !!! 安装后产物仍不全（缺文件或 0 字节）—— 不上锁，下次开机会重试" | tee -a "$LOG"
+fi
+
+# 永远 exit 0：rcS 不该因为 AP 没起来就中断后续启动（capp 还得起）。
+exit 0

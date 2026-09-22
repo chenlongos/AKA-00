@@ -44,7 +44,7 @@ cpp/
 │   │   └── websocket.cpp
 │   └── Makefile / Makefile.cross（本机 dev / 交叉编译）
 ├── board/                    ← 板上目录的实体文件（打包时原样收进 dist/AKA-00/，见下）
-│   ├── config.toml  init.sh  stop.sh  init_ap_web.sh  https_init.sh
+│   ├── config.toml  init.sh  stop.sh  init_ap_web.sh  S97akaap  https_init.sh
 │   ├── arm_angles*.json  speed_config.json  VERSION  start_img.jpg
 │   └── demo/                 动作脚本（grab.lua / approach.lua）+ 模型（models/）+ 卡片（configs/）
 ├── scripts/                  build-libjpeg.sh / build-mbedtls.sh / build-lua.sh / build-ota.sh
@@ -141,7 +141,7 @@ make clean                # 清理全部构建产物
 ### 部署内容 = `cpp/board/`（实体文件）
 
 板上要什么由**实体文件**说了算：`cpp/board/` 就是 `$AKA_HOME/` 的镜像 ——
-`config.toml`、`init.sh`/`stop.sh`/`init_ap_web.sh`、`https_init.sh`、
+`config.toml`、`init.sh`/`stop.sh`/`init_ap_web.sh`/`S97akaap`、`https_init.sh`、
 `arm_angles*.json`、`speed_config.json`、`VERSION`、`start_img.jpg`、
 以及 `demo/`（动作脚本 + 模型 + 卡片配置）全部躺在那儿。想改板上哪个文件就直接改那里的实体文件，
 不用碰构建脚本。
@@ -181,7 +181,8 @@ $AKA_HOME/
 │   └── configs/<卡片名>.json  #   **卡片**：{"action":..,"model":..,+ 四个参数}（用户建的）
 ├── init.sh                   # 启动（自愈循环）
 ├── stop.sh                   # 停止
-└── init_ap_web.sh            # AP 热点 + 开机自启配置（开机广播 AP，访问 192.168.4.1）
+├── init_ap_web.sh            # AP 热点 + 开机自启配置（开机广播 AP，访问 192.168.4.1）
+└── S97akaap                  # 首次开机自举 AP（镜像构建时拷到 /etc/init.d/）
 ```
 
 > 这个目录里的东西（除 `aka-capp`、`static/`、`tools/` 三样构建产物外）**都在
@@ -219,12 +220,21 @@ AKA_HOME=$HOME/AKA-00 $HOME/AKA-00/init.sh
 手机/控制器连上热点后浏览器访问 `http://192.168.4.1` 即可控制；`wlan1` 作为
 STA，由 capp 的 `/api/wifi/scan`、`/api/wifi/connect` 扫描并连接目标路由器。
 
-```sh
-# 装配置 + 开机脚本（S98apstart / S99webstart），不改动当前网络 → reboot 后生效
-$HOME/AKA-00/init_ap_web.sh install
+职责是分开的，别混：
 
-# 或立即切换：wlan0 从 STA 切成 AP（会断开当前 WiFi 连接）
-$HOME/AKA-00/init_ap_web.sh            # = install + 立即启动
+| 文件 | 职责 |
+|---|---|
+| `S97akaap` | **判断"装过没装过"（锁）+ 决定调不调 + 装完上锁**。AP 的唯一入口 |
+| `init_ap_web.sh` | **无状态的安装器**：谁调都装，不判断、不上锁 |
+
+```sh
+# 无状态：无条件安装（会断开 wlan0 当前 STA 连接）
+$HOME/AKA-00/init_ap_web.sh             # = install + 立即启动 AP
+$HOME/AKA-00/init_ap_web.sh install     # 只装配置和开机脚本，不动当前网络
+$HOME/AKA-00/init_ap_web.sh start       # 只立即启动 AP
+
+# 走锁：装过就跳过（开机由 rcS 调它；--init 走的是上面那条，不过锁）
+$HOME/AKA-00/S97akaap
 ```
 
 > 适配点（与 Python 版的差异）：本板（SG2002 / HD05085A）无 `udhcpd`，改用
@@ -232,6 +242,92 @@ $HOME/AKA-00/init_ap_web.sh            # = install + 立即启动
 > 误杀 capp 在 `wlan1` 上自举的 wpa_supplicant；capp 在 `S99webstart` 里用
 > `init.sh &` 后台启动而非 `exec`，避免 rcS 卡在 sysinit 导致 getty 不启动。
 > 如需给热点加密码，取消 `/etc/hostapd.conf` 里 `wpa=2` 那 4 行的注释。
+
+#### `S97akaap`：开机自举 + 幂等锁
+
+AP 的配置和 `S98apstart`/`S99webstart` **都是 `init_ap_web.sh` 生成的**。板子上从没
+跑过它时，这些文件一个都没有 → 开机没有任何脚本会去调用它 → 死锁。所以有个
+`S97akaap`，由**镜像构建拷到 `/etc/init.d/S97akaap`**：
+
+```sh
+# 镜像构建时（AKA-00 已用 --extract 展开在镜像里）
+cp $IMAGE/root/AKA-00/S97akaap $IMAGE/etc/init.d/S97akaap && chmod 755 $IMAGE/etc/init.d/S97akaap
+```
+
+它是**开机那条路的入口 + 锁的持有者**，逻辑就三步：**有锁 → 跳过；没锁 → 调安装
+脚本；装完产物齐全才上锁。**
+
+> **和 `aka-00-server --init` 是两条独立的路**：`--init` 仍直接调 `init_ap_web.sh`
+> （原版行为，没改）→ 装完**不上锁**，之后第一次开机 S97 会再装一遍才上锁。
+> 这是有意的取舍：`--init` 是操作者显式动作，不该被锁拦住；锁只管开机。
+> 走"镜像预烤"路线的话根本不跑 `--init`，不存在这次重复。
+
+锁是 **`/root/.aka-ap-provisioned`** —— 放在 **AKA-00 的上一级**，两个理由：
+
+- **OTA 换不到它**：`--update` 是 `swap_in` 整目录替换 `$AKA_HOME`（板上
+  `/root/AKA-00`）。锁若在 AKA-00 里面，每次升级都会被冲掉 → 升级后开机重装 AP、
+  手改的 `hostapd.conf` 被覆盖。
+- **删起来顺手**：登 root 进去 `ls -a` 就看见，`rm -f /root/.aka-ap-provisioned`。
+
+> 位置本身**不构成**安全依据（`/root` 跟 `/etc` 里的产物不在一个生命周期上）。
+> 兜底的是产物检查 —— 见下面那条。
+
+下面任一情况都会让锁失效并重装：
+
+- **参数指纹变了** —— `AP_IFACE` / `AP_IP` / `NETMASK` / `DHCP_START` / `DHCP_END` /
+  `CHANNEL` / `AKA_HOME`（参数在 `S97akaap` 里定义，由它显式传给安装脚本）
+- **产物缺了或空了** —— `hostapd.conf`、`dnsmasq.ap.conf`、`S98apstart`、`S99webstart`
+  少一个、或者哪个是 **0 字节**（`-s` 而不是 `-f`/`-x`：空文件能骗过后者，然后
+  hostapd 拿着空配置起不来，板子静默没 AP）
+
+**"有锁"严格蕴含"配置可用"**：锁是在调完安装脚本、确认产物齐全非空之后才写的 ——
+判据是产物本身，不是安装脚本的退出码（它没有 `set -e`，失败也多半返回 0）。所以
+半途断电/装失败留下的残局，下次开机会自动重来。
+
+```sh
+rm -f /root/.aka-ap-provisioned && $HOME/AKA-00/S97akaap   # 删锁重装
+$HOME/AKA-00/init_ap_web.sh                              # 绕过锁，无条件重装
+```
+
+排序 `S97 < S98apstart < S99webstart`：
+
+- **第一次开机**：S97 装好配置并当场拉起 AP（安装脚本第 6 节）；但当次 rcS 的 `S??*`
+  列表已展开，新生成的 S98/S99 多半赶不上 —— 从第二次开机起它们接管。
+- **之后每次开机**：有锁，几毫秒 no-op。
+
+日志：`/tmp/aka-ap-init.log`（`tee`，所以串口/终端上也看得到）。
+
+> eth0 默认路由那件事（`/etc/network/interfaces` 里的静态 gateway 会压住 WiFi 的
+> 默认路由）**不归 S97 管** —— 那是 `init.sh` 的活，见下面「eth0 默认路由」。
+
+> **镜像里不要烤 `hostapd.conf` / `dnsmasq.ap.conf` / 锁。** SSID 是
+> `chenlong-robot-<MAC后6位>` —— 每块板子不同。构建机上生成一次烤进去，全批次板子
+> 就成了同一个 SSID，还会顶掉各自的配置。镜像只放展开好的 AKA-00 + `S97akaap`。
+>
+> 本脚本用**临时文件 + `mv`** 原子替换来写开机脚本（见 `install_boot_script`）：
+> `cat >` 会先把目标截成 0 字节，写到一半断电就留下一个**空的开机脚本**（可执行但
+> 什么都不干，开机静默没 AP）。
+
+#### 已知问题：eth0 的默认路由（**未修**）
+
+`/etc/network/interfaces` 给 eth0 配了静态 gateway（板上是 `192.168.1.1`），开机
+`ifup` 就装一条 `default via 192.168.1.1 dev eth0`，**压住 wlan1（WiFi）那条默认
+路由**（内核按 metric 选，先加的先赢）→ 板子出不去网，得手敲
+`ip route del default via 192.168.1.1 dev eth0` 才行。
+
+**当前代码没解决这个**（S97 不管，`init.sh` 里那段也不管用）。两条路都有问题：
+
+1. **`init.sh:80` 用的是 `ip route show default dev eth0`，在 HD05085A 上不起过滤作用。**
+   2026-09-22 实测：那个 `default` 关键字**被忽略**，它把 eth0 上所有路由都吐出来，
+   于是循环连 `192.168.1.0/24 dev eth0 scope link` 这种**子网路由**一起删了 —— eth0
+   当场不通（现象：`192.168.1.123` ping 不通）。
+2. **而且它只在 `init.sh` 启动那一刻跑一次，还要求那时 `wlan1` 已经有 IP。** 典型用法是
+   **开机之后在界面上连 WiFi**（`wlan1` 由 capp 自举，连上是后来的事）—— 那一刻条件
+   不成立，之后再没人删。
+
+**根治的位置是镜像**：构建时直接把 `/etc/network/interfaces` 里 eth0 的 `gateway`
+注释掉（那本来就是固件的网络配置，不该由运行时脚本去改），坏路由从源头就不产生。
+在改之前，这条得手敲。
 
 停止：`$AKA_HOME/stop.sh`（SIGTERM 优雅退出并停电机）。
 
