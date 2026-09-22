@@ -113,6 +113,22 @@ if artifacts_ok; then
         echo "# ssid=$(sed -n 's/^ssid=//p' /etc/hostapd.conf 2>/dev/null | head -1) installed=$(date '+%Y-%m-%d %H:%M:%S')"
     } > "$LOCK_FILE"
     echo "[S97] AP 配置完成，已上锁" | tee -a "$LOG"
+
+    # ── 补齐当次启动：我们刚生成的 S98/S99 赶不上**这一次** rcS ──────────────
+    #
+    # rcS 是 `for i in /etc/init.d/S??*` —— **glob 在循环开始时就展开完了**，所以
+    # 安装脚本刚写出来的 S98apstart / S99webstart 这一轮不会被跑到。不补这一下，
+    # 第一次开机就只有热点：没有 wlan1（S99 负责 `iw phy phy0 interface add wlan1`）、
+    # 也没有 capp（S99 负责拉起 init.sh）—— 用户连上热点打不开页面，得再重启一次。
+    # （实测过：只有 S97 的日志 + hostapd/dnsmasq 在跑，ps 里没有 aka-capp、ip a 里没有 wlan1。）
+    #
+    # 直接跑一遍 S99webstart：它干的就是"建 wlan1 + 拉起 capp"，而且它开头那段
+    # "重新夺回 wlan0 的 AP"对我们刚起好的 hostapd/dnsmasq 是空转。
+    # 只在**这一次装了**的时候跑 —— 之后每次开机 rcS 自己会按正常顺序跑到 S99。
+    if [ -x /etc/init.d/S99webstart ]; then
+        echo "[S97] 补跑一次 S99webstart（建 wlan1 + 拉起 capp，本次 rcS 赶不上它）" | tee -a "$LOG"
+        /etc/init.d/S99webstart >> "$LOG" 2>&1
+    fi
 else
     echo "[S97] !!! 安装后产物仍不全（缺文件或 0 字节）—— 不上锁，下次开机会重试" | tee -a "$LOG"
 fi

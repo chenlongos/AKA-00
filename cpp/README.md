@@ -306,9 +306,18 @@ $HOME/AKA-00/init_ap_web.sh                              # 绕过锁，无条件
 
 排序 `S97 < S98apstart < S99webstart`：
 
-- **第一次开机**：S97 装好配置并当场拉起 AP（安装脚本第 6 节）；但当次 rcS 的 `S??*`
-  列表已展开，新生成的 S98/S99 多半赶不上 —— 从第二次开机起它们接管。
-- **之后每次开机**：有锁，几毫秒 no-op。
+- **第一次开机**（没锁 → 真装）：S97 装好配置、当场拉起 AP（安装脚本第 6 节），
+  然后**补跑一次 `/etc/init.d/S99webstart`**。
+- **之后每次开机**：有锁，几毫秒 no-op；S98/S99 由 rcS 按正常顺序跑到。
+
+> 为什么要补跑那一下：rcS 是 `for i in /etc/init.d/S??*`，**glob 在循环开始时就展开
+> 完了** —— S97 刚写出来的 S98apstart / S99webstart 这一轮不会被跑到。不补的话第一次
+> 开机就只有热点：**没有 `wlan1`**（S99 负责 `iw phy phy0 interface add wlan1`）、
+> **也没有 capp**（S99 负责拉起 `init.sh`），用户连上热点打不开页面，得再重启一次。
+>
+> 现象（实测）：`/tmp/aka-ap-init.log` 里有 `[S97] AP 配置完成，已上锁`、
+> `hostapd`/`dnsmasq` 在跑、`wlan0` 是 `192.168.4.1`，但 `ps` 里**没有 `aka-capp`**、
+> `ip a` 里**没有 `wlan1`**。现场救急就是在串口敲一次 `/etc/init.d/S99webstart`。
 
 日志：`/tmp/aka-ap-init.log`（`tee`，所以串口/终端上也看得到）。
 
