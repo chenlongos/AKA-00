@@ -47,6 +47,17 @@ bool ensure_dir(const std::string& path);
 /// 读文件内容（trim 后），失败返回空串
 std::string read_sys_file(const std::string& path);
 
+/// 原子写文件：写 <path>.part → fsync → rename 换入；任一环节失败都删掉 .part 并返回 false。
+///
+/// - `mode` 与 umask 无关（内部 fchmod），放密码的文件传 0600。
+/// - 父目录必须**已经存在**（要建目录先 ensure_dir）。
+/// - **先 fsync 再 rename 是必须的**：ext4/ubifs 延迟分配下，断电可能留下一个 0 字节的
+///   最终文件。这个仓库被它坑过 —— 一次 OTA 换包中途断电把 config.toml 写成 0 字节，
+///   所有配置静默取默认值，整台车按 mock 跑、界面上还看不出问题
+///   （见 csrc/config.cpp 里对 0 字节 config.toml 的处理）。
+/// - 非原子写（直接 ofstream 截断）的另一半风险：读者可能读到写了一半的内容。
+bool write_file_atomic(const std::string& path, const std::string& content, int mode = 0644);
+
 /// 执行命令并返回 stdout（popen），失败返回空串
 std::string exec_output(const std::string& cmd);
 

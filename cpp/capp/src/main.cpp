@@ -85,6 +85,15 @@ int main() {
         return 1;
     }
 
+    // 上次连过的 WiFi 自动重连（后台线程）。
+    //
+    // 两个约束，改这段前先看一眼：
+    //   1. **必须在 listen() 之后**。ensure_wpa_env 最坏等 5s、整个重放可能几十秒，
+    //      挡在端口绑定前面的话，手机连上热点会打不开页面 —— 那是本功能最容易踩的回归。
+    //   2. 线程 detach 且**不捕获 ctx**（只读 /etc/aka-wifi.json + 跑 wpa_cli），
+    //      所以下面那段退出清理不需要 join 它。往线程里加 ctx 引用会引入悬垂。
+    capp::start_wifi_autoconnect();
+
     // HTTPS：相对路径以 $AKA_HOME 为基准
     auto resolve_path = [&](const std::string& p) -> std::string {
         return (!p.empty() && p[0] == '/') ? p : ctx.app_dir + "/" + p;

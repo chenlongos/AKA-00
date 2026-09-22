@@ -282,4 +282,47 @@ void start_status_reporter(AppContext& ctx);
 /// 立即上报一次（boot/heartbeat）
 void report_status(AppContext& ctx, const std::string& action);
 
+// ── WiFi STA 服务（wlan1 连目标路由器；实现在 services/wifi_service.cpp）──
+//
+// 除了 app/routes/wifi.py 那套 wpa_supplicant 自举，这里多做一件事：
+// **把最后一次成功连接的 WiFi 记下来**，capp 下次启动时后台重放，用户不用每次开机
+// 都在界面里重连。凭据落 /etc/aka-wifi.json（0600），只留最后一个。
+//
+// 为什么放 /etc 而不是 $AKA_HOME：OTA 的 --update 是整目录换包，$AKA_HOME 里不进
+// KEEP_FILES 的东西会丢（KEEP_FILES 的 `-s` 判空还会静默扔掉 0 字节文件）；
+// /etc 不在 swap_in 的范围内，升级天然保留，也和 AP 侧的 /etc/hostapd.conf 同处一地。
+
+/// 凭据文件路径（默认 /etc/aka-wifi.json）。AKA_WIFI_CONF 可覆盖，供本机调试 ——
+/// 免得在开发机上往真 /etc 写一个真的 wifi 密码文件。
+std::string wifi_cred_path();
+
+/// 存最后一次成功连接的 WiFi（ssid 为空 → 返回 false 且不写）
+bool wifi_save_credential(const std::string& ssid, const std::string& password);
+
+/// 读回凭据。文件不存在 / 0 字节 / 非法 JSON / 不是对象 / ssid 为空 → false（当"没存过"）
+bool wifi_load_credential(std::string& ssid, std::string& password);
+
+/// 确保 wlan1 的控制接口就绪（必要时拉起网卡并后台启动 wpa_supplicant）。
+/// 注意：它**只看 socket 文件在不在** —— 返回 true 不代表 wpa_supplicant 真的活着
+/// （进程崩了 socket 可能残留），静默路径上要自己用 `wpa_cli ping` 探活。
+bool ensure_wpa_env();
+
+/// 把一份凭据下发给 wpa_supplicant 并选中：
+///   remove_network all → add_network → set_network <id> ssid <hex>
+///   → psk "<pw>" | key_mgmt NONE → select_network <id>
+/// **整段在互斥锁里**：调用方里有并发（http 是 thread-per-connection，用户点"连接"
+/// 和启动重放会同时发命令），交叉执行的后果是网络表被搅成"ssid 是 A、psk 是 B"。
+/// 返回 true 只代表**命令下发成功**，不代表连上了 —— 等待与判定由调用方自己做。
+bool wifi_apply_network(const std::string& ssid, const std::string& password);
+
+/// wlan1 的 wpa_state（"COMPLETED" / "SCANNING" / …），拿不到返回空串
+std::string wifi_wpa_state();
+/// wlan1 当前关联的 SSID，未关联返回空串
+std::string wifi_current_ssid();
+
+/// 启动后台"重放上次连接"线程（detach）。
+/// 线程**不捕获 AppContext**（只读凭据文件 + 跑 wpa_cli），所以 main 的退出清理段
+/// 不需要 join 它 —— 往这个线程里加 ctx 引用会引入悬垂，别加。
+void start_wifi_autoconnect();
+
 }  // namespace capp

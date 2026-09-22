@@ -220,6 +220,21 @@ AKA_HOME=$HOME/AKA-00 $HOME/AKA-00/init.sh
 手机/控制器连上热点后浏览器访问 `http://192.168.4.1` 即可控制；`wlan1` 作为
 STA，由 capp 的 `/api/wifi/scan`、`/api/wifi/connect` 扫描并连接目标路由器。
 
+**连过的 WiFi 会被记住**：连接成功时把 `{ssid, password}` 写进 **`/etc/aka-wifi.json`**
+（`0600`，原子写），capp 每次启动在**后台线程**里重放一次 —— 用户不用每次开机都重连。
+只保留**最后一个**（换网就覆盖）。实现见 `cpp/capp/src/services/wifi_service.cpp`。
+
+> `/etc/aka-wifi.json` 是**第一个由 capp 自己生成、不在部署体系内**的持久文件，所以
+> 单独说明它为什么在那儿：
+>
+> - **不放 `$AKA_HOME`**：OTA 的 `--update` 是 `swap_in` 整目录换包，`$AKA_HOME` 里
+>   不进 `KEEP_FILES` 的东西一律丢（而且那份白名单用 `[ -s ]` 判空，**0 字节文件会被
+>   静默扔掉**）。放 `/etc` 就不在 `swap_in` 的范围内，升级天然保留。
+> - **不放 `/root`**（虽然那把 AP 的锁在那儿）：两边性质不同 —— 锁是"装过没装过"的
+>   标记，这个是用户数据，跟 AP 配置（`/etc/hostapd.conf`、`/etc/dnsmasq.ap.conf`）
+>   同处一地更自然。
+> - 想"忘记网络"：`rm /etc/aka-wifi.json` 即可（下个版本可能加个接口，现在就这样）。
+
 职责是分开的，别混：
 
 | 文件 | 职责 |

@@ -2,12 +2,14 @@
 
 #include "csrc/system_utils.hpp"
 
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <sstream>
 #include <vector>
 
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
@@ -27,6 +29,51 @@ std::string read_sys_file(const std::string& path) {
     if (b == std::string::npos) return "";
     size_t e = s.find_last_not_of(" \t\r\n");
     return s.substr(b, e - b + 1);
+}
+
+bool write_file_atomic(const std::string& path, const std::string& content, int mode) {
+    const std::string tmp = path + ".part";
+    int fd = open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, mode);
+    if (fd < 0) return false;
+    // umask 会削掉 mode 里的位，显式 fchmod 才能保证最终权限就是调用方要的那个
+    // （放密码的文件要 0600，光靠 open 的 mode 参数在 umask=022 下会变成 0600&~022=0600，
+    //  但 umask=077 之类又会削别的位 —— 不依赖 umask，写死）。
+    if (fchmod(fd, mode) != 0) {
+        close(fd);
+        unlink(tmp.c_str());
+        return false;
+    }
+    size_t off = 0;
+    while (off < content.size()) {
+        ssize_t n = write(fd, content.data() + off, content.size() - off);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            close(fd);
+            unlink(tmp.c_str());
+            return false;
+        }
+        if (n == 0) {   // 理论上不会发生；真发生了就是写不动了，别死循环
+            close(fd);
+            unlink(tmp.c_str());
+            return false;
+        }
+        off += (size_t)n;
+    }
+    // 顺序不能换：先 fsync 落盘、再 rename 换入。反过来在断电时可能留下 0 字节的最终文件。
+    if (fsync(fd) != 0) {
+        close(fd);
+        unlink(tmp.c_str());
+        return false;
+    }
+    if (close(fd) != 0) {
+        unlink(tmp.c_str());
+        return false;
+    }
+    if (rename(tmp.c_str(), path.c_str()) != 0) {
+        unlink(tmp.c_str());
+        return false;
+    }
+    return true;
 }
 
 std::string exec_output(const std::string& cmd) {

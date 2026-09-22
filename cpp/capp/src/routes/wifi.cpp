@@ -8,6 +8,7 @@
 #include "routes_internal.hpp"
 
 #include "csrc/base64.hpp"
+#include "csrc/log.hpp"
 #include "csrc/system_utils.hpp"
 #include <algorithm>
 #include <cstdio>
@@ -19,29 +20,10 @@
 namespace capp {
 namespace routes {
 
-// wpa_supplicant 自举（移植自 app/routes/wifi.py 的 ensure_wpa_env）
-// 若 wlan1 的控制接口未就绪，则拉起网卡并后台启动 wpa_supplicant。
-// 与 Python 版的区别：不执行 killall，避免误杀 wlan0 上服务当前连接的 wpa_supplicant。
-bool ensure_wpa_env() {
-    const std::string ctrl  = "/var/run/wpa_supplicant";
-    const std::string iface = "wlan1";
-    const std::string sock  = ctrl + "/" + iface;
-
-    struct stat st{};
-    if (stat(sock.c_str(), &st) == 0) return true;        // 已就绪
-    if (stat(ctrl.c_str(), &st) != 0) mkdir(ctrl.c_str(), 0700);
-
-    csrc::exec_output("ip link set " + iface + " down 2>/dev/null");
-    csrc::exec_output("ip link set " + iface + " up 2>/dev/null");
-    usleep(500000);
-    csrc::exec_output("wpa_supplicant -D nl80211 -i " + iface + " -C " + ctrl +
-                      " -B >/dev/null 2>&1");
-    for (int i = 0; i < 10; i++) {                        // 最多等 5s
-        if (stat(sock.c_str(), &st) == 0) return true;
-        usleep(500000);
-    }
-    return false;
-}
+// wpa_supplicant 自举（ensure_wpa_env）和"把凭据下发给 wpa_supplicant"（wifi_apply_network）
+// 都挪到 services/wifi_service.cpp 了 —— 它们现在还要服务"启动时自动重连"那条路，
+// 不该只住在 HTTP 这一层。声明在 capp/context.hpp。
+// 这一域剩下的职责：解析请求、调服务、把结果翻译成 HTTP 响应。
 
 // ── WiFi 扫描与连接 ──
 
@@ -165,38 +147,24 @@ void register_wifi_routes(Router& router, AppContext& ctx) {
             resp.set_error("ssid 不能为空", 400);
             return;
         }
-        ensure_wpa_env();  // 确保 wlan1 的 wpa_supplicant 已就绪
-        // SSID 转 hex（与 Python do_connect 一致，wpa_supplicant 无引号 hex 当字节）
-        std::string ssid_hex;
-        {
-            char buf[4];
-            for (unsigned char c : ssid) {
-                snprintf(buf, sizeof buf, "%02x", c);
-                ssid_hex += buf;
+        // 密码会被存下来、之后每次开机以 root 重放一次，所以先挡掉会让下面那几条
+        // 命令解析出错的字符：双引号会破坏 wpa_supplicant 的 psk 语法，控制字符更不必说。
+        // 在这里挡掉，比"存下来之后每次开机静默失败"好排查得多。
+        for (unsigned char c : password) {
+            if (c == '"' || c < 0x20) {
+                resp.set_error("密码不能包含英文双引号或控制字符", 400);
+                return;
             }
         }
-        csrc::exec_output("wpa_cli -p /var/run/wpa_supplicant -i wlan1 remove_network all >/dev/null 2>&1");
-        std::string add_out = csrc::exec_output(
-            "wpa_cli -p /var/run/wpa_supplicant -i wlan1 add_network 2>/dev/null");
-        std::string net_id = add_out;
-        {
-            size_t nl = net_id.find('\n');
-            if (nl != std::string::npos) net_id = net_id.substr(0, nl);
-            size_t b = net_id.find_first_not_of(" \t\r\n");
-            if (b != std::string::npos) net_id = net_id.substr(b);
+        ensure_wpa_env();  // 确保 wlan1 的 wpa_supplicant 已就绪
+        // 下发网络（remove_network all → add → set → select）。这段现在与"启动时
+        // 自动重连"共用，见 services/wifi_service.cpp。
+        if (!wifi_apply_network(ssid, password)) {
+            // 原来是拿不到 net_id 就兜底用 "0" 硬试，结果要等满 8s 才 408。
+            // 这里直接说清楚：wpa_supplicant 没在干活。
+            resp.set_error("wpa_supplicant 不可用", 500);
+            return;
         }
-        if (net_id.empty()) net_id = "0";
-        csrc::exec_output("wpa_cli -p /var/run/wpa_supplicant -i wlan1 set_network " + net_id +
-                          " ssid " + ssid_hex + " >/dev/null 2>&1");
-        if (!password.empty()) {
-            csrc::exec_output("wpa_cli -p /var/run/wpa_supplicant -i wlan1 set_network " + net_id +
-                              " psk \"" + password + "\" >/dev/null 2>&1");
-        } else {
-            csrc::exec_output("wpa_cli -p /var/run/wpa_supplicant -i wlan1 set_network " + net_id +
-                              " key_mgmt NONE >/dev/null 2>&1");
-        }
-        csrc::exec_output("wpa_cli -p /var/run/wpa_supplicant -i wlan1 select_network " + net_id +
-                          " >/dev/null 2>&1");
 
         bool ok = false;
         std::string msg = "连接超时";
@@ -243,6 +211,13 @@ void register_wifi_routes(Router& router, AppContext& ctx) {
             }
         }
         if (ok) {
+            // 存下来给下次开机自动重连用（只留最后一个，换网就覆盖）。
+            // 写盘失败**不影响本次连接结果** —— 连接已经成功了，凭据没存住只是
+            // "下次要手点一下"，不该把它变成一个失败响应。
+            if (!wifi_save_credential(ssid, password)) {
+                CAM_WARN("[wifi] 凭据写入 %s 失败（下次开机会需要手动重连）",
+                         wifi_cred_path().c_str());
+            }
             Json j;
             j["ip"] = msg;
             resp.set_json(j);
