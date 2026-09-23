@@ -31,6 +31,21 @@ public:
     void release_torque();    // #255PULK
     void restoring_torque();  // #255PULR
 
+    /// 读取当前位置（脉宽 500~2500）。手册 p.26 第 9 条：#000PRAD! → #000P1500!
+    /// 超时/回包不合法（如 "#000P!" 这类无位置回包）返回 false。
+    bool read_position(int servo_id, int& pulse);
+
+    /// 闭环闭合夹爪：一边驱动一边用 read_position 盯位置，位置不再变（≈ 已经夹住物体）
+    /// 就收手 —— 把目标改到"夹住处再往闭合方向 bias"，不再持续硬顶。
+    ///
+    /// 为什么：夹住东西 = 舵机永远到不了目标 = 持续堵转，而堵转电流 1.8~2A（手册
+    /// p.7/p.14），手册每章的注意事项都写着"合理运行转矩≈1/3 堵转扭矩"。硬顶下去
+    /// 要么触发防堵转释力（= 松劲），要么烧。收手之后靠位置误差维持夹持力，
+    /// 电流随 bias 走 —— bias 就是"夹多紧"那个旋钮。
+    ///
+    /// 返回夹住时的脉宽；没夹到东西（正常走到目标）返回 -1。
+    int grip_until_stall(int servo_id, double angle, int bias, int timeout_ms);
+
     /// 更新运行时角度配置（合并 grab_position / lift_position / gripper_*）
     void update_angles(const Json& angles);
 
@@ -45,6 +60,7 @@ public:
 
 private:
     void send_frame(int servo_id, double angle);
+    void send_pulse(int servo_id, int pulse, int time_ms);
     void send_cmd_str(int servo_id, const std::string& cmd);
     void load_angles();
 
