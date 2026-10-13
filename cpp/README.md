@@ -84,9 +84,9 @@ static/ (index.html + assets/)  --打包-->  板上 $AKA_HOME/static/
 
 ## 构建
 
-### 用 make 构建（orb / macOS 通用）
+### 用 make 构建（orb / macOS / Ubuntu 通用）
 
-顶层 `cpp/Makefile` 用 make 驱动整个构建。**在 orb 里直接 `make`**；在 macOS 上
+顶层 `cpp/Makefile` 用 make 驱动整个构建。**在 orb/Ubuntu 上直接 `make`**；在 macOS 上
 `make` 会自动经 `orb run` 转发交叉编译（产物落在共享目录）：
 
 ```sh
@@ -129,9 +129,24 @@ make clean                # 清理全部构建产物
 
 说明：
 
-- 交叉编译需要 riscv64-unknown-linux-musl 工具链（默认
-  `/home/junbo_dai/riscv64-linux-musl-x86_64`，orb 内）；工具链路径可用
-  `make -f Makefile.cross CXX=/path/to/riscv64-unknown-linux-musl-g++` 覆盖
+- 交叉编译需要 riscv64-unknown-linux-musl 工具链，**位置由用户自行指定**（不写死）：
+  入口变量是 `AKA_TOOLCHAIN_DIR`（工具链安装根目录，结尾带 `/`，其 `bin/` 下有
+  `riscv64-unknown-linux-musl-*`），顶层 make 会 export 给子 make 与 `scripts/build-*.sh`：
+
+  ```sh
+  # Ubuntu/Linux 上拷一份模板改成自己机器上的路径（推荐入口）
+  cp scripts/build.sh.example scripts/build.sh && sh scripts/build.sh
+  # 或直接传参
+  make AKA_TOOLCHAIN_DIR=/opt/riscv64-unknown-linux-musl/
+  # 工具链已在 PATH 里时可不设该变量（回退为裸命令名）；
+  # 也可以精细到单个工具：make CXX=/path/to/riscv64-unknown-linux-musl-g++ ...
+  ```
+
+  macOS/orb 上保留 `/home/junbo_dai/riscv64-linux-musl-x86_64/` 作为回退默认，
+  同样可用 `AKA_TOOLCHAIN_DIR=...` 覆盖。
+- TPU 推理（cvitek SDK，不在仓库里）：`WITH_TPU=1`（默认）时必须指定
+  `TPU_SDK_DIR=/path/to/cvitek_tpu_sdk`，否则直接报错；没有 SDK 时用 `WITH_TPU=0`
+  编桩（不链 TPU，其余功能不受影响）
 - `capp` 目标带 FORCE：每次重跑交叉编译（内部增量，秒级），防止 `bin/aka-capp`
   被本机 host 构建误覆盖成非 RISC-V 二进制
 - 本机开发调试构建用 `cd capp && make`，输出 `bin/aka-capp-dev`（macOS/Linux 版），

@@ -9,6 +9,7 @@
 #   ./build-mbedtls.sh                            # 自动 git clone mbedtls 并交叉编译
 #   ./build-mbedtls.sh /path/to/mbedtls-src       # 用本地源码目录（已 git submodule init）
 #   TOOLCHAIN_PREFIX=/path/to/riscv64-unknown-linux-musl- ./build-mbedtls.sh
+#   AKA_TOOLCHAIN_DIR=/path/to/toolchain/ ./build-mbedtls.sh   # 取 <dir>bin/ 下的交叉前缀
 #
 # 产物: cpp/third_party/mbedtls/{libmbedtls.a, libmbedcrypto.a, libmbedx509.a}
 #
@@ -23,7 +24,14 @@ OUT="$HERE/../third_party/mbedtls"
 WORK="$HERE/../third_party/build-mbedtls"
 VERSION="3.6.7"
 
-TOOLCHAIN_PREFIX="${TOOLCHAIN_PREFIX:-/home/junbo_dai/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-}"
+# 工具链不写死路径：优先 TOOLCHAIN_PREFIX，其次 AKA_TOOLCHAIN_DIR/bin/，最后回退 PATH 里的裸前缀
+if [ -z "${TOOLCHAIN_PREFIX:-}" ]; then
+    if [ -n "${AKA_TOOLCHAIN_DIR:-}" ]; then
+        TOOLCHAIN_PREFIX="${AKA_TOOLCHAIN_DIR%/}/bin/riscv64-unknown-linux-musl-"
+    else
+        TOOLCHAIN_PREFIX="riscv64-unknown-linux-musl-"
+    fi
+fi
 CC="${TOOLCHAIN_PREFIX}gcc"
 AR="${TOOLCHAIN_PREFIX}ar"
 

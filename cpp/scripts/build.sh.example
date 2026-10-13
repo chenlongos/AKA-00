@@ -1,0 +1,48 @@
+#!/bin/sh
+# =============================================================================
+# build.sh.example —— Ubuntu/Linux 本机交叉编译示例（也适用于 macOS+orb）
+#
+# 本文件**不是**直接执行的构建脚本，而是模板：
+#   cp cpp/scripts/build.sh.example cpp/scripts/build.sh
+# 按自己机器上的实际路径改掉下面的变量，然后：
+#   sh cpp/scripts/build.sh              # 在仓库任意位置执行都行
+#   （或进 cpp/ 目录直接 make —— 工具链在 PATH 里时可不设任何变量）
+#
+# 顶层 make 会把 AKA_TOOLCHAIN_DIR / TPU_SDK_DIR / WITH_TPU export 给
+# csrc|capp 的 Makefile.cross 与 scripts/build-{libjpeg,mbedtls,lua}.sh，
+# 所以只需要在这一个地方指定工具链位置。
+# =============================================================================
+set -e
+
+CPP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+# ── 必填：riscv64 交叉工具链安装根目录（结尾带 /，其 bin/ 下有 riscv64-unknown-linux-musl-*）──
+# Ubuntu 上常见的两种来源：
+#   1) 官方 musl 预编译包解压目录，如:
+#        export AKA_TOOLCHAIN_DIR=/opt/riscv64-unknown-linux-musl/
+#   2) 工具链已加入 PATH —— 可以不设这个变量，直接 make
+export AKA_TOOLCHAIN_DIR=/opt/riscv64-unknown-linux-musl/
+
+# ── TPU 推理（cvitek SDK，不在仓库里）──
+# WITH_TPU=1（默认）时必须指向 SDK 目录，否则 Makefile.cross 直接报错；
+# 没有 SDK / 不需要 TPU 推理时改成 WITH_TPU=0（编桩，capp 照常编译）。
+export WITH_TPU=1
+export TPU_SDK_DIR=/opt/cvitek_tpu_sdk
+
+# ── 全流程构建：libjpeg → mbedtls → lua → csrc → capp → package → ota ──
+# 带屏版（产物: cpp/dist/AKA-00/ 与 cpp/dist/aka-00-server 自解压安装器）
+make -C "$CPP_DIR" ota AKA_TOOLCHAIN_DIR="$AKA_TOOLCHAIN_DIR" \
+    WITH_TPU="$WITH_TPU" TPU_SDK_DIR="$TPU_SDK_DIR"
+
+# 不带屏版（产物: cpp/dist-noscreen/；需要整条显示栈编译期裁掉时用这条）
+# make -C "$CPP_DIR" noscreen AKA_TOOLCHAIN_DIR="$AKA_TOOLCHAIN_DIR" \
+#     WITH_TPU="$WITH_TPU" TPU_SDK_DIR="$TPU_SDK_DIR"
+
+# ── 备用：不用顶层 make，直接给子 Makefile / 脚本传变量的等价写法 ──
+# cd "$CPP_DIR/scripts" && ./build-libjpeg.sh          # 脚本认 TOOLCHAIN_PREFIX
+# cd "$CPP_DIR/csrc" && make -f Makefile.cross \
+#     CXX="${AKA_TOOLCHAIN_DIR}bin/riscv64-unknown-linux-musl-g++" \
+#     AR="${AKA_TOOLCHAIN_DIR}bin/riscv64-unknown-linux-musl-ar" \
+#     WITH_TPU="$WITH_TPU" TPU_SDK_DIR="$TPU_SDK_DIR"
+
+echo "✓ 构建完成（见 $CPP_DIR/dist/）"

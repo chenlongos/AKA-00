@@ -2,10 +2,14 @@
 # capp — 交叉编译 Makefile（SG2002 / riscv64 musl 静态）
 #
 # 用法:
-#   make -f Makefile.cross                        # 带屏版本 → bin/aka-capp
+#   make -f Makefile.cross                        # 带屏版 → bin/aka-capp（工具链需在 PATH 里）
 #   make -f Makefile.cross WITH_SCREEN=0          # 不带屏 → bin/aka-capp-noscreen
+#   make -f Makefile.cross AKA_TOOLCHAIN_DIR=/path/to/toolchain/
 #   make -f Makefile.cross CXX=/path/to/riscv64-unknown-linux-musl-g++ \
 #                          JPEG_DIR=/path/to/libjpeg
+#
+# 工具链位置优先由 CXX 指定；未指定时取 AKA_TOOLCHAIN_DIR/bin/ 下的交叉工具链；
+# 两者都未设则回退为裸命令名（走 PATH）。顶层 cpp/Makefile 会统一传入。
 #
 # JPEG_DIR 指向 libjpeg 安装前缀（含 include/ 与 lib/）。
 # 默认 third_party/jpeg —— 先跑一次 ../scripts/build-libjpeg.sh 生成
@@ -29,7 +33,12 @@ endif
 # 注意：SDK 只有 libcviruntime.so 的话静态链接会失败，这里用的是 SDK 里的
 # -static.a 版本；真的静态链不过时的退路是改成 -lcviruntime + rpath 指向 libs/。
 WITH_TPU    ?= 1
-TPU_SDK_DIR ?= /home/junbo_dai/cvitek_tpu_sdk
+# 无默认路径：WITH_TPU=1 且未指定 TPU_SDK_DIR 时直接报错（顶层 make 会显式传下来）。
+ifeq ($(WITH_TPU),1)
+ifeq ($(strip $(TPU_SDK_DIR)),)
+$(error TPU_SDK_DIR 未指定（WITH_TPU=1 需要 cvitek TPU SDK）—— 传 TPU_SDK_DIR=/path/to/cvitek_tpu_sdk，或 WITH_TPU=0 关掉 TPU 推理)
+endif
+endif
 ifeq ($(WITH_TPU),1)
 TPU_LDFLAGS := -L$(TPU_SDK_DIR)/lib \
                -Wl,--start-group -lcviruntime-static -lcvikernel-static -lcvimath-static -lz \
@@ -38,8 +47,17 @@ else
 TPU_LDFLAGS :=
 endif
 
-# 注意用 := 覆盖环境变量（orb 登录 shell 常导出 CXX=g++ 之类，会污染交叉编译）
-CXX      := /home/junbo_dai/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-g++
+# 工具链：命令行 CXX > 环境变量 AKA_TOOLCHAIN_DIR/bin/ > PATH 里的裸命令名
+# （写死的默认路径已去掉，由用户自行指定。CXX/AR/CC 是 make 内置变量，
+#   origin 为 default（内置 host 值）或 environment（登录 shell 导出的 g++ 等）时
+#   一律重新赋值，免得 host 工具链污染交叉编译；命令行传值优先且不受影响）
+CROSS_DIR  := $(if $(strip $(AKA_TOOLCHAIN_DIR)),$(AKA_TOOLCHAIN_DIR)bin/,)
+CROSS_NAME := riscv64-unknown-linux-musl-
+ifeq ($(filter command line file,$(origin CXX)),)
+CXX := $(CROSS_DIR)$(CROSS_NAME)g++
+endif
+override CC := $(CROSS_DIR)$(CROSS_NAME)gcc
+override AR := $(CROSS_DIR)$(CROSS_NAME)ar
 CSRC     := ../csrc
 JPEG_DIR ?= ../third_party/jpeg
 MBEDTLS_DIR ?= ../third_party/mbedtls
@@ -73,7 +91,7 @@ $(OBJDIR)/%.o: src/%.cpp | $(OBJDIR)
 
 $(CSRC_LIB):
 	$(MAKE) -f Makefile.cross -C $(CSRC) WITH_SCREEN=$(WITH_SCREEN) WITH_TPU=$(WITH_TPU) \
-	    TPU_SDK_DIR=$(TPU_SDK_DIR)
+	    TPU_SDK_DIR=$(TPU_SDK_DIR) CXX=$(CXX) AR=$(AR)
 
 $(TARGET): $(OBJS) $(CSRC_LIB)
 	$(CXX) $(CXXFLAGS) -o $@ $(OBJS) $(CSRC_LIB) \

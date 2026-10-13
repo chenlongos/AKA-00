@@ -28,13 +28,40 @@
 #   make csrc-noscreen | capp-noscreen | package-noscreen   # 不带屏版各步骤
 #   make all                # 同 make（默认目标 = 带屏版）
 #   make clean
+#
+# ── 交叉工具链（Linux/Ubuntu 直接 make；参考 scripts/build.sh.example）──
+#   AKA_TOOLCHAIN_DIR：riscv64 工具链安装根目录（其 bin/ 下有 riscv64-unknown-linux-musl-*，
+#   注意结尾带 /）。命令行或环境变量传入（make AKA_TOOLCHAIN_DIR=/path 或 export 后 make），
+#   export 给子 make（Makefile.cross）与 scripts/*.sh。不设时回退为裸命令名（走 PATH）；
+#   macOS/orb 保留原默认路径作为可覆盖的回退值。
+#   TPU_SDK_DIR：WITH_TPU=1（默认）时必须指定，否则子 make 直接报错；WITH_TPU=0 不需要。
 # =============================================================================
 
 # ── 执行环境：orb 里本地跑，macOS 上经 orb run 转发 ──
 ORB_RUN := bash -lc
 ifeq ($(shell uname -s),Darwin)
 ORB_RUN := orb run -p bash -lc
+# 向后兼容：orb 内的既有默认路径，可用 AKA_TOOLCHAIN_DIR=... 覆盖
+AKA_TOOLCHAIN_DIR ?= /home/junbo_dai/riscv64-linux-musl-x86_64/
 endif
+
+# 工具链位置由用户指定（见上）；export 穿透到子 make 与 scripts/*.sh
+export AKA_TOOLCHAIN_DIR
+ifeq ($(strip $(AKA_TOOLCHAIN_DIR)),)
+# 未指定：回退为 PATH 里的裸命令名
+CROSS      := riscv64-unknown-linux-musl-
+else
+CROSS      := $(AKA_TOOLCHAIN_DIR)bin/riscv64-unknown-linux-musl-
+endif
+CROSS_CXX  := $(CROSS)g++
+CROSS_CC   := $(CROSS)gcc
+CROSS_AR   := $(CROSS)ar
+# TPU SDK 与 WITH_TPU 开关同样由用户指定、透传给子 make（默认与 Makefile.cross 一致：开）
+WITH_TPU    ?= 1
+export TPU_SDK_DIR
+export WITH_TPU
+# 子 make 公共参数：显式命令行传递（bash -lc 登录 shell 可能吞掉 export 的环境变量）
+XARGS = WITH_TPU=$(WITH_TPU) $(if $(strip $(TPU_SDK_DIR)),TPU_SDK_DIR=$(TPU_SDK_DIR),)
 
 # ── 产物路径（orb 与 macOS 共享文件系统，路径一致）──
 CPP      := $(CURDIR)
@@ -74,12 +101,12 @@ lua: $(LUA)
 csrc: $(CSRC_LIB)
 capp: $(CAPP_BIN)
 tools: $(CSRC_LIB)
-	$(ORB_RUN) "cd $(CPP)/csrc && make -f Makefile.cross WITH_SCREEN=1 tools"
+	$(ORB_RUN) "cd $(CPP)/csrc && make -f Makefile.cross WITH_SCREEN=1 CXX=$(CROSS_CXX) AR=$(CROSS_AR) $(XARGS) tools"
 
 csrc-noscreen: $(CSRC_LIB_NS)
 capp-noscreen: $(CAPP_BIN_NS)
 tools-noscreen: $(CSRC_LIB_NS)
-	$(ORB_RUN) "cd $(CPP)/csrc && make -f Makefile.cross WITH_SCREEN=0 tools"
+	$(ORB_RUN) "cd $(CPP)/csrc && make -f Makefile.cross WITH_SCREEN=0 CXX=$(CROSS_CXX) AR=$(CROSS_AR) $(XARGS) tools"
 
 # 独立板测 demo（tests/ 下的单文件 C 程序：摄像头 → 屏 闭环；与 capp 无关，
 # 现场排障用：DEMO_TEST=1 验颜色/方向、DEMO_BENCH=1 验写屏带宽、裸跑看 fps/耗时）。
@@ -90,11 +117,11 @@ DEMO_BINS := $(DEMO_DIR)/demo_camera $(DEMO_DIR)/demo_image
 demos: $(DEMO_BINS)
 
 $(DEMO_BINS): $(ROOT)/tests/demo_camera.c $(ROOT)/tests/demo_image.c $(JPEG)
-	$(ORB_RUN) "set -e; export PATH=/home/junbo_dai/riscv64-linux-musl-x86_64/bin:\$$PATH; \
+	$(ORB_RUN) "set -e; $(if $(strip $(AKA_TOOLCHAIN_DIR)),export PATH=$(AKA_TOOLCHAIN_DIR)bin:\$$PATH;,true); \
 	    mkdir -p $(DEMO_DIR); \
-	    riscv64-unknown-linux-musl-gcc -O2 -Wall -static -o $(DEMO_DIR)/demo_camera \
+	    $(CROSS_CC) -O2 -Wall -static -o $(DEMO_DIR)/demo_camera \
 	        $(ROOT)/tests/demo_camera.c -I$(CPP)/third_party/jpeg/include $(JPEG); \
-	    riscv64-unknown-linux-musl-gcc -O2 -Wall -static -o $(DEMO_DIR)/demo_image \
+	    $(CROSS_CC) -O2 -Wall -static -o $(DEMO_DIR)/demo_image \
 	        $(ROOT)/tests/demo_image.c -I$(CPP)/third_party/jpeg/include $(JPEG); \
 	    echo '  ✓ 板测 demo: demo_camera / demo_image'"
 
@@ -110,19 +137,19 @@ $(LUA):
 
 # FORCE 同 capp：csrc 源/头文件改动时保证重编（内部增量，秒级）
 $(CSRC_LIB): $(JPEG) FORCE
-	$(ORB_RUN) "cd $(CPP)/csrc && make -f Makefile.cross WITH_SCREEN=1"
+	$(ORB_RUN) "cd $(CPP)/csrc && make -f Makefile.cross WITH_SCREEN=1 CXX=$(CROSS_CXX) AR=$(CROSS_AR) $(XARGS)"
 
 $(CSRC_LIB_NS): $(JPEG) FORCE
-	$(ORB_RUN) "cd $(CPP)/csrc && make -f Makefile.cross WITH_SCREEN=0"
+	$(ORB_RUN) "cd $(CPP)/csrc && make -f Makefile.cross WITH_SCREEN=0 CXX=$(CROSS_CXX) AR=$(CROSS_AR) $(XARGS)"
 
 # FORCE: bin/aka-capp* 可能被本机 make（host 版）覆盖成非 RISC-V 二进制，
 # make 只看 mtime 会误判为最新。每次都跑交叉编译（内部增量，秒级），
 # 确保部署产物永远是 riscv64 静态版。
 $(CAPP_BIN): $(CSRC_LIB) $(MBEDTLS) $(LUA) FORCE
-	$(ORB_RUN) "cd $(CPP)/capp && make -f Makefile.cross WITH_SCREEN=1"
+	$(ORB_RUN) "cd $(CPP)/capp && make -f Makefile.cross WITH_SCREEN=1 CXX=$(CROSS_CXX) $(XARGS)"
 
 $(CAPP_BIN_NS): $(CSRC_LIB_NS) $(MBEDTLS) $(LUA) FORCE
-	$(ORB_RUN) "cd $(CPP)/capp && make -f Makefile.cross WITH_SCREEN=0"
+	$(ORB_RUN) "cd $(CPP)/capp && make -f Makefile.cross WITH_SCREEN=0 CXX=$(CROSS_CXX) $(XARGS)"
 
 # ── 打包 ──
 # 板上要什么是**实体文件**说了算：`cpp/board/` 就是 `$AKA_HOME/` 的镜像，

@@ -9,6 +9,7 @@
 #   ./build-libjpeg.sh                        # 自动下载 jpegsrc.v9f 并交叉编译
 #   ./build-libjpeg.sh /path/to/jpegsrc.tar.gz  # 用本地源码包
 #   TOOLCHAIN_PREFIX=/path/to/riscv64-unknown-linux-musl- ./build-libjpeg.sh
+#   AKA_TOOLCHAIN_DIR=/path/to/toolchain/ ./build-libjpeg.sh   # 取 <dir>bin/ 下的交叉前缀
 #
 # 产物: cpp/third_party/jpeg/{libjpeg.a, jpeglib.h, ...}
 # =============================================================================
@@ -18,7 +19,14 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="$HERE/../third_party/jpeg"
 WORK="$HERE/../third_party/build-jpeg"
 
-TOOLCHAIN_PREFIX="${TOOLCHAIN_PREFIX:-/home/junbo_dai/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-}"
+# 工具链不写死路径：优先 TOOLCHAIN_PREFIX，其次 AKA_TOOLCHAIN_DIR/bin/，最后回退 PATH 里的裸前缀
+if [ -z "${TOOLCHAIN_PREFIX:-}" ]; then
+    if [ -n "${AKA_TOOLCHAIN_DIR:-}" ]; then
+        TOOLCHAIN_PREFIX="${AKA_TOOLCHAIN_DIR%/}/bin/riscv64-unknown-linux-musl-"
+    else
+        TOOLCHAIN_PREFIX="riscv64-unknown-linux-musl-"
+    fi
+fi
 CC="${TOOLCHAIN_PREFIX}gcc"
 AR="${TOOLCHAIN_PREFIX}ar"
 

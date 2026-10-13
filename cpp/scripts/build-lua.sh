@@ -13,6 +13,7 @@
 #   ./build-lua.sh                       # 自动下载 lua-5.4.7 并交叉编译
 #   ./build-lua.sh /path/to/lua.tar.gz   # 用本地源码包
 #   TOOLCHAIN_PREFIX=/path/to/riscv64-unknown-linux-musl- ./build-lua.sh
+#   AKA_TOOLCHAIN_DIR=/path/to/toolchain/ ./build-lua.sh   # 取 <dir>bin/ 下的交叉前缀
 #   HOST=1 ./build-lua.sh                # 编本机版（开发机上跑 capp 调试用）
 #
 # 产物: cpp/third_party/lua/{lib/liblua.a, include/lua.h 等 4 个头}
@@ -24,7 +25,14 @@ OUT="$HERE/../third_party/lua"
 WORK="$HERE/../third_party/build-lua"
 VER="lua-5.4.7"
 
-TOOLCHAIN_PREFIX="${TOOLCHAIN_PREFIX:-/home/junbo_dai/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-}"
+# 工具链不写死路径：优先 TOOLCHAIN_PREFIX，其次 AKA_TOOLCHAIN_DIR/bin/，最后回退 PATH 里的裸前缀
+if [ -z "${TOOLCHAIN_PREFIX:-}" ]; then
+    if [ -n "${AKA_TOOLCHAIN_DIR:-}" ]; then
+        TOOLCHAIN_PREFIX="${AKA_TOOLCHAIN_DIR%/}/bin/riscv64-unknown-linux-musl-"
+    else
+        TOOLCHAIN_PREFIX="riscv64-unknown-linux-musl-"
+    fi
+fi
 CC="${TOOLCHAIN_PREFIX}gcc"
 AR="${TOOLCHAIN_PREFIX}ar"
 CFLAGS="-O2 -DLUA_USE_POSIX"

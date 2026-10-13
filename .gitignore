@@ -22,3 +22,5 @@ cpp/capp/bin/
 cpp/third_party/
 cpp/dist/
 cpp/dist-noscreen/
+# 用户构建脚本
+cpp/scripts/build.sh

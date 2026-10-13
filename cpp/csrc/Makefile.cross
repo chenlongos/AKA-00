@@ -2,8 +2,12 @@
 # csrc — 交叉编译 Makefile（SG2002 / riscv64 musl 静态库）
 #
 # 用法:
-#   make -f Makefile.cross                        # 用默认工具链
+#   make -f Makefile.cross                        # 工具链在 PATH 里（riscv64-unknown-linux-musl-*）
+#   make -f Makefile.cross AKA_TOOLCHAIN_DIR=/path/to/toolchain/
 #   make -f Makefile.cross CXX=/path/to/riscv64-unknown-linux-musl-g++
+#
+# 工具链位置优先由 CXX/AR 指定；未指定时取 AKA_TOOLCHAIN_DIR/bin/ 下的交叉工具链；
+# 两者都未设则回退为裸命令名（走 PATH）。顶层 cpp/Makefile 会统一传入。
 #
 # JPEG_DIR 指向 libjpeg 安装前缀（含 include/ 与 lib/，由 scripts/build-libjpeg.sh 生成）
 # =============================================================================
@@ -24,8 +28,13 @@ endif
 #   WITH_TPU=1（默认）→ 编入 YoloDetector（真实现），需要板子的 TPU SDK
 #   WITH_TPU=0         → 只留桩（与开发机一致）
 # SDK 不在仓库里（也不 vendor 头文件），靠这个变量指过去；换机器只改这一个路径。
+# 无默认路径：WITH_TPU=1 且未指定 TPU_SDK_DIR 时直接报错（顶层 make 会显式传下来）。
 WITH_TPU    ?= 1
-TPU_SDK_DIR ?= /home/junbo_dai/cvitek_tpu_sdk
+ifeq ($(WITH_TPU),1)
+ifeq ($(strip $(TPU_SDK_DIR)),)
+$(error TPU_SDK_DIR 未指定（WITH_TPU=1 需要 cvitek TPU SDK）—— 传 TPU_SDK_DIR=/path/to/cvitek_tpu_sdk，或 WITH_TPU=0 关掉 TPU 推理)
+endif
+endif
 ifeq ($(WITH_TPU),1)
 TPU_DEF := -DAKA_WITH_TPU=1
 TPU_INC := -I$(TPU_SDK_DIR)/include
@@ -34,9 +43,19 @@ TPU_DEF := -DAKA_WITH_TPU=0
 TPU_INC :=
 endif
 
-# 注意用 := 覆盖环境变量（orb 登录 shell 常导出 CXX=g++ 之类，会污染交叉编译）
-CXX      := /home/junbo_dai/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-g++
-AR       := /home/junbo_dai/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-ar
+# 工具链：命令行 CXX/AR > 环境变量 AKA_TOOLCHAIN_DIR/bin/ > PATH 里的裸命令名
+# （写死的默认路径已去掉，由用户自行指定。CXX/AR/CC 是 make 内置变量，
+#   origin 为 default（内置 host 值）或 environment（登录 shell 导出的 g++ 等）时
+#   一律重新赋值，免得 host 工具链污染交叉编译；命令行传值优先且不受影响）
+CROSS_DIR  := $(if $(strip $(AKA_TOOLCHAIN_DIR)),$(AKA_TOOLCHAIN_DIR)bin/,)
+CROSS_NAME := riscv64-unknown-linux-musl-
+ifeq ($(filter command line file,$(origin CXX)),)
+CXX := $(CROSS_DIR)$(CROSS_NAME)g++
+endif
+ifeq ($(filter command line file,$(origin AR)),)
+AR := $(CROSS_DIR)$(CROSS_NAME)ar
+endif
+override CC := $(CROSS_DIR)$(CROSS_NAME)gcc
 JPEG_DIR ?= ../third_party/jpeg
 # mbedtls：https_client.cpp（客户端 TLS）要头文件。库由 capp 链接（-lmbedtls ...），
 # 静态库里留未定义符号没问题 —— 这里只需要 include 路径。
