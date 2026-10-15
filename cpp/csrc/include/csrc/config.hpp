@@ -14,6 +14,10 @@
 namespace csrc {
 
 struct CameraConfig {
+    // 设备路径：/dev/video*（Linux V4L2）或 /dev/cvi-usb-camera0（Starry 私有 ioctl）。
+    // 运行时按前缀分流，一套二进制两内核通用；默认取 Linux 节点，
+    // Starry 板在 config.toml 的 [camera] port 覆盖为 /dev/cvi-usb-camera0。
+    std::string port = "/dev/video0";
     int width = 640;    // 摄像头采集宽度：须为原生可出流档（Hy-UXGA B5M2 实测 640x360；320x240 是假档勿用）
     int height = 360;
     int fps = 15;

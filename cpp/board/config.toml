@@ -3,6 +3,10 @@
 # 板上运行时实际读取的是 /root/AKA-00/config.toml。
 
 [camera]
+# 摄像头设备路径，运行时按前缀分流（一套二进制 Linux/Starry 通用）：
+#   /dev/cvi-usb-camera0 → Starry 私有 ioctl；/dev/video* → Linux V4L2。
+# 本板跑 Starry；纯 Linux 机器改成 "/dev/video0"（所配节点缺失时程序也会自动回退到另一个）。
+port = "/dev/cvi-usb-camera0"
 # 采集分辨率：必须用摄像头原生能出帧的档位。
 # 实测本摄像头（Hy-UXGA/B5M2）：320x240 会"假协商不出帧"（勿用！），640x360 可稳定出流。
 # 枚举到的全部档位：1920x1080 1280x960 1280x720 640x360（320x240 为假档）

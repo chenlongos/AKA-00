@@ -175,7 +175,9 @@ int cmd_bench() {
 
 int cmd_camera(int scale) {
     csrc::Camera& cam = csrc::Camera::get_instance();
-    if (!cam.open(640, 360, 15)) {
+    // 传 /dev/video0：Linux 直接用；Starry 板上无此节点时，open_device 会自动回退到
+    // /dev/cvi-usb-camera0（见 Camera::open_device 的容错探测）。
+    if (!cam.open("/dev/video0", 640, 360, 15)) {
         CAM_ERROR("camera open failed");
         return 1;
     }

@@ -25,8 +25,12 @@ public:
     Camera(const Camera&) = delete;
     Camera& operator=(const Camera&) = delete;
 
-    /// 打开摄像头并启动采集线程。重复调用幂等。
-    bool open(int width, int height, int fps);
+    /// 打开摄像头并启动采集线程。`device` 在运行时按路径前缀分流内核实现
+    /// （一套交叉编译二进制同时支持 Linux 与 Starry）：
+    ///   /dev/cvi-usb-camera* → Starry 私有 ioctl（INIT + GET_INFO + GET_FRAME）
+    ///   其他（/dev/video* 等）→ Linux V4L2（格式枚举/mmap/poll/固定曝光 完整保留）
+    /// 重复调用幂等。
+    bool open(const std::string& device, int width, int height, int fps);
     void close();
     bool is_available() const { return available_; }
 
@@ -94,7 +98,7 @@ public:
 
 private:
     void capture_loop();
-    bool open_device(int width, int height, int fps);
+    bool open_device(const std::string& device, int width, int height, int fps);
     void apply_fixed_exposure();   // fixed_exposure_ 为真时在开流前调用
 
     bool available_ = false;
@@ -110,9 +114,10 @@ private:
     RgbFrame rgb_cache_;
     int rgb_cache_max_w_ = -1;
 
-    // Linux V4L2 状态（非 Linux 编译时不定义）
+    // ── 设备实现分流（运行时按设备路径判断，见 open_device）──
+    bool cvi_mode_ = false;  // true = Starry CVI 私有 ioctl；false = Linux V4L2
     int fd_ = -1;
-    void* bufs_ = nullptr;   // CamBuf*
+    void* bufs_ = nullptr;   // CamBuf*（V4L2 mmap 双缓冲；CVI 模式下不使用）
     unsigned nbufs_ = 0;
     uint32_t fmt_ = 0;
     int cam_w_ = 0, cam_h_ = 0;   // 协商分辨率（capture_loop 上报用）

@@ -15,7 +15,8 @@ bool ensure_camera(AppContext& ctx) {
     if (ctx.camera_on) return true;
     // 固定曝光（可选，须在 open 前设置；对应 demo 的 DEMO_EXP_FIX=1）
     ctx.camera.set_fixed_exposure(ctx.config.camera.exp_fix);
-    bool ok = ctx.camera.open(ctx.config.camera.width, ctx.config.camera.height,
+    bool ok = ctx.camera.open(ctx.config.camera.port,
+                              ctx.config.camera.width, ctx.config.camera.height,
                               ctx.config.camera.fps);
     ctx.camera_on = ok;
     // 屏显示跟随摄像头（固定行为）：摄像头一开，屏就出图。

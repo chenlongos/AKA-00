@@ -147,6 +147,7 @@ Config Config::load() {
     }
 
     TomlReader toml(path);
+    cfg.camera.port = toml.get("camera", "port", cfg.camera.port);
     cfg.camera.width = toml.geti("camera", "width", cfg.camera.width);
     cfg.camera.height = toml.geti("camera", "height", cfg.camera.height);
     cfg.camera.fps = toml.geti("camera", "fps", cfg.camera.fps);
