@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
-    "build:noscreen": "tsc -b && WITH_SCREEN=0 vite build",
+    "build": "tsc -b && vite build && node scripts/sri-retry.mjs && node scripts/gzip-assets.mjs",
+    "build:noscreen": "tsc -b && WITH_SCREEN=0 vite build && node scripts/sri-retry.mjs && node scripts/gzip-assets.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },
