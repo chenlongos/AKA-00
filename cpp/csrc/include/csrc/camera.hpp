@@ -10,6 +10,7 @@
 #pragma once
 
 #include <cstdint>
+#include <atomic>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -99,12 +100,14 @@ public:
 private:
     void capture_loop();
     bool open_device(const std::string& device, int width, int height, int fps);
+    void close_device();
     void apply_fixed_exposure();   // fixed_exposure_ 为真时在开流前调用
 
-    bool available_ = false;
-    bool running_ = false;
+    std::atomic<bool> available_{false};
+    std::atomic<bool> running_{false};
     bool fixed_exposure_ = false;   // set_fixed_exposure() → open_device 时应用
     std::thread* thread_ = nullptr;
+    std::mutex lifecycle_mu_;
 
     mutable std::mutex mu_;
     Frame latest_;

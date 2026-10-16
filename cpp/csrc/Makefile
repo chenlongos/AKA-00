@@ -72,3 +72,13 @@ $(LIB): $(OBJS)
 
 clean:
 	rm -rf build build-noscreen
+
+# Test production camera lifecycle with simulated CVI and V4L2 device calls.
+.PHONY: test-camera
+test-camera: $(TESTDIR)/test_camera
+	@$(TESTDIR)/test_camera
+
+$(TESTDIR)/test_camera: tests/test_camera.cpp src/camera/camera.cpp src/camera/image_convert.cpp include/csrc/camera.hpp | $(TESTDIR)
+	$(CXX) -std=c++17 -O2 -Wall -Wextra -Werror -Iinclude -Isrc/camera $(JPEG_INC) \
+	    -o $@ $(filter %.cpp,$^) $(JPEG_DIR)/lib/libjpeg.a -pthread \
+	    -Wl,--wrap=open,--wrap=close,--wrap=access,--wrap=ioctl,--wrap=mmap,--wrap=munmap,--wrap=poll

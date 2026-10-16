@@ -293,6 +293,12 @@ void Camera::apply_fixed_exposure() {
 }
 
 void Camera::close() {
+    std::lock_guard<std::mutex> lifecycle(lifecycle_mu_);
+    close_device();
+}
+
+void Camera::close_device() {
+    available_ = false;
     if (thread_) {
         running_ = false;
         thread_->join();
@@ -316,15 +322,34 @@ void Camera::close() {
         bufs_ = nullptr;
         nbufs_ = 0;
     }
-    available_ = false;
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        latest_ = Frame{};
+    }
+    {
+        std::lock_guard<std::mutex> lk(rgb_mu_);
+        rgb_cache_ = RgbFrame{};
+        rgb_cache_max_w_ = -1;
+    }
 }
 
 bool Camera::open(const std::string& device, int width, int height, int fps) {
+    std::lock_guard<std::mutex> lifecycle(lifecycle_mu_);
     if (available_) return true;
-    if (!open_device(device, width, height, fps)) return false;
-    available_ = true;
+    if (!open_device(device, width, height, fps)) {
+        close_device();
+        return false;
+    }
     running_ = true;
-    thread_ = new std::thread([this] { capture_loop(); });
+    try {
+        thread_ = new std::thread([this] { capture_loop(); });
+    } catch (const std::exception& error) {
+        running_ = false;
+        CAM_ERROR("camera capture thread: %s", error.what());
+        close_device();
+        return false;
+    }
+    available_ = true;
     CAM_INFO("camera(%s) capture thread started (%dx%d)",
              cvi_mode_ ? "CVI" : "V4L2", cam_w_, cam_h_);
     return true;
