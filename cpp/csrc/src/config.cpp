@@ -3,6 +3,7 @@
 #include "csrc/config.hpp"
 
 #include <cstdlib>
+#include <cerrno>
 #include <fstream>
 #include <map>
 #include <sstream>
@@ -184,6 +185,18 @@ Config Config::load() {
     cfg.chassis.gear_ratio = toml.geti("chassis", "gear_ratio", cfg.chassis.gear_ratio);
 
     cfg.logging.level = toml.get("logging", "level", cfg.logging.level);
+
+    // Autorun is opt-in. Invalid values must not turn a typo into movement.
+    cfg.blockly.autorun_enabled = toml.get("blockly", "autorun_enabled") == "true";
+    cfg.blockly.autorun_program_id = toml.get("blockly", "autorun_program_id");
+    if (toml.has("blockly", "startup_timeout_ms")) {
+        const std::string value = toml.get("blockly", "startup_timeout_ms");
+        char* end = nullptr;
+        errno = 0;
+        const long timeout = std::strtol(value.c_str(), &end, 10);
+        cfg.blockly.startup_timeout_ms = !errno && end != value.c_str() && !*end &&
+            timeout >= 100 && timeout <= 600000 ? static_cast<int>(timeout) : 0;
+    }
 
     // 板载屏显示（[display]）
     {

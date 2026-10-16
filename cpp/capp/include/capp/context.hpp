@@ -14,6 +14,7 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <ctime>
 #include <map>
 #include <memory>
@@ -34,6 +35,8 @@
 #include "csrc/yolo_detector.hpp"
 
 namespace capp {
+
+class ProgramService;
 
 struct AppContext {
     csrc::Config config;
@@ -84,14 +87,22 @@ struct AppContext {
     /// 优雅关闭标记（SIGTERM/SIGINT → main 设置 → accept 循环退出）
     std::atomic<bool> shutdown{false};
 
+    // Lua 与 Blockly 在启动时互斥，人工控制仍可随时接管。
+    std::mutex autonomy_mu;
+    std::atomic<bool> program_running{false};
+    std::shared_ptr<ProgramService> program_service;
+
     // 控制服务
     std::mutex timer_mu;
     std::thread* timer_thread = nullptr;
     std::atomic<bool> timer_cancel{false};
     /// 控制指令代际号（timer_mu 保护）：每条新指令推进；同步等待方据此判断
     /// "自己发起的运动是否已被后续指令取代"（被取代则不再自动停车）
-    int motion_seq = 0;
-    std::mutex arm_mu;   // grab/release 串行
+    int64_t motion_seq = 0;
+    std::mutex arm_mu;   // 保护异步夹爪状态
+    std::condition_variable arm_done;
+    bool arm_busy = false;
+    std::string arm_error;
 
     // ota 任务: task_id → Json{progress, status, message}
     std::mutex ota_mu;
@@ -150,6 +161,8 @@ bool detect_boxes(AppContext& ctx, const std::string& model_name, const csrc::De
 
 /// 取消挂起的"定时停"线程
 void cancel_pending_stop(AppContext& ctx);
+/// 只取消仍属于指定指令的定时停，保留后续人工指令。
+bool cancel_pending_stop_if_owned(AppContext& ctx, int64_t expected_seq);
 /// 推进控制指令代际号（每条新指令都要推；同步等待方据此判断自己是否已被取代）
 int64_t bump_motion_seq(AppContext& ctx);
 /// 读当前代际号
@@ -229,6 +242,8 @@ csrc::Json save_model_upload(AppContext& ctx, const std::string& name, const std
 csrc::Json script_run(AppContext& ctx, const std::string& name, const csrc::Json& params);
 /// 停止当前脚本：置中止标志并立刻刹车（不等脚本配合）。
 csrc::Json script_stop(AppContext& ctx);
+/// 退出时回收工作线程，先于摄像头和底盘关闭。
+void join_script_worker(AppContext& ctx);
 /// 当前状态：state / script（动作名）/ mode / round / model / card / message /
 /// calls / action / notes
 csrc::Json script_status(AppContext& ctx);

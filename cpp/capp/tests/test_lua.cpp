@@ -1,4 +1,5 @@
 #include "capp/context.hpp"
+#include "capp/program_service.hpp"
 #include <cassert>
 #include <chrono>
 #include <cstdio>
@@ -37,6 +38,34 @@ int main() {
     run("assert(os==nil and io==nil and package==nil and require==nil); return 'sandbox-ok'",
         "done", "sandbox-ok");
     run("this is not valid Lua", "failed", "error:");
+    std::filesystem::create_directory(std::string(root) + "/blockly");
+    std::filesystem::copy_file("../board/blockly/robot-sdk.js", std::string(root) + "/blockly/robot-sdk.js");
+    setenv("AKA_BLOCKLY_RUNNER", std::filesystem::absolute("../blockly/bin/aka-blockly-runner-dev").c_str(), 1);
+    unsetenv("AKA_PROGRAM_DIR"); unsetenv("AKA_PROGRAM_VOLATILE");
+    ctx.program_service = std::make_shared<capp::ProgramService>(ctx);
+    csrc::Json bundle;
+    bundle["formatVersion"] = 1; bundle["sdkVersion"] = 1;
+    bundle["program"] = "await robot.wait(2);";
+    bundle["requiredCapabilities"] = csrc::Json(csrc::Json::Type::Array);
+    bundle["settings"]["moveSpeed"] = 20; bundle["settings"]["turnSpeed"] = 20;
+    bundle["settings"]["maxRuntimeMs"] = 3000;
+    int code = 0;
+    const auto saved = ctx.program_service->upload(bundle, code);
+    assert(code == 200);
+    std::ofstream(std::string(root) + "/demo/validation.lua") << "while not abort_requested() do end";
+    assert(capp::script_run(ctx, "validation", csrc::Json()).getb("ok"));
+    ctx.program_service->run(saved.gets("programId"), code);
+    assert(code == 409);
+    capp::join_script_worker(ctx);
+    ctx.program_service->run(saved.gets("programId"), code);
+    assert(code == 202);
+    assert(!capp::script_run(ctx, "validation", csrc::Json()).getb("ok"));
+    ctx.program_service->shutdown();
+    assert(!ctx.program_running);
+    assert(ctx.program_service->status().gets("state") == "stopped");
+    ctx.shutdown = true;
+    assert(!capp::script_run(ctx, "validation", csrc::Json()).getb("ok"));
+    ctx.program_service.reset();
     std::filesystem::remove_all(root);
-    std::puts("Lua: instruction hook, parameters, sandbox and errors: PASSED");
+    std::puts("Lua: instruction hook, parameters, sandbox, errors and Blockly exclusion/shutdown: PASSED");
 }

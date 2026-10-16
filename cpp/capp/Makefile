@@ -92,6 +92,7 @@ clean:
 TESTDIR := build-tests
 .PHONY: test-lua
 test-lua: $(TESTDIR)/test_lua
+	$(MAKE) -C ../blockly
 	@$(TESTDIR)/test_lua
 
 $(TESTDIR):
@@ -99,3 +100,32 @@ $(TESTDIR):
 
 $(TESTDIR)/test_lua: tests/test_lua.cpp $(filter-out $(OBJDIR)/main.o,$(OBJS)) $(CSRC_LIB) | $(TESTDIR)
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(MBEDTLS_LIB) $(MBEDTLS_LINK) $(LUA_LIB) $(LUA_LINK) -lm -pthread
+
+.PHONY: test-control
+test-control: $(TESTDIR)/test_control
+	@$(TESTDIR)/test_control
+
+CONTROL_TEST_SRCS := tests/test_control.cpp src/services/control_service.cpp src/services/waits.cpp \
+    $(CSRC)/src/state.cpp $(CSRC)/src/system_utils.cpp
+$(TESTDIR)/test_control: $(CONTROL_TEST_SRCS) $(wildcard include/capp/*.hpp) | $(TESTDIR)
+	$(CXX) -std=c++17 -O2 -Wall -Wextra -Werror -DAKA_WITH_SCREEN=0 -DAKA_WITH_TPU=0 \
+	    -ffunction-sections -fdata-sections -Iinclude -I$(CSRC)/include \
+	    -o $@ $(CONTROL_TEST_SRCS) -Wl,--gc-sections -pthread
+
+.PHONY: test-program
+test-program: $(TESTDIR)/test_program_service
+	$(MAKE) -C ../blockly
+	@$(TESTDIR)/test_program_service ../blockly/bin/aka-blockly-runner-dev ../board/blockly/robot-sdk.js
+
+$(TESTDIR)/program_control.o: src/services/control_service.cpp $(wildcard include/capp/*.hpp) | $(TESTDIR)
+	$(CXX) -std=c++17 -O2 -Wall -Wextra -Werror -DAKA_WITH_SCREEN=0 -DAKA_WITH_TPU=0 \
+	    -Dmotor_status_json=unused_hardware_motor_status_json -ffunction-sections -fdata-sections \
+	    -Iinclude -I$(CSRC)/include -c $< -o $@
+
+PROGRAM_TEST_SRCS := tests/test_program_service.cpp src/services/program_service.cpp src/routes/program.cpp \
+    src/services/waits.cpp src/http/message.cpp src/http/router.cpp $(CSRC)/src/state.cpp $(CSRC)/src/system_utils.cpp \
+    $(CSRC)/src/config.cpp
+$(TESTDIR)/test_program_service: $(PROGRAM_TEST_SRCS) $(TESTDIR)/program_control.o $(wildcard include/capp/*.hpp) | $(TESTDIR)
+	$(CXX) -std=c++17 -O2 -Wall -Wextra -Werror -DAKA_WITH_SCREEN=0 -DAKA_WITH_TPU=0 \
+	    -ffunction-sections -fdata-sections -Iinclude -I$(CSRC)/include -Isrc/routes \
+	    -o $@ $(PROGRAM_TEST_SRCS) $(TESTDIR)/program_control.o -Wl,--gc-sections -lmbedcrypto -pthread

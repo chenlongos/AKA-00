@@ -69,6 +69,7 @@ ROOT     := $(CPP)/..
 JPEG     := $(CPP)/third_party/jpeg/lib/libjpeg.a
 MBEDTLS  := $(CPP)/third_party/mbedtls/lib/libmbedtls.a
 LUA      := $(CPP)/third_party/lua/lib/liblua.a
+BLOCKLY_RUNNER := $(CPP)/blockly/bin/aka-blockly-runner
 
 # 带屏版
 CSRC_LIB     := $(CPP)/csrc/build-cross/libcsrc.a
@@ -82,7 +83,7 @@ CAPP_BIN_NS  := $(CPP)/capp/bin/aka-capp-noscreen
 DIST_NS      := $(CPP)/dist-noscreen/AKA-00
 OBJDIR_NS    := build-cross-noscreen
 
-.PHONY: all screen noscreen libjpeg mbedtls lua csrc capp tools package ota ota-noscreen \
+.PHONY: all screen noscreen libjpeg mbedtls lua blockly csrc capp tools package ota ota-noscreen \
         csrc-noscreen capp-noscreen tools-noscreen package-noscreen demos clean FORCE
 
 # 默认：只产出两样东西 —— dist/AKA-00/（部署目录）与 dist/aka-00-server（自解压安装器）
@@ -97,6 +98,10 @@ noscreen: package-noscreen ota-noscreen
 libjpeg: $(JPEG)
 mbedtls: $(MBEDTLS)
 lua: $(LUA)
+blockly: $(BLOCKLY_RUNNER)
+
+$(BLOCKLY_RUNNER): FORCE
+	+$(ORB_RUN) "cd $(CPP)/blockly && $(MAKE) CROSS=1 CXX=$(CROSS_CXX) CC=$(CROSS_CC) AR=$(CROSS_AR)"
 
 csrc: $(CSRC_LIB)
 capp: $(CAPP_BIN)
@@ -172,6 +177,8 @@ define PACKAGE_RECIPE
 	mkdir -p "$$(dirname "$$DIST")"; \
 	cp -r "$(CPP)/board" "$$DIST"; \
 	cp "$(2)" "$$DIST/$(5)"; \
+	cp "$(BLOCKLY_RUNNER)" "$$DIST/aka-blockly-runner"; \
+	cp "$(CPP)/third_party/quickjs/LICENSE" "$$DIST/blockly/QUICKJS-LICENSE"; \
 	chmod 755 "$$DIST/$(5)" "$$DIST"/*.sh; \
 	if [ -f "$(ROOT)/static/index.html" ]; then \
 	    cp -r "$(ROOT)/static" "$$DIST/static"; \
@@ -205,11 +212,11 @@ define PACKAGE_RECIPE
 endef
 
 # ── 打包：带屏版 → dist/AKA-00/（部署目录）──
-package: $(CAPP_BIN) tools demos
+package: $(CAPP_BIN) $(BLOCKLY_RUNNER) tools demos
 	$(call PACKAGE_RECIPE,1,$(CAPP_BIN),$(DIST),$(OBJDIR),aka-capp)
 
 # ── 打包：不带屏版 → dist-noscreen/AKA-00/ ──
-package-noscreen: $(CAPP_BIN_NS) tools-noscreen demos
+package-noscreen: $(CAPP_BIN_NS) $(BLOCKLY_RUNNER) tools-noscreen demos
 	$(call PACKAGE_RECIPE,0,$(CAPP_BIN_NS),$(DIST_NS),$(OBJDIR_NS),aka-capp)
 
 clean:

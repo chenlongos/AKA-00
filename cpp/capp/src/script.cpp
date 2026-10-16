@@ -684,7 +684,11 @@ void script_worker(AppContext& ctx, std::string name, csrc::Json params, bool re
 }  // namespace
 
 csrc::Json script_run(AppContext& ctx, const std::string& name, const csrc::Json& params) {
+    std::lock_guard<std::mutex> autonomy(ctx.autonomy_mu);
     csrc::Json j;
+    if (ctx.shutdown || ctx.program_running) {
+        j["ok"] = false; j["error"] = "Blockly 程序正在运行或服务正在退出"; return j;
+    }
     if (!valid_model_name(name)) {   // 同一个"名字会拼进路径"的校验（禁 / 与 ..）
         j["ok"] = false;
         j["error"] = "动作名非法（只允许字母数字与 _ - .）：" + name;
@@ -771,6 +775,18 @@ csrc::Json script_stop(AppContext& ctx) {
     j["ok"] = true;
     j["state"] = "aborted";
     return j;
+}
+
+void join_script_worker(AppContext& ctx) {
+    pthread_t tid{};
+    {
+        std::lock_guard<std::mutex> lock(ctx.script_mu);
+        ctx.script_abort = true;
+        if (!ctx.script_tid_valid) return;
+        tid = ctx.script_tid;
+        ctx.script_tid_valid = false;
+    }
+    pthread_join(tid, nullptr);
 }
 
 csrc::Json script_status(AppContext& ctx) {

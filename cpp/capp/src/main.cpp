@@ -11,6 +11,7 @@
 #include "capp/context.hpp"
 #include "capp/http_server.hpp"
 #include "capp/routes.hpp"
+#include "capp/program_service.hpp"
 #include "csrc/https_client.hpp"
 #include "csrc/log.hpp"
 #include "csrc/system_utils.hpp"
@@ -116,20 +117,17 @@ int main() {
 
     CAM_INFO("[app] static dir = %s", ctx.static_dir.c_str());
     CAM_INFO("[app] http://0.0.0.0:%d (ws: /ws/control)", ctx.config.web.port);
+    if (ctx.program_service) ctx.program_service->start_autorun();
     server.run();  // 阻塞直到 SIGTERM/SIGINT（on_signal → ctx.shutdown）
 
     // 退出清理
+    ctx.shutdown = true;
+    if (ctx.program_service) ctx.program_service->shutdown();
+    capp::join_script_worker(ctx);
+    capp::wait_arm_done(ctx);
     capp::close_display(ctx);   // 先停显示线程（它要用摄像头最新帧）
     capp::close_camera(ctx);
-    {
-        std::lock_guard<std::mutex> lk(ctx.timer_mu);
-        if (ctx.timer_thread) {
-            ctx.timer_cancel = true;
-            ctx.timer_thread->join();
-            delete ctx.timer_thread;
-            ctx.timer_thread = nullptr;
-        }
-    }
+    capp::cancel_pending_stop(ctx);
     ctx.collector.stop();
     ctx.motor_pair->close();
     CAM_INFO("[app] shutdown");

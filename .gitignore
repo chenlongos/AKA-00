@@ -14,6 +14,7 @@ cpp/csrc/build-cross/
 cpp/csrc/build-cross-noscreen/
 # 开发机单测产物（make -C cpp/csrc test-standby）
 cpp/csrc/build-tests/
+cpp/capp/build-tests/
 cpp/capp/build/
 cpp/capp/build-noscreen/
 cpp/capp/build-cross/
@@ -24,3 +25,7 @@ cpp/dist/
 cpp/dist-noscreen/
 # 用户构建脚本
 cpp/scripts/build.sh
+
+cpp/blockly/build/
+cpp/blockly/build-cross/
+cpp/blockly/bin/

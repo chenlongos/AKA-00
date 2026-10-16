@@ -9,6 +9,8 @@
 #include "csrc/log.hpp"
 #include <chrono>
 #include <cmath>
+#include <exception>
+#include <utility>
 #include <thread>
 #include <unistd.h>
 
@@ -18,25 +20,28 @@ namespace {
 
 // ── 定时停线程管理 ──
 
-void schedule_stop(AppContext& ctx, double duration_sec) {
-    std::lock_guard<std::mutex> lk(ctx.timer_mu);
-    if (ctx.timer_thread) {
-        ctx.timer_cancel = true;
-        ctx.timer_thread->join();
-        delete ctx.timer_thread;
-    }
+// 调用方持 timer_mu。线程结束后保留句柄，由下一条指令或退出清理统一 join。
+void cancel_timer_locked(AppContext& ctx) {
+    if (!ctx.timer_thread) return;
+    ctx.timer_cancel = true;
+    ctx.timer_thread->join();
+    delete ctx.timer_thread;
+    ctx.timer_thread = nullptr;
+}
+
+// 和发出运动指令在同一个 timer_mu 临界区内，避免旧请求稍后挂上定时停车。
+void schedule_stop_locked(AppContext& ctx, double duration_sec) {
     ctx.timer_cancel = false;
     ctx.timer_thread = new std::thread([&ctx, duration_sec] {
         auto until = std::chrono::steady_clock::now() +
                      std::chrono::milliseconds((int64_t)(duration_sec * 1000.0));
         while (std::chrono::steady_clock::now() < until) {
-            if (ctx.timer_cancel) return;
+            if (ctx.timer_cancel || ctx.shutdown) return;
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
-        if (!ctx.timer_cancel) {
+        if (!ctx.timer_cancel && !ctx.shutdown) {
             ctx.motor_pair->sleep();
-            std::lock_guard<std::mutex> lk2(ctx.timer_mu);
-            ctx.timer_thread = nullptr;
+            ctx.collector.set_target_speed(0, 0);
         }
     });
 }
@@ -70,11 +75,7 @@ bool wait_stationary(AppContext& ctx, double timeout_s, double stall_s, bool& ev
     }
 }
 
-// 这两个**调用时 arm_mu 已经在手里**（apply_arm_action 先 try_lock 再交给线程接手），
-// 所以它们自己不再加锁。
-
-// 这两个**调用时 arm_mu 已经在手里**（apply_arm_action 先 try_lock 再交给线程接手），
-// 所以它们自己不再加锁。
+// apply_arm_action 先保留执行名额，只有一个后台线程能进入这两段序列。
 void do_grab(AppContext& ctx) {
     ctx.gripper->close();
     ctx.collector.set_gripper_target(0);
@@ -91,12 +92,14 @@ void do_release(AppContext& ctx) {
 // 不能放进上面的匿名 namespace，否则声明与定义分属两个名字，重载解析会歧义。
 void cancel_pending_stop(AppContext& ctx) {
     std::lock_guard<std::mutex> lk(ctx.timer_mu);
-    if (ctx.timer_thread) {
-        ctx.timer_cancel = true;
-        ctx.timer_thread->join();
-        delete ctx.timer_thread;
-        ctx.timer_thread = nullptr;
-    }
+    cancel_timer_locked(ctx);
+}
+
+bool cancel_pending_stop_if_owned(AppContext& ctx, int64_t expected_seq) {
+    std::lock_guard<std::mutex> lk(ctx.timer_mu);
+    if (ctx.motion_seq != expected_seq) return false;
+    cancel_timer_locked(ctx);
+    return true;
 }
 
 int64_t motion_seq_now(AppContext& ctx) {
@@ -126,7 +129,11 @@ int wait_timed_done(AppContext& ctx, int64_t seq, double duration_sec) {
         if (motion_seq_now(ctx) != seq) return 1;
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
-    ctx.motor_pair->sleep();  // 到点滑行停车（与旧 schedule_stop 动作一致）
+    std::lock_guard<std::mutex> lk(ctx.timer_mu);
+    if (ctx.shutdown) return 2;
+    if (ctx.motion_seq != seq) return 1;
+    ctx.motor_pair->sleep();  // 到点检查归属并滑行停车，不能覆盖后来的 Demo/人工指令
+    ctx.collector.set_target_speed(0, 0);
     return 0;
 }
 
@@ -158,20 +165,42 @@ ArmResult apply_arm_action(AppContext& ctx, const std::string& action) {
     // **不排队**：夹爪那套序列要 ~3.5s（ZP10S：伸下去→夹→抬起）。以前每来一次请求就
     // spawn 一个后台线程去抢 arm_mu —— 连点多次 grab 就是"排了一串队挨个执行"，
     // 表现是"点了很多次，它就一直夹取"。正忙就跳过这一次，并把"忙"如实报给调用方。
-    if (!ctx.arm_mu.try_lock()) return ArmResult::Busy;
+    {
+        std::lock_guard<std::mutex> lock(ctx.arm_mu);
+        if (ctx.arm_busy) return ArmResult::Busy;
+        ctx.arm_busy = true;
+        ctx.arm_error.clear();
+    }
 
     const bool is_grab = (action == "grab");
-    if (is_grab) {
-        ctx.collector.set_gripper_target(1);
-        ctx.collector.set_gripper_status("closed");
-    }
     try {
+        if (is_grab) {
+            ctx.collector.set_gripper_target(1);
+            ctx.collector.set_gripper_status("closed");
+        }
         std::thread([&ctx, is_grab] {
-            std::lock_guard<std::mutex> lk(ctx.arm_mu, std::adopt_lock);   // 接手已持有的锁
-            if (is_grab) do_grab(ctx); else do_release(ctx);
+            std::string error;
+            try {
+                if (is_grab) do_grab(ctx); else do_release(ctx);
+            } catch (const std::exception& e) {
+                error = e.what();
+            } catch (...) {
+                error = "夹爪执行异常";
+            }
+            if (!error.empty()) CAM_ERROR("[arm] %s", error.c_str());
+            {
+                std::lock_guard<std::mutex> lock(ctx.arm_mu);
+                ctx.arm_error = std::move(error);
+                ctx.arm_busy = false;
+                ctx.arm_done.notify_all();
+            }
         }).detach();
     } catch (...) {
-        ctx.arm_mu.unlock();   // 线程没起成就把锁还回去
+        {
+            std::lock_guard<std::mutex> lock(ctx.arm_mu);
+            ctx.arm_busy = false;
+            ctx.arm_done.notify_all();
+        }
         return ArmResult::NotArm;
     }
     return ArmResult::Accepted;
@@ -179,23 +208,31 @@ ArmResult apply_arm_action(AppContext& ctx, const std::string& action) {
 
 csrc::Json execute_action(AppContext& ctx, const std::string& action, int speed,
                           double milliseconds, bool wait_done) {
-    cancel_pending_stop(ctx);
-    int64_t seq = bump_motion_seq(ctx);
     CAM_INFO("[control] action=%s speed=%d ms=%.0f wait=%d", action.c_str(), speed,
              milliseconds, (int)wait_done);
 
-    bool handled = apply_base_action(ctx, action, speed);
-    if (!handled) {
-        switch (apply_arm_action(ctx, action)) {
-            case ArmResult::Accepted: handled = true; break;
-            case ArmResult::Busy: {
-                csrc::Json err;
-                err["status"] = "error";
-                err["message"] = "夹爪正忙：上一段动作还没做完（这次没做，也没排队）";
-                return err;
+    const bool timed_move = milliseconds > 0 &&
+        (action == "up" || action == "down" || action == "left" || action == "right");
+    int64_t seq;
+    bool handled;
+    {
+        std::lock_guard<std::mutex> lock(ctx.timer_mu);
+        cancel_timer_locked(ctx);
+        seq = ++ctx.motion_seq;
+        handled = apply_base_action(ctx, action, speed);
+        if (!handled) {
+            switch (apply_arm_action(ctx, action)) {
+                case ArmResult::Accepted: handled = true; break;
+                case ArmResult::Busy: {
+                    csrc::Json err;
+                    err["status"] = "error";
+                    err["message"] = "夹爪正忙：上一段动作还没做完（这次没做，也没排队）";
+                    return err;
+                }
+                case ArmResult::NotArm: break;
             }
-            case ArmResult::NotArm: break;
         }
+        if (timed_move && !wait_done) schedule_stop_locked(ctx, milliseconds / 1000.0);
     }
     if (!handled) {
         csrc::Json err;
@@ -204,8 +241,6 @@ csrc::Json execute_action(AppContext& ctx, const std::string& action, int speed,
         return err;
     }
 
-    bool timed_move = milliseconds > 0 &&
-        (action == "up" || action == "down" || action == "left" || action == "right");
     if (timed_move && wait_done) {
         // 同步：阻塞到时长结束、自动停车后才返回确认 ACK
         int rc = wait_timed_done(ctx, seq, milliseconds / 1000.0);
@@ -220,7 +255,6 @@ csrc::Json execute_action(AppContext& ctx, const std::string& action, int speed,
     }
 
     if (timed_move) {
-        schedule_stop(ctx, milliseconds / 1000.0);
         csrc::Json ok;
         ok["status"] = "success";
         ok["message"] = action + " scheduled for " + std::to_string((long long)milliseconds) + "ms";
@@ -234,10 +268,15 @@ csrc::Json execute_action(AppContext& ctx, const std::string& action, int speed,
 }
 
 csrc::Json run_motor(AppContext& ctx, int left, int right, double duration, bool wait_done) {
-    cancel_pending_stop(ctx);
-    int64_t seq = bump_motion_seq(ctx);
-    ctx.motor_pair->set_speed(left, right);
-    ctx.collector.set_target_speed(left, right);
+    int64_t seq;
+    {
+        std::lock_guard<std::mutex> lock(ctx.timer_mu);
+        cancel_timer_locked(ctx);
+        seq = ++ctx.motion_seq;
+        ctx.motor_pair->set_speed(left, right);
+        ctx.collector.set_target_speed(left, right);
+        if (duration > 0 && !wait_done) schedule_stop_locked(ctx, duration);
+    }
     if (left == 0 && right == 0)
         CAM_INFO("[motor] stop cmd (L=R=0)");
     else
@@ -255,7 +294,6 @@ csrc::Json run_motor(AppContext& ctx, int left, int right, double duration, bool
         return ok;
     }
     if (duration > 0) {
-        schedule_stop(ctx, duration);
         csrc::Json ok;
         ok["status"] = "success";
         ok["left"] = csrc::Json((int64_t)left);
@@ -307,12 +345,17 @@ csrc::Json move_distance(AppContext& ctx, const std::string& direction, double v
         return err;
     }
 
-    bump_motion_seq(ctx);  // 取代任何进行中的定时运动
     auto* mp = ctx.motor_pair.get();
-    int base = mp->move_state();  // 发送前状态（可能是上次闭环残留的 done=2）
-    CAM_INFO("[control] move_distance dir=%s value=%.0f(%s) speed=%d target=%d base_state=%d",
-             direction.c_str(), value, unit.c_str(), sp, (int)target, base);
-    mp->move_distance((uint8_t)d, (uint8_t)sp, target);
+    int base;
+    {
+        std::lock_guard<std::mutex> lock(ctx.timer_mu);
+        cancel_timer_locked(ctx);
+        ++ctx.motion_seq;
+        base = mp->move_state();  // 发送前状态（可能是上次闭环残留的 done=2）
+        CAM_INFO("[control] move_distance dir=%s value=%.0f(%s) speed=%d target=%d base_state=%d",
+                 direction.c_str(), value, unit.c_str(), sp, (int)target, base);
+        mp->move_distance((uint8_t)d, (uint8_t)sp, target);
+    }
 
     // 同步：等 ESP32 闭环精确回报。ESP32 把"运行中/结果"随 10Hz STATUS 回包附带
     // （主机 get_speeds 顺带解析成 move_state），这里只读内存标志，零新增串口流量。

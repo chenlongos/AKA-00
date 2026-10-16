@@ -59,6 +59,11 @@ public:
         if (servo_id >= 0) zp10s_->set_angle(servo_id, angle);
     }
     void send_raw_cmd(const std::string& cmd) override { zp10s_->send_raw_cmd(cmd); }
+    bool ping() override {
+        if (!zp10s_->ok()) return false;
+        int pulse = 0;
+        return zp10s_->read_position(2, pulse);
+    }
 
 private:
     std::unique_ptr<ZP10S> zp10s_;
@@ -80,6 +85,10 @@ public:
         return GripperStatus::Moving;
     }
     void update_angles(const Json& angles) override { servo_->update_angles(angles); }
+    bool ping() override {
+        int position = 0;
+        return servo_->ok() && servo_->get_position(3, position);
+    }
     void preview_angle(const std::string& key, int angle) override {
         int servo_id = resolve_servo_id(key, /*gripper_servo=*/3);
         if (servo_id >= 0) servo_->move_to_position((uint8_t)servo_id, angle);

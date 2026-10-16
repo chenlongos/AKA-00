@@ -75,6 +75,12 @@ struct LoggingConfig {
     std::string level = "info";
 };
 
+struct BlocklyConfig {
+    bool autorun_enabled = false;
+    std::string autorun_program_id;
+    int startup_timeout_ms = 30000;
+};
+
 /// 板载 SPI 屏实时显示（/dev/fb0，ST7796S 320x480 RGB565）
 ///
 /// 板载屏显示（摄像头画面 → /dev/fb0）。默认值 = cpp/config.toml 里发出去的值；
@@ -98,6 +104,7 @@ struct Config {
     ChassisConfig chassis;
     LoggingConfig logging;
     DisplayConfig display;
+    BlocklyConfig blockly;
 
     // 云端 URL（app/config.py HardwareConfig 对齐）
     std::string status_report_url = "https://api.chenlongrobot.com/api/robot-actions";

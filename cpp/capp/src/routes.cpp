@@ -32,6 +32,7 @@ void register_routes(Router& router, AppContext& ctx) {
     routes::register_camera_routes(router, ctx);
     routes::register_models_routes(router, ctx);
     routes::register_demo_routes(router, ctx);
+    routes::register_program_routes(router, ctx);
     routes::register_display_routes(router, ctx);
     routes::register_ota_routes(router, ctx);
     routes::register_system_routes(router, ctx);

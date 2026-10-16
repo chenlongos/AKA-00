@@ -142,6 +142,14 @@ swap_in() {
                 cp -f "$_c" "$_new/demo/configs/$_b" && echo "[ota] 保留 demo 卡片: $_b"
             done
         fi
+        # Downloaded Blockly programs are user data; upgrading must preserve them.
+        if [ -d "$AKA_HOME/programs" ]; then
+            mkdir -p "$_new/programs"
+            for _p in current.json last-run.json; do
+                [ -f "$AKA_HOME/programs/$_p" ] || continue
+                cp -f "$AKA_HOME/programs/$_p" "$_new/programs/$_p"
+            done
+        fi
 
         # demo/models/ 是目录，上面那圈只认文件，得单独处理：不能整个照搬（包里自带的
         # 模型是要更新的），也不能整个丢（用户经 /api/models/upload 传上来的只存在

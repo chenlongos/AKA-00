@@ -27,6 +27,7 @@ void register_arm_routes(Router& router, AppContext& ctx);
 void register_camera_routes(Router& router, AppContext& ctx);
 void register_models_routes(Router& router, AppContext& ctx);
 void register_demo_routes(Router& router, AppContext& ctx);
+void register_program_routes(Router& router, AppContext& ctx);
 void register_display_routes(Router& router, AppContext& ctx);
 void register_ota_routes(Router& router, AppContext& ctx);
 void register_system_routes(Router& router, AppContext& ctx);

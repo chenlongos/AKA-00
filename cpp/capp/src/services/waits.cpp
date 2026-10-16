@@ -12,10 +12,8 @@
 namespace capp {
 
 void wait_arm_done(AppContext& ctx) {
-    // grab/release 是丢给后台线程跑的（ZP10S 那套"伸下去→夹→抬起"约 3.5s），
-    // 线程全程持 arm_mu —— 所以这里拿得到锁就说明上一段动作已经结束。
-    // 有界：那段序列是固定时长 + 串口自带超时，不会无限等。
-    std::lock_guard<std::mutex> lk(ctx.arm_mu);
+    std::unique_lock<std::mutex> lock(ctx.arm_mu);
+    ctx.arm_done.wait(lock, [&] { return !ctx.arm_busy; });
 }
 
 bool wait_script_done(AppContext& ctx, double timeout_s) {

@@ -37,6 +37,9 @@ public:
     virtual void preview_angle(const std::string& key, int angle) = 0;
     /// 发送原始命令到驱动串口（raw_command 路由用；默认 no-op）
     virtual void send_raw_cmd(const std::string&) {}
+    /// Read-only hardware round trip. Downloaded programs reject arm actions when
+    /// no real feedback is available; opening a UART alone does not prove a link.
+    virtual bool ping() { return false; }
 };
 
 /// 创建夹爪驱动。driver 只认 "zp10s" | "sts3215"；其它值不会退化成 mock（已删除），
