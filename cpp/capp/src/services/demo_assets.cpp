@@ -1,7 +1,8 @@
-// demo 资源：模型与动作脚本
+// demo 资源：模型库
 //
 // 由 capp/src/services.cpp 按域拆出来（对应 app/services/*.py 的分法）。
 // 路径、命名校验、模型落盘（原子换入）。
+// 动作不再来自 demo/*.lua —— 流程已迁进 C++（capp/script.cpp 的内置动作状态机）。
 // 声明都在 capp/context.hpp（那一份是按域分节的伞头文件，调用方只 include 它）。
 
 #include "capp/context.hpp"
@@ -60,14 +61,6 @@ std::string model_dir(AppContext& ctx) { return ctx.app_dir + "/demo/models"; }
 
 std::string model_path(AppContext& ctx, const std::string& name) {
     return model_dir(ctx) + "/" + name + ".cvimodel";
-}
-
-std::string action_script_path(AppContext& ctx, const std::string& name) {
-    return ctx.app_dir + "/demo/" + name + ".lua";
-}
-
-bool action_script_exists(AppContext& ctx, const std::string& name) {
-    return access(action_script_path(ctx, name).c_str(), F_OK) == 0;
 }
 
 csrc::Json save_model_upload(AppContext& ctx, const std::string& name, const std::string& content) {

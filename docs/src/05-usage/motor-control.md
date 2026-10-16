@@ -123,7 +123,7 @@ POST /api/config/speed  body: {"forward_speed":55,"turn_speed":40}
 > **后端不做任何运动决策时会用它**：它只是"界面默认值"的存储。
 > 现在的前端是 `BaseControlPage` 拿 `forward_speed`（并 clamp 到 ≤60）当摇杆的初始速度、
 > `SpeedConfigPage` 拿它当设置页的初值 —— **发指令时速度是显式带的**（WS/HTTP 参数），
-> 所以改了这里不会影响已经发出去的指令，也不会影响 demo 脚本（脚本的速度来自卡片参数）。
+> 所以改了这里不会影响已经发出去的指令，也不会影响 demo 动作（内置动作的速度来自卡片参数）。
 
 ---
 
@@ -166,12 +166,12 @@ POST /api/config/speed  body: {"forward_speed":55,"turn_speed":40}
 
 ---
 
-## 7. 谁优先：人的指令 > 脚本
+## 7. 谁优先：人的指令 > 内置动作
 
-- 任何运动指令（HTTP 或 WS）都会让**正在跑的 demo 脚本**被判
+- 任何运动指令（HTTP 或 WS）都会让**正在跑的 demo 动作**被判
   `superseded: 被新的运动指令取代（人接管）` 并**立刻中断**、交出控制权 —— 设计如此，
-  摇杆一动脚本就停。
-- `/api/control`、`/api/motor/direct` **不受"一次只能一个脚本"的 409 限制**：随发随生效。
+  摇杆一动动作就停。
+- `/api/control`、`/api/motor/direct` **不受"一次只能一个动作"的 409 限制**：随发随生效。
 - 底盘掉线（`motor.connected:false`）时运动指令被丢弃 —— 界面上应该据此禁用摇杆并提示。
 
 ---
@@ -181,7 +181,7 @@ POST /api/config/speed  body: {"forward_speed":55,"turn_speed":40}
 | 现象 | 原因 |
 |---|---|
 | `duration=0`/`time=0` 发完车不停 | 这是"设定速度"语义，不是"走一段"；要停就再发一次（急停用 `action=stop`） |
-| 直驱能到 100%，但 demo 脚本最快只到 70% | 两条路的上限不同：`/api/motor/direct` 是 **±100**，脚本/命名动作里宿主会把速度 clamp 到 **±70** |
+| 直驱能到 100%，但 demo 动作最快只到 70% | 两条路的上限不同：`/api/motor/direct` 是 **±100**，内置动作/命名动作里宿主会把速度 clamp 到 **±70** |
 | 响应里 `left=150` 以为生效了 150 | 超范围被**静默截断**到 100，响应回显原值；看 `left_speed`（实测）或 `status.left_target` |
 | 发了速度但 `left_speed` 还是 0 | 轮速是实测值，启动有 0.2~0.5 秒延迟；也可能底盘掉线（看 `motor.connected`） |
 | 代码注释说"单发一条只转 0.2~0.9s，要 80ms 重发" | **已过时**：这块板子上单发能连续转 10 秒以上（§2 实测表） |

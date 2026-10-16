@@ -4,8 +4,8 @@
 //   - 硬件: MotorPair / Gripper / Camera（csrc）
 //   - 状态采集: StateCollector（csrc 单例）
 //   - 控制服务: 定时停线程 / 夹爪锁
-//   - demo: 卡片 = 动作 × 模型（跑 demo/<动作>.lua，模型由宿主注入 params.model；见 routes.cpp）
-//   - 脚本: Lua 流程宿主（$AKA_HOME/demo/*.lua）
+//   - demo: 卡片 = 动作 × 模型（执行内置动作状态机，模型由宿主注入 params.model；见 routes.cpp）
+//   - 动作: 内置 C++ 状态机宿主（原 Lua 流程已迁进 capp/script.cpp）
 //   - ota: 升级任务
 //   - 云端上报: 命令日志
 //
@@ -49,12 +49,12 @@ struct AppContext {
     // 单帧推理（GET /api/detect）：懒加载的模型 + 一把锁。
     // 同步跑（每请求一次推理），锁把"换模型 + 推理"整段罩住 —— TPU 是单实例、
     // YoloDetector 非线程安全；脚本并发由 script_running 串行（同一时刻只有一个流程）。
-    // ── Lua 动作脚本（demo/*.lua）── 状态由工作线程写、接口读，都用 script_mu 保护；
+    // ── 内置动作状态机（原 demo/*.lua 流程）── 状态由工作线程写、接口读，都用 script_mu 保护；
     // script_abort 是给"立即停"用的（原子，免得停止请求要等锁）。
     std::mutex script_mu;
-    /// 脚本工作线程（pthread 而不是 std::thread：**要显式指定栈大小**）。
-    /// musl 的 std::thread 默认栈只有 128KB（glibc 是 8MB），而脚本线程的调用链是
-    /// Lua VM → 原语 → 取帧 → libjpeg 解码（jpeg_decompress_struct 本身就十几 KB），
+    /// 动作工作线程（pthread 而不是 std::thread：**要显式指定栈大小**）。
+    /// musl 的 std::thread 默认栈只有 128KB（glibc 是 8MB），而线程调用链是
+    /// 状态机 → 取帧 → libjpeg 解码（jpeg_decompress_struct 本身就十几 KB），
     /// 栈溢出会踩到相邻内存 —— 实测表现为在 jpeg_idct_* 里收到 badaddr≈0x46 的段错误。
     pthread_t script_tid{};
     bool script_tid_valid = false;
@@ -62,12 +62,12 @@ struct AppContext {
     bool script_running = false;
     std::string script_state = "idle";   // idle|running|done|failed|aborted
     std::string script_message;
-    std::string script_name;    // 动作脚本名（demo/<动作>.lua）
+    std::string script_name;    // 动作名（内置动作 id：grab/approach）
     std::string script_model;   // 这次跑的是哪个模型（params.model；脚本路径之外还要能答"在追什么"）
     std::string script_card;    // 哪张卡片发起的（直接调 action+model 跑时为空）
     bool script_repeat = false; // 循环执行（mode=loop）：跑完一轮接着下一轮，直到被停
     int script_round = 0;       // 已跑到第几轮（once 恒为 1）
-    long long script_calls = 0;                  // 原语调用计数（看脚本有没有在动）
+    long long script_calls = 0;                  // 动作调用计数（看状态机有没有在动）
     std::string script_action;                   // 最近一次动作
     std::vector<std::pair<std::string, std::string>> script_notes;   // 脚本 note() 发布的字段
 
@@ -188,12 +188,12 @@ bool valid_model_name(const std::string& name);
 
 // ── demo 资源（全部在 `$AKA_HOME/demo/` 下，见 cpp/README.md 的部署布局）──
 //
-//   demo/<动作>.lua            **动作脚本**（预定义、与模型无关，模型从 params().model 读）
 //   demo/models/*.cvimodel     模型库
-//   demo/configs/<卡片名>.json  **卡片定义**：{"action":..,"model":..,+ 四个参数}
+//   demo/configs/<卡片名>.json  **卡片定义**：{"action":..,"model":..,+ 运行参数}
 //
 // 一张 demo 卡片 = 动作 × 模型（用户自己在界面上建，名字自由）；跑的时候宿主读卡片拿到
-// 动作和模型，跑 demo/<动作>.lua 并把 params.model 注入成卡片里的模型。
+// 动作和模型，执行内置动作状态机（见下方 script_run），并把 params.model 注入成卡片里的模型。
+// 动作不再来自 `demo/*.lua` —— 流程已迁进 C++（capp/script.cpp 的内置状态机）。
 // 注意卡片名**只当文件名用**（可能是中文），别拿它去拼模型路径 —— 这是最容易犯、
 // 报错又最误导的一处（会变成"注册模型失败：…/demo/models/追网球接近.cvimodel"）。
 
@@ -201,11 +201,6 @@ bool valid_model_name(const std::string& name);
 std::string model_dir(AppContext& ctx);
 /// `$AKA_HOME/demo/models/<name>.cvimodel`
 std::string model_path(AppContext& ctx, const std::string& name);
-
-/// `$AKA_HOME/demo/<动作>.lua`（参数是**动作名**，不是卡片名、更不是模型名）
-std::string action_script_path(AppContext& ctx, const std::string& name);
-/// 这个动作脚本在不在（列表用它标 script 字段，跑之前也用它先挡一道）
-bool action_script_exists(AppContext& ctx, const std::string& name);
 
 /// 卡片名是否合法：只有文件系统层面的限制（允许中文），见实现里的说明
 bool valid_card_name(const std::string& name);
@@ -216,18 +211,30 @@ bool valid_card_name(const std::string& name);
 csrc::Json save_model_upload(AppContext& ctx, const std::string& name, const std::string& content);
 
 
-// ── Lua 流程脚本（$AKA_HOME/demo/*.lua，实现在 capp/script.cpp）──
+// ── 内置动作状态机（实现在 capp/script.cpp）──
 //
-// 把"看→对准→靠近→抓"这类**要反复调参的流程**从 C++ 搬到脚本里：改一行存盘重跑，
-// 不用交叉编译 + 部署 + 重启。脚本只拿得到有上限的原语；限速/被抢占的接管/
-// 底盘掉线这些**安全兜底全在宿主**（见 script.cpp 的注释与文档）。
+// "看→对准→靠近→抓"这类流程原先写成 Lua 脚本（改一行存盘重跑、不用重编），现迁进
+// C++：动作硬编码成内置状态机（grab/approach），低频调参常量以"卡片 JSON 可选字段 +
+// C++ 出厂默认"外置。安全兜底（限速 clamp/once 超时/被抢占的接管/底盘掉线/退出刹车）
+// 全在宿主里强制（见 script.cpp 的注释与文档）。
 
-/// 跑一个动作脚本（异步；同一时刻只允许一个）。params 会以 Lua table 的形式给脚本读。
-/// 脚本从 `$AKA_HOME/demo/<name>.lua` 读（name 是**动作名**）；名字只允许 [A-Za-z0-9_.-]。
-/// 执行方式看 params.mode：`once`（默认，跑一遍就结束）/ `loop`（跑完接着跑，直到被停）。
-/// **没有总时长上限** —— 停不停由 stop / 人的指令接管 / 服务退出决定。
+/// 一个内置动作：id 是动作名（对外契约里的 action/script），do_grab 决定到位后是否夹取。
+struct ActionDef {
+    std::string id;
+    std::string name;   // 界面显示名（原先取自 lua 首行 `-- name:`）
+    bool do_grab = false;
+};
+/// 内置动作清单（顺序即显示顺序）。
+const std::vector<ActionDef>& list_action_defs();
+/// id 是否是内置动作（跑之前先挡一道，替代旧的 action_script_exists）。
+bool is_known_action(const std::string& id);
+
+/// 跑一个内置动作（异步；同一时刻只允许一个）。name 是**动作名**，只允许 [A-Za-z0-9_.-]。
+/// 运行参数与低频调参常量都从 params 读（缺省用出厂默认）；model 必填。
+/// 执行方式看 params.mode：`once`（默认，跑一遍就结束，最多 kMaxOnceSeconds）/
+/// `loop`（跑完接着跑，直到被停 —— 没有总时长上限）。
 csrc::Json script_run(AppContext& ctx, const std::string& name, const csrc::Json& params);
-/// 停止当前脚本：置中止标志并立刻刹车（不等脚本配合）。
+/// 停止当前动作：置中止标志并立刻刹车（不等状态机配合）。
 csrc::Json script_stop(AppContext& ctx);
 /// 当前状态：state / script（动作名）/ mode / round / model / card / message /
 /// calls / action / notes

@@ -1,9 +1,9 @@
-// Demo 卡片与动作脚本
+// Demo 卡片与内置动作
 //
 // 入口：register_demo_routes()（由 src/routes.cpp 的 register_routes 调用）
 //
 // 由 capp/src/routes.cpp 按域拆出来（对照 app/routes/*.py 的分法）。
-// 对应 app/routes/demo.py + 动作脚本那条 /api/demo/run。
+// 对应 app/routes/demo.py + 内置动作那条 /api/demo/run。
 
 #include "routes_internal.hpp"
 
@@ -13,7 +13,7 @@
 namespace capp {
 namespace routes {
 
-// ── Demo 卡片与动作脚本 ──
+// ── Demo 卡片与内置动作 ──
 
 namespace {
 
@@ -37,13 +37,14 @@ void finish_wait(AppContext& ctx, HttpResponse& resp) {
 void register_demo_routes(Router& router, AppContext& ctx) {
 
 
-    // ── 动作脚本（demo/*.lua）── 接口都挂在 /api/demo 下（跟卡片/配置同一套命名）
+    // ── 内置动作（grab / approach）── 接口都挂在 /api/demo 下（跟卡片/配置同一套命名）
     //
-    // `/api/demo/run` 是**最底层**的那条：直接跑某个动作脚本 + 任意 params（不校验模型），
+    // `/api/demo/run` 是**最底层**的那条：直接跑某个内置动作 + 任意 params（不校验模型），
     // 调试/一次性用；正常跑 demo 走 `/api/demo/init`（跑卡片，或 action+model，会先校验
-    // 动作脚本和模型文件都在）。
-    // 把"看→对准→靠近→抓"这类要反复调参的流程写成脚本，改一行存盘重跑，不用重编部署。
-    // 安全兜底（限速/被人的指令取代/底盘掉线/内存与卡死）全在宿主里，脚本绕不过去。
+    // 动作与模型文件都在）。
+    // 把"看→对准→靠近→抓"这类流程内置成 C++ 状态机（capp/script.cpp）；最常改的
+    // speed/target_size/turn_speed/mode 走卡片参数，低频判据常量也可写进卡片 JSON 覆盖。
+    // 安全兜底（限速/被人的指令取代/底盘掉线/退出刹车）全在宿主里强制。
     router.add("POST", "/api/demo/run", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
         const Json payload = req.json();
         if (!payload.is_object()) {
@@ -88,7 +89,7 @@ void register_demo_routes(Router& router, AppContext& ctx) {
     router.add("GET", "/api/demo/list", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
         Json demos(Json::Type::Array);
         for (const auto& c : list_demo_cards(ctx)) {
-            const bool has_action = action_script_exists(ctx, c.action);
+            const bool has_action = is_known_action(c.action);
             const bool has_model = access(model_path(ctx, c.model).c_str(), F_OK) == 0;
             Json item;
             item["name"] = c.name;                                  // 卡片名（前端只认这个）
@@ -99,7 +100,7 @@ void register_demo_routes(Router& router, AppContext& ctx) {
             item["kind"] = "card";
             // 动作脚本或模型文件缺了也照样列出来 —— 点开始会明确报错，别让卡片凭空消失
             item["ready"] = has_action && has_model;
-            item["error"] = !has_action ? ("动作脚本缺失：demo/" + c.action + ".lua")
+            item["error"] = !has_action ? ("未知动作：" + c.action)
                           : (!has_model ? ("模型文件缺失：demo/models/" + c.model + ".cvimodel") : "");
             demos.push_back(item);
         }
@@ -123,7 +124,7 @@ void register_demo_routes(Router& router, AppContext& ctx) {
         const Json st = script_status(ctx);
         Json j;
         j["name"] = st.gets("card");       // 跑的是哪张卡片
-        j["action"] = st.gets("script");   // 动作脚本名
+        j["action"] = st.gets("script");   // 动作名
         j["model"] = st.gets("model");
         resp.set_json(j);
     });
@@ -178,8 +179,8 @@ void register_demo_routes(Router& router, AppContext& ctx) {
             resp.set_error("模型名非法（只允许字母数字与 _ - .）：" + model, 400);
             return;
         }
-        if (!action_script_exists(ctx, action)) {
-            resp.set_error("动作脚本不存在：demo/" + action + ".lua", 400);
+        if (!is_known_action(action)) {
+            resp.set_error("内置动作不存在：" + action, 400);
             return;
         }
         if (access(model_path(ctx, model).c_str(), F_OK) != 0) {
@@ -289,8 +290,8 @@ void register_demo_routes(Router& router, AppContext& ctx) {
             resp.set_error("模型名非法（只允许字母数字与 _ - .）：" + model, 400);
             return;
         }
-        if (!action_script_exists(ctx, action)) {
-            resp.set_error("动作脚本不存在：demo/" + action + ".lua", 400);
+        if (!is_known_action(action)) {
+            resp.set_error("内置动作不存在：" + action, 400);
             return;
         }
         if (access(model_path(ctx, model).c_str(), F_OK) != 0) {

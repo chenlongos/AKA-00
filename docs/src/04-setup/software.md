@@ -2,7 +2,7 @@
 
 ## 本机跑起来（不需要板子）
 
-设备端是个普通的 C++ 程序，可以直接在开发机上编一份跑，配置、前端页面、demo 脚本
+设备端是个普通的 C++ 程序（动作已内置进二进制），可以直接在开发机上编一份跑，配置、前端页面、模型/卡片
 都用仓库里的实体文件：
 
 ```bash
@@ -35,7 +35,7 @@ cd frontend && npm run dev
 
 ```bash
 cd cpp
-make              # 一条龙：libjpeg/mbedtls/lua → csrc → capp → package → ota
+make              # 一条龙：libjpeg/mbedtls → csrc → capp → package → ota
 make noscreen     # 不带屏版本（整个显示栈编译期裁掉）
 make clean        # 清理构建产物
 ```

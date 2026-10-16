@@ -9,7 +9,7 @@
 #   （或进 cpp/ 目录直接 make —— 工具链在 PATH 里时可不设任何变量）
 #
 # 顶层 make 会把 AKA_TOOLCHAIN_DIR / TPU_SDK_DIR / WITH_TPU export 给
-# csrc|capp 的 Makefile.cross 与 scripts/build-{libjpeg,mbedtls,lua}.sh，
+# csrc|capp 的 Makefile.cross 与 scripts/build-{libjpeg,mbedtls}.sh，
 # 所以只需要在这一个地方指定工具链位置。
 # =============================================================================
 set -e
@@ -29,7 +29,7 @@ export AKA_TOOLCHAIN_DIR=/opt/riscv64-unknown-linux-musl/
 export WITH_TPU=1
 export TPU_SDK_DIR=/opt/cvitek_tpu_sdk
 
-# ── 全流程构建：libjpeg → mbedtls → lua → csrc → capp → package → ota ──
+# ── 全流程构建：libjpeg → mbedtls → csrc → capp → package → ota ──
 # 带屏版（产物: cpp/dist/AKA-00/ 与 cpp/dist/aka-00-server 自解压安装器）
 make -C "$CPP_DIR" ota AKA_TOOLCHAIN_DIR="$AKA_TOOLCHAIN_DIR" \
     WITH_TPU="$WITH_TPU" TPU_SDK_DIR="$TPU_SDK_DIR"

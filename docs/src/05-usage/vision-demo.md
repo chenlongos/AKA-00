@@ -82,7 +82,7 @@ GET /api/detect?model=<模型名>[&conf=0.25][&iou=0.45]
 | count | 框数（可能 0 个 —— 那不是错误） |
 
 > **框宽 = `x2 - x1`，中心 = `(x1+x2)/2, (y1+y2)/2`** —— REST 版只给四角，宽高/中心/面积
-> 自己算。脚本里的 `detect()` 会多给 `w/h/cx/cy/area`（见 §5）。
+> 自己算。内置动作内部会多算 `w/h/cx/cy/area`（见 §5）。
 >
 > 坐标是**原图**（如 640x360），**不是**页面上 `stream` 缩放后的尺寸 —— 两个尺寸不一致时
 > 别拿标尺去量屏幕。
@@ -150,7 +150,7 @@ curl -X POST http://$IP/api/models/delete -H 'Content-Type: application/json' -d
 
 ### 概念：一张卡片 = 动作 × 模型
 
-- **动作** = `demo/<动作>.lua` 脚本（预定义、与模型无关：`approach` 接近瞄准、`grab` 追到就夹）；
+- **动作** = 内置的 C++ 状态机（与模型无关：`approach` 接近对准、`grab` 追到就夹；见 `capp/script.cpp`）；
 - **模型** = `demo/models/<模型>.cvimodel`；
 - **卡片** = 用户起的名字 + 上面两者 + 四个参数，存 `demo/configs/<卡片名>.json`。
 
@@ -173,7 +173,7 @@ curl -X POST http://$IP/api/models/delete -H 'Content-Type: application/json' -d
 | 字段 | 说明 |
 |------|------|
 | name | 卡片名。**给了它就以卡片为准**，下面那些参数是"临时覆盖"，不落盘 |
-| action | 动作名（`demo/<action>.lua`）。没有 name 时必填 |
+| action | 内置动作 id（`grab` / `approach`）。没有 name 时必填 |
 | model | 模型名。没有 name 时必填 |
 | target_size | 目标框宽（原图像素）：框宽达到它就认为到位。缺省 **300** |
 | speed | 直线速度百分比。缺省 **25**（宿主还会再 clamp 到 ≤70） |
@@ -196,11 +196,11 @@ curl -X POST http://$IP/api/models/delete -H 'Content-Type: application/json' -d
 
 **`wait` 的语义**（最容易被误解的一条）：
 
-- 它只决定**这一个 HTTP 请求等不等**，不是脚本的时限。
+- 它只决定**这一个 HTTP 请求等不等**，不是动作的时限。
 - `once` 默认等 → 一次请求拿到结论；`loop` **默认不等**（循环不会自己结束，等下去就是挂死
   连接），显式传 `"wait": true` 直接 **400**。
-- 请求最多等 **310 秒**；而**脚本自身**在 `once` 模式下最多跑 **5 分钟**（到点宿主收工、
-  状态落 `aborted`、`error` 写明"到最大执行时间"）。所以正常情况是先由脚本收工、请求拿到
+- 请求最多等 **310 秒**；而**动作自身**在 `once` 模式下最多跑 **5 分钟**（到点宿主收工、
+  状态落 `aborted`、`error` 写明"到最大执行时间"）。所以正常情况是先由动作收工、请求拿到
   真实原因。
 - 想自己轮询就传 `"wait": false`，然后看 `/api/demo/status`。
 
@@ -210,13 +210,13 @@ curl -X POST http://$IP/api/models/delete -H 'Content-Type: application/json' -d
 |------|------|------|
 | 卡片不存在 | 400 | `{"error":"没有这张卡片（或配置读不了）：demo/configs/xxx.json"}` |
 | 卡片名非法 | 400 | `{"error":"卡片名非法（不能含 / \\ 与控制字符，不能以 . 开头）：../x"}` |
-| 动作脚本不存在 | 400 | `{"error":"动作脚本不存在：demo/<动作>.lua"}` |
+| 内置动作不存在 | 400 | `{"error":"内置动作不存在：approach"}` |
 | 模型文件不存在 | 400 | `{"error":"模型不存在：demo/models/<模型>.cvimodel"}` |
 | 没给 name 也没给 action+model | 400 | `{"error":"要么给 name（跑已建的卡片），要么给 action + model（直接跑）"}` |
 | loop + `"wait": true` | 400 | `{"error":"loop 模式不会自己结束，wait 没有意义（要停就 POST /api/demo/stop）"}` |
-| **已经有一个脚本在跑** | 409 | `{"status":"already_running","pid":…,"name":"<在跑的卡片>","error":"已有脚本在跑（先 POST /api/demo/stop）"}` |
+| **已经有一个动作在跑** | 409 | `{"status":"already_running","pid":…,"name":"<在跑的卡片>","error":"已有动作在跑（先 POST /api/demo/stop）"}` |
 
-> **一次只能跑一个**：脚本驱动电机是独占的，第二个请求 409。要换就 `stop` 再起。
+> **一次只能跑一个**：动作驱动电机是独占的，第二个请求 409。要换就 `stop` 再起。
 
 ### 最底层那条：`POST /api/demo/run`
 
@@ -224,7 +224,7 @@ curl -X POST http://$IP/api/models/delete -H 'Content-Type: application/json' -d
 {"script": "grab", "params": {"model": "tennis", "target_size": 300, "mode": "once"}}
 ```
 
-和 `init` 的区别：**不校验模型/卡片**，`params` 原样交给脚本（调试、一次性用）。响应字段与
+和 `init` 的区别：**不校验模型/卡片**，`params` 原样交给状态机（调试、一次性用）。响应字段与
 `init` 一致（`{ok,state,script,mode}` / 等跑完时 `{completed:…}`）。
 
 ### 看状态：`GET /api/demo/status`
@@ -237,18 +237,18 @@ curl -X POST http://$IP/api/models/delete -H 'Content-Type: application/json' -d
 
 | 字段 | 含义 |
 |------|------|
-| state | `idle`（没在跑）/ `running` / `done`（正常结束）/ `failed`（脚本 fail、推理/相机错、底盘掉线…）/ `aborted`（被停：stop、人的指令接管、服务退出、**或 once 到 5 分钟时限**） |
+| state | `idle`（没在跑）/ `running` / `done`（正常结束）/ `failed`（状态机判定失败、推理/相机错、底盘掉线…）/ `aborted`（被停：stop、人的指令接管、服务退出、**或 once 到 5 分钟时限**） |
 | script | 正在跑的动作名 |
 | model / card | 在追哪个模型 / 哪张卡片（直接 action+model 跑时 `card` 为空串） |
 | mode / round | 执行方式 / 循环跑到第几轮 |
-| message | 结束原因或脚本的返回值（`done` 时就是脚本 `return` 的那句话） |
-| action | 最近一次电机原语（`forward`/`turn_left`/`standby`…），空 = 还没动过 |
-| calls | 脚本调用原语的次数（心跳/活性） |
-| **notes** | 脚本用 `note(k,v)` 发布的自定义观测值（如 `box_w`/`offset`）—— **调参就靠它** |
+| message | 结束原因或状态机的返回值（`done` 时就是它返回的那句话，如"已抓取"/"已到位"） |
+| action | 最近一次驱动动作（`forward`/`turn_left`/`standby`…），空 = 还没动过 |
+| calls | 状态机驱动动作的次数（心跳/活性） |
+| **notes** | 状态机发布的自定义观测值（如 `box_w`/`offset`）—— **调参就靠它** |
 
 ### 停：`POST /api/demo/stop`
 
-立刻刹车、不等脚本配合；脚本会在下一次调原语时被中断，状态转 `aborted`。
+立刻刹车、不等动作配合；运行中的状态机会在下一次驱动动作时被中断，状态转 `aborted`。
 没在跑时返回 `{"status":"already_stopped"}`（不报错）。
 
 ### 卡片管理
@@ -258,74 +258,57 @@ curl -X POST http://$IP/api/models/delete -H 'Content-Type: application/json' -d
 | `GET /api/demo/list` | 卡片 + 动作 + 模型清单（新建卡片的下拉就用它）。卡片字段：`name/action/model/ready/error/kind/script/path` |
 | `GET /api/demo/config?name=<卡片名>` | 读一张卡的参数（`{name,action,model,target_size,speed,turn_speed,mode}`） |
 | `POST /api/demo/config` | 新建或覆盖：`{"name":…,"action":…,"model":…,"target_size":…,"speed":…,"turn_speed":…,"mode":…}`。**改参数时 action/model 也要回传**，否则会被当成新建 |
-| `POST /api/demo/delete` | `{"name":"<卡片名>"}` —— 只删这张卡；动作脚本与模型文件不受影响 |
+| `POST /api/demo/delete` | `{"name":"<卡片名>"}` —— 只删这张卡；内置动作与模型文件不受影响 |
 | `GET /api/demo/name` | `{name,action,model}`：正在跑的是哪张卡（老接口，等价于 status 里的 `card`） |
 
-`ready:false` 表示动作脚本或模型文件缺了 —— 卡片照样列出来（点开始会明确报错），不会凭空消失。
+`ready:false` 表示内置动作缺失或模型文件缺了 —— 卡片照样列出来（点开始会明确报错），不会凭空消失。
 
 ---
 
-## 5. 动作脚本（要加新动作时）
+## 5. 内置动作（C++ 状态机）
 
-动作就是 `$AKA_HOME/demo/<动作名>.lua` 一个文件，宿主内置 Lua 解释器跑它。
-**第一行的约定注释给显示名**（界面上的"接近瞄准"就是这么来的）：
+动作**硬编码**在 aka-capp 二进制里（实现在 `capp/script.cpp`），不再读 `demo/*.lua`，也不在运行时
+解释外部脚本。板上现成两个动作：
 
-```lua
--- name: 我的动作
-local p = params() or {}
-local model = p.model                      -- 宿主注入：卡片/请求里配的模型
-local target = tonumber(p.target_size) or 300
+- **`approach`**（显示名"接近瞄准"）：看 → 对准 → 靠近，到位就**停住、不夹**；
+- **`grab`**（显示名"追到就夹"）：同一条流程，到位后**闭合夹爪**（ZP10S 上"伸下去→夹→抬起"约 3.5s）。
 
-while true do
-    local d, err = detect(model)           -- 取一帧跑一次推理
-    if not d then fail("推理失败：" .. tostring(err)) end
-    local best = nil
-    for _, b in ipairs(d.boxes) do
-        if not best or b.area > best.area then best = b end
-    end
-    if not best then standby(); sleep_ms(50)
-    elseif best.x2 - best.x1 >= target then brake(); return "到位了"
-    else forward(p.speed or 20); sleep_ms(600); standby() end
-end
-```
+两者共用同一个状态机，只差"到位要不要夹"这一个开关（`do_grab`）。**加新动作要改代码重编**，
+不是写个文件就能扩展的。
 
-### 能用的原语（全部只有这些）
+流程主干（判据"框宽 = 距离"）：取面积最大的框当目标，每步五选一 ——
 
-| 原语 | 说明 |
+| 情况 | 动作 |
 |------|------|
-| `detect(model, opts?)` | 取一帧推理；`opts` 可给 `{conf=, iou=}`（默认 0.25 / 0.45）→ `{frame_w=640, boxes={{x1,y1,x2,y2,w,h,cx,cy,area},…}}`；**硬失败**返回 `nil, err`（"这一拍还没出帧"给空列表，不算错误） |
-| `forward(s)` `back(s)` `turn_left(s)` `turn_right(s)` `drive(l,r)` | 驱动，参数是百分比，**宿主一律 clamp 到 ±70** |
-| `standby()` `brake()` | 速度归零 / 刹车 |
-| `sleep_ms(ms)` | 等待（切段睡，随时可被打断） |
-| `grab()` `release()` | 夹爪（ZP10S 上是"伸下去→夹→抬起"约 3.5s 的整段序列） |
-| `elapsed_ms()` | 本脚本已跑的毫秒数 |
-| `motor_connected()` | 底盘是否真在线（掉线时驱动是空操作） |
-| `abort_requested()` | 是否收到 stop（可选优雅收尾） |
-| `note(k, v)` | 往 `/api/demo/status` 的 `notes` 里发一个可观测值 |
-| `log(fmt, …)` / `print` | 写进 capp 日志 |
-| `fail(msg)` | 主动判定失败（状态 `failed`） |
-| `params()` | 启动时传进来的参数表 |
+| 框宽 > 目标 × `too_close_k`（凑太近） | 后退一小段脉冲 |
+| 框宽 ≥ 目标 且 与夹爪位差 ≤ `align_margin` | **到位**：`grab` 停稳→夹；`approach` 只停不夹 |
+| 偏离画面中心 > `center_margin` | 大脉冲转向 |
+| 框宽 ≥ 目标 但没对准夹爪位 | 精调小脉冲转向 |
+| 框宽 < 目标 | 前进一个脉冲 |
 
-有 math/string/table 标准库；**没有** io / os / package / coroutine / debug，也**没有 pcall**
-（脚本吞掉宿主的打断就糟了）。内存预算 4MB。
+丢目标 `lost_ms` 没找回就收工。
 
-> 板上现成两个动作：`approach`（`-- name: 接近瞄准`，只靠近不夹）、`grab`（`-- name: 追到就夹`）。
-> **别改这两个文件** —— 它们是仓库里的代码、OTA 会按包覆盖；想调参请改卡片配置或另写一个
-> 动作脚本（`demo/<新名字>.lua`，OTA 不会删你新加的）。
+### 可调的判据常量（卡片 JSON 可选字段）
+
+最常改的运行参数（`model`/`target_size`/`speed`/`turn_speed`/`mode`）本来就来自卡片配置。
+一批低频判据常量（转向脉冲系数、夹爪偏移等）也可**写进 `demo/configs/<卡片名>.json`** 覆盖出厂默认，
+不写则用内置默认。完整键名与默认值见 [`api.md`](./api.md) 的"可调的判据常量"表。
+
+> **注意**：从界面重新保存卡片（`POST /api/demo/config`）只回写上面那几项运行参数，
+> 会把手工写进 JSON 的判据常量重置为默认。手工精调 = 直接编辑 `demo/configs/<卡片名>.json`。
 
 ---
 
-## 6. 安全边界（宿主强制，脚本和调用方都绕不过去）
+## 6. 安全边界（宿主强制，调用方绕不过去）
 
 | 约束 | 说明 |
 |------|------|
-| 速度上限 ±70% | 每个驱动原语的参数都被 clamp |
-| 一次一个脚本 | 再发 `init`/`run` 会 409，先 `stop` |
+| 速度上限 ±70% | 每个驱动动作的参数都被宿主 clamp |
+| 一次一个动作 | 再发 `init`/`run` 会 409，先 `stop` |
 | `once` 最多 5 分钟 | 到点宿主收工（停电机、状态 `aborted`、`error` 写明原因） |
 | `loop` 没有时长上限 | 它本来就该一直跑，停不停由人决定 |
-| 被人的指令取代 | 有人推摇杆 / 调 `/api/control`，脚本立刻被中断并交出控制权 |
-| stop / 服务退出 / 底盘掉线 | 立刻中断（脚本收尾时宿主兜底刹车） |
-| 内存 | Lua VM 4MB 预算 |
+| 被人的指令取代 | 有人推摇杆 / 调 `/api/control`，运行中的动作立刻被中断并交出控制权 |
+| stop / 服务退出 / 底盘掉线 | 立刻中断（收尾时宿主兜底刹车） |
 
 ---
 
@@ -362,10 +345,10 @@ curl -X POST http://$IP/api/demo/stop
 | `/api/detect` 回 `no frame` | 摄像头开着、但这一拍还没出帧（刚开没多久）；连续这样就是流卡住了 |
 | `POST /api/camera/open` 一直 500、但 `snapshot` 还能出图 | 采集流卡死、缓存里还有旧帧（两次 snapshot 字节完全相同就是在骗你）。**重启 capp 恢复**（实测 2026-09-21；根因待查：卡死后没法从 API 侧再拉起来） |
 | 框的坐标对不上屏幕 | 坐标是**原图**像素；页面上的画面可能被缩放过 |
-| `init` 一直不返回 | 默认 `wait=true`，它在等脚本跑完（最多 310 秒）。想立刻拿控制权就 `wait:false` |
-| 请求回 `timeout: 等待 310 秒…` 但车还在动 | 请求放弃等了，脚本还在跑 —— 补一个 `POST /api/demo/stop` |
+| `init` 一直不返回 | 默认 `wait=true`，它在等动作跑完（最多 310 秒）。想立刻拿控制权就 `wait:false` |
+| 请求回 `timeout: 等待 310 秒…` 但车还在动 | 请求放弃等了，动作还在跑 —— 补一个 `POST /api/demo/stop` |
 | `loop` 模式传了 `wait:true` 被 400 | 循环不会自己结束，等下去是挂死连接 |
-| 第二个 `init` 回 409 | 已经有一个脚本在跑，先 `stop` |
+| 第二个 `init` 回 409 | 已经有一个动作在跑，先 `stop` |
 | 删了模型，卡片还在但点开始报错 | 卡片不跟着删（故意的）；重传同名模型即复活 |
 | 传模型回 `不是 cvimodel（文件头不是 CviModel）` | 传错文件了 |
 | 相机开着但屏没画面（带屏板） | 屏跟随摄像头：摄像头一开就自动起屏；`/api/display/status` 看 `running` |

@@ -43,6 +43,18 @@ bool load_demo_card(AppContext& ctx, const std::string& name, DemoCard& out) {
     out.params["turn_speed"] = csrc::Json((int64_t)one.geti("turn_speed", kDemoTurnSpeedDefault));
     const std::string mode = one.gets("mode");
     out.params["mode"] = (mode == "loop") ? "loop" : "once";
+    // 低频调参常量透传：卡片 JSON 里若写了这些键，一并带进 params 交给内置状态机
+    // （capp/script.cpp 的 load_tuning 会用同名的键覆盖出厂默认）。没写就不加，用默认。
+    static const char* kTuningKeys[] = {
+        "center_margin", "turn_pulse_k", "turn_pulse_min", "turn_pulse_max",
+        "fwd_pulse_ms", "align_margin", "too_close_k", "back_pulse_k",
+        "back_pulse_min", "back_pulse_max", "grab_offset", "fine_pulse_max",
+        "lost_ms", "loop_gap_ms", "conf", "iou",
+    };
+    for (const char* k : kTuningKeys) {
+        const csrc::Json* v = one.get(k);
+        if (v && v->is_number()) out.params[k] = csrc::Json(v->as_double(0));
+    }
     return !out.action.empty() && !out.model.empty();
 }
 
@@ -84,37 +96,16 @@ bool save_demo_card(AppContext& ctx, const std::string& name, const std::string&
     return (bool)f;
 }
 
-/// 动作清单：扫 demo/<动作>.lua（`_` 开头的跳过 —— 那是模板/草稿，不是一个动作）。
-/// 显示名取脚本第一行的约定注释 `-- name: 接近瞄准`；没有就用文件名。
+/// 动作清单：直接返回内置动作注册表（capp::list_action_defs）—— 流程已从 demo/*.lua 迁进 C++。
 std::vector<ActionInfo> list_actions(AppContext& ctx) {
+    (void)ctx;
     std::vector<ActionInfo> out;
-    const std::string dir = ctx.app_dir + "/demo";
-    DIR* d = opendir(dir.c_str());
-    if (!d) return out;
-    while (struct dirent* e = readdir(d)) {
-        const std::string n = e->d_name;
-        if (n.size() <= 4 || n.compare(n.size() - 4, 4, ".lua") != 0) continue;
-        if (n[0] == '_') continue;                        // 下划线开头的是模板/草稿，不算一个动作
-        const std::string id = n.substr(0, n.size() - 4);
-        if (!valid_model_name(id)) continue;              // 动作名要能拼进路径
-        ActionInfo a;
-        a.id = id;
-        a.name = id;
-        std::ifstream f(dir + "/" + n);
-        std::string first;
-        if (f && std::getline(f, first)) {
-            const std::string key = "name:";
-            const size_t at = first.find(key);
-            if (at != std::string::npos) {
-                std::string label = first.substr(at + key.size());
-                const size_t b = label.find_first_not_of(" \t");
-                const size_t e2 = label.find_last_not_of(" \t\r");
-                if (b != std::string::npos) a.name = label.substr(b, e2 - b + 1);
-            }
-        }
-        out.push_back(a);
+    for (const auto& a : capp::list_action_defs()) {
+        ActionInfo info;
+        info.id = a.id;
+        info.name = a.name;
+        out.push_back(info);
     }
-    closedir(d);
     std::sort(out.begin(), out.end(),
               [](const ActionInfo& x, const ActionInfo& y) { return x.id < y.id; });
     return out;

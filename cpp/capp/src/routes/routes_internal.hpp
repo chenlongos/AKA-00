@@ -41,8 +41,8 @@ void register_ws_routes(Router& router, AppContext& ctx);
 // 卡片由**用户在界面上新建**（选动作 + 选模型 + 填参数），接口是 POST /api/demo/config。
 // 卡片名**只当文件名用**（可以是中文「追网球接近」），动作和模型写在文件里 ——
 // 所以不需要"从名字拆出模型和动作"（那种拆法遇到模型名自带 `-` 就歧义了）。
-// 跑卡片时：读配置 → 跑 demo/<动作>.lua → 把 params.model 注入成**配置里的模型**。
-// （注意不是卡片名！搞错的话会变成"注册模型失败：…/demo/models/追网球接近.cvimodel"）
+// 跑卡片时：读配置 → 执行内置动作状态机（capp/script.cpp）→ 把 params.model 注入成**配置里的模型**。
+// （不是卡片名！搞错的话会变成"注册模型失败：…/demo/models/追网球接近.cvimodel"）
 
 constexpr int kDemoTargetSizeDefault = 300;
 constexpr int kDemoSpeedDefault = 25;        // 直线速度（%）
@@ -59,7 +59,7 @@ constexpr double kDemoWaitMaxSeconds = 310.0;
 
 struct DemoCard {
     std::string name;     // 卡片名（= 文件名，可能中文）
-    std::string action;   // 动作 = 脚本名（demo/<action>.lua）
+    std::string action;   // 动作 = 内置动作 id（grab/approach；见 capp::list_action_defs）
     std::string model;    // 模型（demo/models/<model>.cvimodel）
     csrc::Json params;    // 四个运行参数（缺的用默认值兜底）
 };
@@ -76,7 +76,7 @@ std::vector<DemoCard> list_demo_cards(AppContext& ctx);
 bool save_demo_card(AppContext& ctx, const std::string& name, const std::string& action,
                     const std::string& model, const csrc::Json& params);
 
-/// 可用的动作脚本（demo/*.lua）；name 来自脚本第一行的 `-- name: 显示名`
+/// 可用的内置动作（直接取自 capp::list_action_defs，不再扫 demo/*.lua）；name 是显示名
 struct ActionInfo {
     std::string id;
     std::string name;

@@ -9,7 +9,7 @@
 # 原样收进 dist/AKA-00/，补三样构建产物（capp 二进制 / static / tools）。
 # **两份包只允许“编译产物的内容”不同**：那几个 ELF（aka-capp、tools/*）与前端 bundle
 #  （static/assets/index.js，见 frontend 的 WITH_SCREEN 开关）。文件集合、以及其余
-#  一切文本文件（config.toml、*.sh、*.json、demo/*.lua、static/index.html…）必须逐字节
+#  一切文本文件（config.toml、*.sh、*.json、static/index.html…）必须逐字节
 #  相同 —— 部署时不该出现“这个包少张图、那个包多个文件”或“两个包的脚本不一样”的意外。
 # **板上要什么就改 cpp/board/ 里的实体文件**，这里不再有逐文件的拷贝清单。
 #
@@ -68,7 +68,6 @@ CPP      := $(CURDIR)
 ROOT     := $(CPP)/..
 JPEG     := $(CPP)/third_party/jpeg/lib/libjpeg.a
 MBEDTLS  := $(CPP)/third_party/mbedtls/lib/libmbedtls.a
-LUA      := $(CPP)/third_party/lua/lib/liblua.a
 
 # 带屏版
 CSRC_LIB     := $(CPP)/csrc/build-cross/libcsrc.a
@@ -82,7 +81,7 @@ CAPP_BIN_NS  := $(CPP)/capp/bin/aka-capp-noscreen
 DIST_NS      := $(CPP)/dist-noscreen/AKA-00
 OBJDIR_NS    := build-cross-noscreen
 
-.PHONY: all screen noscreen libjpeg mbedtls lua csrc capp tools package ota ota-noscreen \
+.PHONY: all screen noscreen libjpeg mbedtls csrc capp tools package ota ota-noscreen \
         csrc-noscreen capp-noscreen tools-noscreen package-noscreen demos clean FORCE
 
 # 默认：只产出两样东西 —— dist/AKA-00/（部署目录）与 dist/aka-00-server（自解压安装器）
@@ -96,7 +95,6 @@ noscreen: package-noscreen ota-noscreen
 
 libjpeg: $(JPEG)
 mbedtls: $(MBEDTLS)
-lua: $(LUA)
 
 csrc: $(CSRC_LIB)
 capp: $(CAPP_BIN)
@@ -117,7 +115,7 @@ DEMO_BINS := $(DEMO_DIR)/demo_camera $(DEMO_DIR)/demo_image
 demos: $(DEMO_BINS)
 
 $(DEMO_BINS): $(ROOT)/tests/demo_camera.c $(ROOT)/tests/demo_image.c $(JPEG)
-	$(ORB_RUN) "set -e; $(if $(strip $(AKA_TOOLCHAIN_DIR)),export PATH=$(AKA_TOOLCHAIN_DIR)bin:\$$PATH;,true); \
+	$(ORB_RUN) "set -e; $(if $(strip $(AKA_TOOLCHAIN_DIR)),export PATH=$(AKA_TOOLCHAIN_DIR)bin:\$$PATH,true); \
 	    mkdir -p $(DEMO_DIR); \
 	    $(CROSS_CC) -O2 -Wall -static -o $(DEMO_DIR)/demo_camera \
 	        $(ROOT)/tests/demo_camera.c -I$(CPP)/third_party/jpeg/include $(JPEG); \
@@ -131,29 +129,27 @@ $(JPEG):
 $(MBEDTLS):
 	$(ORB_RUN) "cd $(CPP)/scripts && ./build-mbedtls.sh"
 
-# Lua：流程脚本宿主（scripts/*.lua）。纯 C、无依赖，编成静态库链进 capp。
-$(LUA):
-	$(ORB_RUN) "cd $(CPP)/scripts && ./build-lua.sh"
-
 # FORCE 同 capp：csrc 源/头文件改动时保证重编（内部增量，秒级）
-$(CSRC_LIB): $(JPEG) FORCE
+# 依赖 $(MBEDTLS)：https_client.cpp 里 #include <mbedtls/...> 需要头文件，
+# make clean 后 third_party/ 全空，必须先把 mbedtls 装好再编 csrc（顺序：libjpeg → mbedtls → csrc）。
+$(CSRC_LIB): $(JPEG) $(MBEDTLS) FORCE
 	$(ORB_RUN) "cd $(CPP)/csrc && make -f Makefile.cross WITH_SCREEN=1 CXX=$(CROSS_CXX) AR=$(CROSS_AR) $(XARGS)"
 
-$(CSRC_LIB_NS): $(JPEG) FORCE
+$(CSRC_LIB_NS): $(JPEG) $(MBEDTLS) FORCE
 	$(ORB_RUN) "cd $(CPP)/csrc && make -f Makefile.cross WITH_SCREEN=0 CXX=$(CROSS_CXX) AR=$(CROSS_AR) $(XARGS)"
 
 # FORCE: bin/aka-capp* 可能被本机 make（host 版）覆盖成非 RISC-V 二进制，
 # make 只看 mtime 会误判为最新。每次都跑交叉编译（内部增量，秒级），
 # 确保部署产物永远是 riscv64 静态版。
-$(CAPP_BIN): $(CSRC_LIB) $(MBEDTLS) $(LUA) FORCE
+$(CAPP_BIN): $(CSRC_LIB) $(MBEDTLS) FORCE
 	$(ORB_RUN) "cd $(CPP)/capp && make -f Makefile.cross WITH_SCREEN=1 CXX=$(CROSS_CXX) $(XARGS)"
 
-$(CAPP_BIN_NS): $(CSRC_LIB_NS) $(MBEDTLS) $(LUA) FORCE
+$(CAPP_BIN_NS): $(CSRC_LIB_NS) $(MBEDTLS) FORCE
 	$(ORB_RUN) "cd $(CPP)/capp && make -f Makefile.cross WITH_SCREEN=0 CXX=$(CROSS_CXX) $(XARGS)"
 
 # ── 打包 ──
 # 板上要什么是**实体文件**说了算：`cpp/board/` 就是 `$AKA_HOME/` 的镜像，
-# 想改 init.sh、config.toml、demo/*.lua 就直接改那里的文件，不用碰构建脚本。
+# 想改 init.sh、config.toml、config 就直接改那里的文件，不用碰构建脚本。
 # 这里只做两件事：① 把 board/ 原样收过来 ② 补三样构建产物（aka-capp / static / tools）。
 # 两份包**只允许编译产物的内容不同**（ELF + 前端 bundle）；文件集合、权限、其余文本
 # 文件都要一致 —— 不带屏版用不到的 start_img.jpg 也照发，多占几百 KB，换的是
@@ -196,7 +192,7 @@ define PACKAGE_RECIPE
 	[ -f "$(DEMO_DIR)/demo_camera" ] && cp "$(DEMO_DIR)/demo_camera" "$(DEMO_DIR)/demo_image" "$$DIST/tools/" || true; \
 	chmod 755 "$$DIST/tools"/* 2>/dev/null || true; \
 	echo "── 部署目录 $${DIST}（$(if $(filter 1,$(1)),带屏,不带屏)）──"; \
-	echo "   demo/：$$(ls "$$DIST/demo"/*.lua 2>/dev/null | wc -l | tr -d ' ') 个脚本、$$(find "$$DIST/demo/models" -name '*.cvimodel' 2>/dev/null | wc -l | tr -d ' ') 个模型、$$(ls "$$DIST/demo/configs"/*.json 2>/dev/null | wc -l | tr -d ' ') 份参数"; \
+	echo "   demo/：$$(find "$$DIST/demo/models" -name '*.cvimodel' 2>/dev/null | wc -l | tr -d ' ') 个模型、$$(ls "$$DIST/demo/configs"/*.json 2>/dev/null | wc -l | tr -d ' ') 份参数"; \
 	du -sh "$$DIST"; \
 	echo ""; \
 	echo "  部署到板子：make ota（不带屏版 make ota-noscreen）生成 aka-00-server，scp 过去后执行"; \
