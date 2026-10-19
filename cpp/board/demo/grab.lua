@@ -78,7 +78,7 @@ local LOOP_GAP_MS   = 30       -- 每步之间喘口气，让相机出新帧
 log("开始：模型=%s 目标框宽=%dpx 直线速度=%d%% 转弯速度=%d%%",
     model, math.floor(target), math.floor(speed), math.floor(turn_speed))
 
-local last_seen = elapsed_ms()
+local last_seen = nil
 
 while true do
     local d, err = detect(model)
@@ -86,6 +86,8 @@ while true do
         -- 推理本身失败（模型没了/相机不可用）——重试没意义，直接收工
         fail("推理失败：" .. tostring(err))
     end
+    -- 首次检测会初始化模型和摄像头；丢失目标计时从初始化完成后开始。
+    if not last_seen then last_seen = elapsed_ms() end
 
     -- 选面积最大的框（最近的优先，与 demo 一致）
     local best = nil
