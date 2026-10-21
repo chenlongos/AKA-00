@@ -67,7 +67,7 @@ struct MotorLinkStatus {
 class AutoReconnectMotorPair : public MotorPair {
 public:
     AutoReconnectMotorPair(std::string port, int baudrate, int ppr,
-                           const std::string& backend);
+                           const std::string& backend, bool swap_lr = false, bool invert = false);
     ~AutoReconnectMotorPair() override;
 
     // ── MotorPair ──
@@ -110,6 +110,10 @@ private:
     const std::string port_;
     int baudrate_;
     int ppr_;
+    // 左右通道对调 / 两路取反（见 Config.MotorConfig.swap_lr / invert）：下发/回读/闭环
+    // 转向都在代理层统一下变换，使上层的 left/right 与物理左右轮一致；两个开关可叠加。
+    const bool swap_lr_;
+    const bool invert_;
 
     // 驱动切换保护（命令线程与 worker 并发访问 active_）
     mutable std::mutex mu_;
@@ -136,6 +140,7 @@ private:
 /// 不再退化成 mock（mock 已删除）。
 std::unique_ptr<MotorPair> create_motor_pair(const std::string& port,
                                              const std::string& backend,
-                                             int baudrate = 115200, int ppr = 4680);
+                                             int baudrate = 115200, int ppr = 4680,
+                                             bool swap_lr = false, bool invert = false);
 
 }  // namespace csrc
