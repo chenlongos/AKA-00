@@ -43,11 +43,13 @@ constexpr int64_t kBackoffCapMs = 30000;    // 重连退避上限
 // ─────────────────── AutoReconnectMotorPair ───────────────────
 
 AutoReconnectMotorPair::AutoReconnectMotorPair(std::string port, int baudrate, int ppr,
-                                               const std::string& backend)
+                                               const std::string& backend, bool swap_lr, bool invert)
     : backend_(backend),
       port_(std::move(port)),
       baudrate_(baudrate),
-      ppr_(ppr) {
+      ppr_(ppr),
+      swap_lr_(swap_lr),
+      invert_(invert) {
     // active_ 初始就是空的 —— **没有 mock 兜底**（2026-09-18 删除）。
     // 以前这里塞的是 MockMotorPair：配置坏了（config.toml 为空 → backend 取默认 "dev"）
     // 或者串口连不上时，指令全被 mock 吞掉，车不动而界面/接口都不报错。
@@ -99,13 +101,22 @@ void AutoReconnectMotorPair::set_speed(int left, int right) {
         if (left != 0 || right != 0) warn_if_no_chassis("set_speed");
         return;
     }
-    p->set_speed(left, right);
+    // 接线标定的组合变换（与回读同一个变换，它是自身的逆——对调/取反都是对合）：
+    //   swap_lr_：把上层 (left,right) 换成 (right,left)；
+    //   invert_ ：两路取反（前进这种对称运动靠它翻，同时也能翻不对称的转向）。
+    int l = left, r = right;
+    if (swap_lr_) { const int t = l; l = r; r = t; }
+    if (invert_)  { l = -l; r = -r; }
+    p->set_speed(l, r);
 }
 
 void AutoReconnectMotorPair::get_speeds(int& l, int& r) {
     auto p = active();
     if (!p) { l = 0; r = 0; return; }
     p->get_speeds(l, r);
+    // 回读用同一个变换（对合，逆变换 = 自变）：把物理通道换回上层的逻辑左右与正负。
+    if (swap_lr_) { const int t = l; l = r; r = t; }
+    if (invert_)  { l = -l; r = -r; }
 }
 
 void AutoReconnectMotorPair::brake() {
@@ -129,7 +140,12 @@ void AutoReconnectMotorPair::get_encoder(int& c1, int& c2) {
 void AutoReconnectMotorPair::move_distance(uint8_t dir, uint8_t speed, int32_t target) {
     auto p = active();
     if (!p) { warn_if_no_chassis("move_distance"); return; }
-    p->move_distance(dir, speed, target);
+    // dir: 0=forward 1=backward 2=left 3=right（见 control_service）。标定时先按对调翻
+    // 左右，再按取反翻前后+左右；两开关都开时左右互相抵消，只剩前后翻（与 set_speed 一致）。
+    uint8_t d = dir;
+    if (swap_lr_) d = (d == 2) ? 3 : (d == 3 ? 2 : d);
+    if (invert_)  d = (d == 0) ? 1 : (d == 1 ? 0 : (d == 2 ? 3 : (d == 3 ? 2 : d)));
+    p->move_distance(d, speed, target);
 }
 
 void AutoReconnectMotorPair::send_cmd_noresp(uint8_t cmd, const uint8_t* payload, size_t len) {
@@ -332,10 +348,10 @@ void AutoReconnectMotorPair::worker_loop() {
 
 std::unique_ptr<MotorPair> create_motor_pair(const std::string& port,
                                              const std::string& backend,
-                                             int baudrate, int ppr) {
+                                             int baudrate, int ppr, bool swap_lr, bool invert) {
     // mock 已删除：只认 tt_pid。其它值直接交给代理去报错（"不假装能动"），
     // 而不是像以前那样静默换成一个吞指令的 mock。
-    return std::make_unique<AutoReconnectMotorPair>(port, baudrate, ppr, backend);
+    return std::make_unique<AutoReconnectMotorPair>(port, baudrate, ppr, backend, swap_lr, invert);
 }
 
 }  // namespace csrc

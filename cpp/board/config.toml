@@ -38,6 +38,15 @@ backend = "tt_pid"
 port = "/dev/ttyS1"
 baudrate = 115200
 ppr = 4680
+# 左右电机接线标定（每台车一份，默认全 false）。首选还是断电把底盘电机插头/线序
+# 归位（硬件标定，全车队一致）；不方便开壳时才用下面两个软件开关（可叠加）。
+# 现象 → 怎么设：
+#   前进后退正常、只有左右转反    → swap_lr = true
+#   前进后退反、 左右转也反      → invert = true
+#   前进后退反、 左右转正常      → swap_lr = true 且 invert = true
+# config.toml 在 OTA --update 时会被保留，所以这个标定不会被升级冲掉。
+swap_lr = false
+invert = false
 
 [arm]
 backend = "zp10s"

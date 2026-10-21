@@ -18,7 +18,8 @@ bool init_services(AppContext& ctx) {
 
     // 底盘（先建：tt_pid 为自动重连代理，构造不阻塞、失败自动后台重试）
     ctx.motor_pair = csrc::create_motor_pair(ctx.config.motor.port, ctx.config.motor.backend,
-                                             ctx.config.motor.baudrate, ctx.config.motor.ppr);
+                                             ctx.config.motor.baudrate, ctx.config.motor.ppr,
+                                             ctx.config.motor.swap_lr, ctx.config.motor.invert);
     ctx.motor_link = dynamic_cast<csrc::AutoReconnectMotorPair*>(ctx.motor_pair.get());
     ctx.collector.set_motor_pair(ctx.motor_pair.get());
 

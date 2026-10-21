@@ -169,6 +169,12 @@ Config Config::load() {
     cfg.motor.port = toml.get("motor", "port", cfg.motor.port);
     cfg.motor.baudrate = toml.geti("motor", "baudrate", cfg.motor.baudrate);
     cfg.motor.ppr = toml.geti("motor", "ppr", cfg.motor.ppr);
+    {
+        std::string sv = toml.get("motor", "swap_lr", "");
+        if (!sv.empty()) cfg.motor.swap_lr = (sv == "true" || sv == "1" || sv == "yes");
+        std::string iv = toml.get("motor", "invert", "");
+        if (!iv.empty()) cfg.motor.invert = (iv == "true" || iv == "1" || iv == "yes");
+    }
 
     cfg.arm.backend = toml.get("arm", "backend", cfg.arm.backend);
     cfg.arm.port = toml.get("arm", "port", cfg.arm.port);

@@ -45,6 +45,17 @@ struct MotorConfig {
     std::string port = "/dev/ttyS1";
     int baudrate = 115200;
     int ppr = 4680;
+    // ── 每台车的接线标定（两个独立开关，可叠加，覆盖全部 4 种常见接错）──
+    // 现象与对应修法：
+    //   前进后退正常、只有左右转反   → swap_lr = true（左右通道对调）
+    //   前进后退反、 左右转也反   → invert = true（两路同时取反）
+    //   前进后退反、 左右转正常   → swap_lr = true 且 invert = true
+    // （前进是 ( +,+)/( -,-) 对称，只有"取反两路"能翻它；转向是 ( -,+)/ (+,-)
+    //   不对称，对调或取反都能翻它 —— 所以两个开关能分开组合出上面三种。）
+    // 首选还是断电把底盘电机插头/线序归位（硬件标定，全车队行为一致）；
+    // 不方便开壳时才用这两个软件开关。属每台车标定，放 config.toml（OTA 保留）。
+    bool swap_lr = false;   // 交换左右通道
+    bool invert = false;    // 两路极性取反
 };
 
 struct ArmConfig {
