@@ -80,6 +80,33 @@ std::string shell_squote(const std::string& s) {
     return out;
 }
 
+/// wpa_cli 对非 ASCII 的 SSID 返回 \xHH 转义序列，还原为 UTF-8 字节流。
+/// 与 routes/wifi.cpp 的 decode_ssid 相同，放这里是因为 wifi_current_ssid 也需要它。
+static std::string decode_ssid(const std::string& raw) {
+    if (raw.find("\\x") == std::string::npos) return raw;
+    std::string out;
+    out.reserve(raw.size());
+    for (size_t i = 0; i < raw.size(); i++) {
+        if (i + 3 < raw.size() && raw[i] == '\\' && raw[i + 1] == 'x') {
+            char h1 = raw[i + 2], h2 = raw[i + 3];
+            auto hex_val = [](char c) -> int {
+                if (c >= '0' && c <= '9') return c - '0';
+                if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+                if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+                return -1;
+            };
+            int v1 = hex_val(h1), v2 = hex_val(h2);
+            if (v1 >= 0 && v2 >= 0) {
+                out.push_back(static_cast<char>((v1 << 4) | v2));
+                i += 3;
+                continue;
+            }
+        }
+        out.push_back(raw[i]);
+    }
+    return out;
+}
+
 }  // namespace
 
 std::string wifi_cred_path() {
@@ -183,7 +210,8 @@ std::string wifi_current_ssid() {
     if (pos == std::string::npos) return "";
     pos += 6;
     size_t e = status.find('\n', pos);
-    return status.substr(pos, e == std::string::npos ? std::string::npos : e - pos);
+    std::string ssid = status.substr(pos, e == std::string::npos ? std::string::npos : e - pos);
+    return decode_ssid(ssid);
 }
 
 void start_wifi_autoconnect() {

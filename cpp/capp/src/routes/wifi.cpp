@@ -25,6 +25,37 @@ namespace routes {
 // 不该只住在 HTTP 这一层。声明在 capp/context.hpp。
 // 这一域剩下的职责：解析请求、调服务、把结果翻译成 HTTP 响应。
 
+// ── wpa_cli SSID 解码 ──
+//
+// wpa_cli 对非 ASCII 的 SSID 返回 hex 转义序列，如 "\xe4\xbb\xb6" 表示 UTF-8 编码的
+// 某个中文字。逐段还原：每个 \xHH 还原为对应字节，其余字符原样保留，拼成原始字节流
+// 后作为 UTF-8 字符串返回。这样中英混排（如 "家Home"）也能正确显示。
+// 与 app/routes/wifi.py 的 _decode_ssid 对齐。
+static std::string decode_ssid(const std::string& raw) {
+    if (raw.find("\\x") == std::string::npos) return raw;
+    std::string out;
+    out.reserve(raw.size());
+    for (size_t i = 0; i < raw.size(); i++) {
+        if (i + 3 < raw.size() && raw[i] == '\\' && raw[i + 1] == 'x') {
+            char h1 = raw[i + 2], h2 = raw[i + 3];
+            auto hex_val = [](char c) -> int {
+                if (c >= '0' && c <= '9') return c - '0';
+                if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+                if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+                return -1;
+            };
+            int v1 = hex_val(h1), v2 = hex_val(h2);
+            if (v1 >= 0 && v2 >= 0) {
+                out.push_back(static_cast<char>((v1 << 4) | v2));
+                i += 3;   // 跳过 xHH
+                continue;
+            }
+        }
+        out.push_back(raw[i]);
+    }
+    return out;
+}
+
 // ── WiFi 扫描与连接 ──
 
 void register_wifi_routes(Router& router, AppContext& ctx) {
@@ -53,6 +84,7 @@ void register_wifi_routes(Router& router, AppContext& ctx) {
         if (pos != std::string::npos) {
             size_t e = status.find('\n', pos + 6);
             ssid = status.substr(pos + 6, e == std::string::npos ? std::string::npos : e - pos - 6);
+            ssid = decode_ssid(ssid);
         }
         bool connected = status.find("wpa_state=COMPLETED") != std::string::npos;
         std::string ip = connected ? csrc::iface_ip("wlan1") : "192.168.4.1";
@@ -91,6 +123,7 @@ void register_wifi_routes(Router& router, AppContext& ctx) {
             if (pos != std::string::npos) {
                 size_t e = status.find('\n', pos + 6);
                 connected_ssid = status.substr(pos + 6, e == std::string::npos ? std::string::npos : e - pos - 6);
+                connected_ssid = decode_ssid(connected_ssid);
             }
         }
         // 解析 scan_results: bssid freq signal flags ssid
@@ -107,6 +140,7 @@ void register_wifi_routes(Router& router, AppContext& ctx) {
             size_t b = ssid.find_first_not_of(" \t");
             if (b == std::string::npos) continue;
             ssid = ssid.substr(b);
+            ssid = decode_ssid(ssid);
             if (ssid.empty()) continue;
             int signal = atoi(signal_s.c_str());
             bool secured = !(flags == "[ESS]" || flags == "[WPS][ESS]");
