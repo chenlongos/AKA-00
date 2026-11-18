@@ -41,6 +41,14 @@ if (!fs.existsSync(jsFile)) {
 const jsSri = integrityOf(jsFile);
 const cssSri = fs.existsSync(cssFile) ? integrityOf(cssFile) : '';
 
+// 文件名固定（assets/index.js），靠内容哈希做查询串换 URL：
+// /assets/** 固件给 max-age=86400，浏览器按完整 URL 缓存 → 新构建立刻生效，
+// 旧构建在同一天内还能命中自己的缓存。
+const versionOf = (file) =>
+  '?v=' + crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex').slice(0, 8);
+const jsVer = versionOf(jsFile);
+const cssVer = fs.existsSync(cssFile) ? versionOf(cssFile) : '';
+
 let html = fs.readFileSync(htmlPath, 'utf8');
 
 // 幂等：已注入加载器则不重复处理。
@@ -87,13 +95,13 @@ const loader = `
         d.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;padding:12px 14px;background:#b91c1c;color:#fff;border-radius:8px;z-index:2147483647;font:14px/1.4 system-ui,sans-serif;text-align:center';
         (document.body || document.documentElement).appendChild(d);
       }
-      load('/assets/index.css', ${JSON.stringify(cssSri)}, function (u, s) {
+      load('/assets/index.css${cssVer}', ${JSON.stringify(cssSri)}, function (u, s) {
         var l = document.createElement('link');
         l.rel = 'stylesheet'; l.href = u; l.crossOrigin = 'anonymous';
         if (s) l.integrity = s;
         return l;
       }, function () {});
-      load('/assets/index.js', ${JSON.stringify(jsSri)}, function (u, s) {
+      load('/assets/index.js${jsVer}', ${JSON.stringify(jsSri)}, function (u, s) {
         var t = document.createElement('script');
         t.type = 'module'; t.src = u; t.crossOrigin = 'anonymous';
         if (s) t.integrity = s;

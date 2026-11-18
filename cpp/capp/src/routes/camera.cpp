@@ -83,11 +83,6 @@ void register_camera_routes(Router& router, AppContext& ctx) {
 
         uint64_t last_ts = 0;
         auto last_send = std::chrono::steady_clock::now();
-        // stream_scale 配置开关 + 尺寸>0 → 服务端缩放重编码后下发（省 WiFi 带宽）；
-        // 关闭或尺寸无效 → 直通原帧。
-        const bool downscale = ctx.config.camera.stream_scale &&
-                               ctx.config.camera.stream_width > 0 &&
-                               ctx.config.camera.stream_height > 0;
         // 编码输出缓冲跨帧复用，避免每帧 malloc（长时间运行更稳）
         std::vector<uint8_t> jpeg;
         // 有浏览器在看流 → 屏显示降帧（[display] fps_streaming，0=暂停）：
@@ -99,15 +94,20 @@ void register_camera_routes(Router& router, AppContext& ctx) {
                 bool ok = false;
                 uint64_t ts = 0;
                 auto t0 = std::chrono::steady_clock::now();
+                // 每帧取一次参数快照：POST /api/config/camera 改档后，已连着的观众
+                // 下一帧就按新尺寸出流（不重启、不断流）——这是"即时生效"的关键。
+                const StreamCfg sc = stream_cfg_snapshot(ctx);
+                // stream_scale + 尺寸>0 → 服务端缩放重编码（省带宽）；否则直通原帧。
+                const bool downscale = sc.scale && sc.width > 0 && sc.height > 0;
                 if (downscale) {
                     // 缩放路径：解码走 Camera::latest_rgb **共享缓存** ——
                     // 屏显示线程通常已解过这一帧，这里直接命中，省掉整帧解码
                     // （640x360 MJPEG → 320 宽，C906 上约 10ms/帧）。
                     csrc::Camera::RgbFrame rgb;
-                    if (ctx.camera.latest_rgb(ctx.config.camera.stream_width, rgb) &&
+                    if (ctx.camera.latest_rgb(sc.width, rgb) &&
                         !rgb.data.empty() && rgb.ts_ms != last_ts) {
                         jpeg.clear();
-                        ok = build_stream_jpeg_rgb(ctx, rgb, jpeg);
+                        ok = build_stream_jpeg_rgb(rgb, sc.width, sc.height, sc.quality, jpeg);
                         ts = rgb.ts_ms;
                     }
                 } else {

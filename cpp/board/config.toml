@@ -12,22 +12,31 @@ port = "/dev/cvi-usb-camera0"
 # 枚举到的全部档位：1920x1080 1280x960 1280x720 640x360（320x240 为假档）
 width = 640
 height = 360
-fps = 15
+# 采集帧率：单核 C906 上"有新帧才推"→ 采集 30fps 比 15fps 多出约 15% 出流帧率
+# （15fps 时取流只能等到 1/15s 才可能有新帧）。
+fps = 30
 jpeg_quality = 75
 # 浏览器取流方式（CPU ↔ 带宽 的权衡，按机器负载选）：
-#   stream_scale = false（默认，推荐）：**直通原帧** —— 摄像头出的就是压缩好的
-#     MJPEG，直接转发给浏览器，服务端零解码零编码（单核 SoC 上省 ~25ms/帧，
-#     这是"网页看摄像头不卡"的关键）。代价是带宽大：640x360 q75 原帧约
-#     30~60KB/帧（15fps ≈ 4~7Mbps），而缩到 320x180 只要约 15KB/帧。
-#     嫌带宽大就调低 [camera] jpeg_quality（摄像头侧就压小，仍零 CPU），
-#     而不是打开服务端重编码。
-#   stream_scale = true：服务端把采集帧缩到 stream_width x stream_height 并
-#     重编码后下发 —— 省 WiFi 带宽，但每帧多花 ~15ms CPU（解码 10ms 可与屏
-#     显示共享，编码 15ms 省不掉），单核机器上会拖慢取流。
-stream_scale = false
-stream_width = 320
-stream_height = 180
-stream_quality = 75
+#   stream_scale = false：**直通原帧** —— 摄像头出的就是压缩好的 MJPEG，服务端
+#     零解码零编码。代价是带宽大：640x360 q75 原帧实测约 37KB/帧。
+#   stream_scale = true（默认，课堂多车推荐）：服务端把采集帧缩到
+#     stream_width x stream_height 并重编码后下发。单车实测：
+#     直通 ~4.2Mbps → 288x162 q80 ~1.07Mbps @20.6fps，30 台同房间时总带宽从
+#     120Mbps+ 降到 ~32Mbps。
+#   **出流帧率主要由像素数决定**（单核上解码+缩放+编码都按像素线性增长），
+#   stream_quality 几乎不影响帧率（q50~q88 相差 <1fps）。实测（采集30fps）：
+#     320x180 q75 → 16.1fps / 0.89Mbps（解码就要 320x180）
+#     288x162 q80 → 20.6fps / 1.07Mbps（解码仍是 320x180，编码按 288x162）
+#     256x144 q88 → 23.1fps / 1.25Mbps（解码降到 160x90，画面偏软）
+#   想要更流畅就往下调尺寸（下限 256x144），要更清晰就往上调（上限 400x225）。
+#   **注意**：必须同时把 [display] fps_streaming 设成 0，否则屏显示解码会和
+#     浏览器取流抢单核 CPU —— 实测 fps_streaming=3 时缩放出流只有 4fps。
+#   jpeg_quality 当前 C++ 实现未使用（板子走 CVI 私有摄像头路径，拿不到 UVC 质量
+#     控制），改它不会生效。
+stream_scale = true
+stream_width = 288
+stream_height = 162
+stream_quality = 80
 # 固定曝光/AWB/增益（默认 false）：廉价 UVC 的自动曝光/AWB 会周期性抖动，
 # 整幅画面每帧一起变 → 屏显示的脏行检测失效（写屏流量上升、帧率下降）。
 # 开启后画面亮度恒定（暗光下会偏暗）；等价于板测工具 tests/demo_camera.c 的 DEMO_EXP_FIX=1。
@@ -100,8 +109,10 @@ orient = 3
 fps = 8
 # 浏览器有人在看 MJPEG 流时的显示帧率（0 = 暂停显示）。
 # 单核 SoC 上"全屏写屏 + 浏览器取流"会抢 CPU（每帧 RGB565 转换约 28ms + 内核推屏），
-# 有人看流时降到 3 帧（浏览器优先），没人看时恢复 fps
-fps_streaming = 3
+# 有人看流时降到 3 帧（浏览器优先），没人看时恢复 fps。
+# 默认 0（暂停）：配合 [camera] stream_scale 才能跑满 11~13fps；屏停在最后一帧，
+# 浏览器断开后立即恢复正常显示。
+fps_streaming = 0
 # 解码降采样上限宽。全屏要铺满 320x480，按 640 解码才清晰（按 320 解码会被放大 1.78 倍、
 # 明显发虚）；半屏（scale=2）时用 320 更省 CPU，也能与浏览器共用同一次解码
 decode_max_w = 640

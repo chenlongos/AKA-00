@@ -1,5 +1,5 @@
 import {useEffect, useState} from "react";
-import {Route, Routes, useLocation} from "react-router-dom";
+import {Navigate, Route, Routes, useLocation} from "react-router-dom";
 import TabBar from "./components/TabBar.tsx";
 import BaseControlPage from "./pages/BaseControlPage.tsx";
 import WiFiConfigPage from "./pages/WiFiConfigPage.tsx";
@@ -10,8 +10,10 @@ import GravityControlPage from "./pages/GravityControlPage.tsx";
 import SettingsPage from "./pages/SettingsPage.tsx";
 import SpeedConfigPage from "./pages/SpeedConfigPage.tsx";
 import OTAPage from "./pages/OTAPage.tsx";
+import ExperimentPage from "./pages/ExperimentPage.tsx";
+import SelfTestPage from "./pages/SelfTestPage.tsx";
 
-const TAB_PATHS = ["/", "/rc", "/demo", "/settings"];
+const TAB_PATHS = ["/", "/rc", "/demo", "/settings", "/experiment"];
 
 function App() {
     const location = useLocation();
@@ -46,7 +48,11 @@ function App() {
                     <Route path="/arm-angles/admin" element={<ArmAnglesPage />} />
                     <Route path="/ota" element={<OTAPage />} />
                     <Route path="/speed-config" element={<SpeedConfigPage />} />
+                    <Route path="/self-test" element={<SelfTestPage />} />
                     <Route path="/gravity" element={<GravityControlPage />} />
+                    <Route path="/experiment" element={<ExperimentPage />} />
+                    {/* 旧版 iframe 内页地址（/experiment/gesture 等）统一退回列表，避免白屏 */}
+                    <Route path="/experiment/*" element={<Navigate to="/experiment" replace />} />
                 </Routes>
             </div>
             {showTabBar && tabBarVisible && <TabBar />}

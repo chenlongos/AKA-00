@@ -86,7 +86,19 @@ PAYLOAD_OFFSET=0000000
 # `demo/*.lua` 是**动作脚本**（grab/approach…，与模型无关），同样不在保留之列：
 # 它是仓库里的代码，升级按包里的结算 —— 想按模型/按卡片调参，**改 demo/configs/ 里的
 # 卡片配置，别改动作脚本**，否则升级就丢了。（configs 是"板上优先"，见 swap_in。）
-KEEP_FILES="config.toml speed_config.json arm_angles.json cert.pem key.pem"
+# `static/camera-profile.json` 是"摄像头清晰度档位"的每车状态（前端下拉读它）。
+# 档位真正生效的值在 config.toml（已在名单里），这个文件只是给它起名字对号；
+# 不保留的话，升级后实际出流还是用户选的尺寸，UI 却回落显示默认「均衡」。
+KEEP_FILES="config.toml speed_config.json arm_angles.json cert.pem key.pem static/camera-profile.json"
+
+# 云端继承版本记录（capp 的 /api/ota/version 优先读它，见 status_reporter.cpp）：
+# 云端升级下载成功时 capp 先写 aka-release.pending，这里换包成功后才提升为
+# aka-release —— 装完对外版本号就跟随云端 versionNumber，不再依赖包内 VERSION。
+# 换包失败（swap_in 里 exit 1）不会提升，pending 留到下次安装覆盖。
+AKA_HOME="${AKA_HOME%/}"
+RELEASE_DIR="${AKA_HOME%/*}"
+PENDING_VERSION="$RELEASE_DIR/aka-release.pending"
+RELEASE_VERSION="$RELEASE_DIR/aka-release"
 
 extract_payload() {
     _dest="$1"
@@ -98,6 +110,7 @@ extract_payload() {
     tail -c +"$_off" "$0" | tar xz -C "$_dest"
     chmod 755 "$_dest"/*.sh 2>/dev/null || true
     chmod 755 "$_dest/aka-capp" 2>/dev/null || true
+    chmod 755 "$_dest/aka-blockly-runner" 2>/dev/null || true
     if [ -d "$_dest/tools" ]; then chmod 755 "$_dest"/tools/* 2>/dev/null || true; fi
     # macOS 打包可能带出来的元数据文件，清掉免干扰
     rm -f "$_dest"/._* 2>/dev/null || true
@@ -171,6 +184,16 @@ swap_in() {
     if [ -d "$AKA_HOME" ]; then mv "$AKA_HOME" "$_old"; fi
     mv "$_new" "$AKA_HOME"
     echo "[ota] 已换入新版本；回滚点: $_old"
+
+    # root 密码统一为 chenlong（现场维护约定）—— 升级/首次部署都生效，--extract 不动密码。
+    # busybox 的 chpasswd 需要 root 身份；非 root 跑本脚本时这一步会失败，只告警不中止。
+    if command -v chpasswd >/dev/null 2>&1; then
+        if echo 'root:chenlong' | chpasswd 2>/dev/null; then
+            echo "[ota] root 密码已设为 chenlong"
+        else
+            echo "[ota] 警告：root 密码设置失败（非 root 或缺少 chpasswd）"
+        fi
+    fi
 }
 
 stop_service() {
@@ -195,6 +218,8 @@ case "$1" in
         ;;
     --init)
         echo "=== AKA-00 首次部署 ==="
+        # 全新部署以包内 VERSION 为准，清掉旧的云端继承记录
+        rm -f "$RELEASE_VERSION" "$PENDING_VERSION"
         swap_in
         if [ -x "$AKA_HOME/init_ap_web.sh" ]; then "$AKA_HOME/init_ap_web.sh" || echo "[ota] init_ap_web.sh 失败（可稍后重试）"; fi
         echo "[ota] 部署完成，下次开机自动启动"
@@ -210,6 +235,11 @@ case "$1" in
         touch "$AKA_HOME/.ota/aka-ota-lock"   # 让守护脚本暂停拉起（若还在跑）
         stop_service
         swap_in
+        # 换包成功 → 把云端版本号落盘为对外版本（pending 是 capp 下载成功时写的）
+        if [ -f "$PENDING_VERSION" ]; then
+            mv -f "$PENDING_VERSION" "$RELEASE_VERSION"
+            echo "[ota] 版本继承: $(cat "$RELEASE_VERSION")"
+        fi
         # 暂存文件换包后都落在回滚点目录里，删掉省 ~20MB。删的是**正跑着的自己** ——
         # Linux 上 unlink 后 inode 仍在，本脚本能读完，安全。
         rm -f "$AKA_HOME.old/.ota/aka-ota-update" \

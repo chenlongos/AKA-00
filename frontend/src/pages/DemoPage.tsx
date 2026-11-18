@@ -304,13 +304,13 @@ const DemoPage = () => {
         </div>
     );
 
-    /** 模型那一排：可点选的小标签，**每个右上角一个删除的 ✕**，末尾一个 ＋ 传新模型。
+    /** 模型那一排：可点选的小标签，**每个右上角一个删除的 ✕**，末尾一个「+上传模型」。
      *  ✕ 与标签是**兄弟节点**而不是父子 —— button 里套 button 是非法 HTML，点 ✕ 会连带选中它。
      *  标签间距放大到 9px 是给 ✕ 让位置（它往外挑 5px）。 */
     const modelChips = () => (
         <div style={{display: "flex", gap: scalePx(9), flexWrap: "wrap", alignItems: "flex-start"}}>
             {models.length === 0 && (
-                <span style={{fontSize: scalePx(11), color: "var(--color-text-dim)"}}>（还没有模型，点右边的 ＋ 传一个）</span>
+                <span style={{fontSize: scalePx(11), color: "var(--color-text-dim)"}}>（还没有模型，点「+上传模型」传一个）</span>
             )}
             {models.map(m => (
                 <span key={m} style={{position: "relative", display: "inline-flex"}}>
@@ -332,14 +332,16 @@ const DemoPage = () => {
                             }}>×</button>
                 </span>
             ))}
+            {/* 上传模型：虚线描边 + 主色文字，与实心/选中态的小标签在视觉上区分开 */}
             <label title="上传模型（.cvimodel）" style={{
                 display: "inline-flex", alignItems: "center", justifyContent: "center",
-                minWidth: scalePx(26), height: scalePx(26), padding: `0 ${scalePx(6)}`,
-                cursor: uploadingModel ? "wait" : "pointer",
-                borderRadius: scalePx(6), border: "1px dashed var(--color-border-light)",
-                color: "var(--color-text-muted)", fontSize: uploadingModel ? scalePx(10) : scalePx(14),
+                height: scalePx(26), padding: `0 ${scalePx(10)}`,
+                cursor: uploadingModel ? "wait" : "pointer", whiteSpace: "nowrap",
+                borderRadius: scalePx(6), border: "1px dashed var(--color-primary)",
+                color: "var(--color-primary)", fontSize: scalePx(11), fontWeight: 600,
+                opacity: uploadingModel ? 0.6 : 1,
             }}>
-                {uploadingModel ? "上传中…" : "＋"}
+                {uploadingModel ? "上传中…" : "+上传模型"}
                 <input type="file" accept=".cvimodel" disabled={uploadingModel}
                        style={{display: "none"}}
                        onChange={e => {
@@ -413,7 +415,7 @@ const DemoPage = () => {
                                 {chooser(actions.map(a => ({id: a.id, label: a.name})), newAction, setNewAction)}
                             </div>
                             <div style={{display: "flex", flexDirection: "column", gap: scalePx(4)}}>
-                                <span style={labelStyle}>模型（找什么）—— ✕ 删掉、＋ 传新的</span>
+                                <span style={labelStyle}>模型（找什么）—— ✕ 删掉、右侧「+上传模型」传新的</span>
                                 {modelChips()}
                             </div>
                             <div style={{display: "flex", alignItems: "flex-end", gap: scalePx(8), flexWrap: "wrap"}}>
@@ -484,11 +486,6 @@ const DemoPage = () => {
                                             >
                                                 {isRunning ? "停止" : "启动"}
                                             </ControlButton>
-                                            <button onClick={() => setDeleteTarget(name)} title="删除这张卡片" style={{
-                                                background: "none", border: "none", cursor: "pointer",
-                                                padding: scalePx(6), borderRadius: scalePx(6),
-                                                color: "var(--color-text-dim)", fontSize: scalePx(11),
-                                            }}>删除</button>
                                         </div>
                                     </div>
 
@@ -511,7 +508,16 @@ const DemoPage = () => {
                                                         ...prev, [name]: {...formOfCard(name), mode: m},
                                                     })))}
                                                 </div>
-                                                <div style={{display: "flex", justifyContent: "flex-end"}}>
+                                                {/* 删除放参数展开区底部左侧（红色次要按钮），与右侧「保存」分开 */}
+                                                <div style={{...S.rowBetween}}>
+                                                    <button onClick={() => setDeleteTarget(name)} title="删除这张卡片" style={{
+                                                        background: "var(--color-danger-soft)",
+                                                        border: "1px solid rgba(239, 68, 68, 0.45)",
+                                                        color: "var(--color-danger)", cursor: "pointer",
+                                                        padding: `${scalePx(6)} ${scalePx(12)}`,
+                                                        borderRadius: scalePx(8),
+                                                        fontSize: scalePx(11), fontWeight: 600,
+                                                    }}>删除</button>
                                                     <ControlButton variant="secondary" size="small"
                                                                    onClick={() => saveParams(name, card)}
                                                                    loading={savingName === name}>

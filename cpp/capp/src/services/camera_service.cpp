@@ -70,20 +70,16 @@ bool current_jpeg(AppContext& ctx, int quality, std::vector<uint8_t>& out) {
 bool build_stream_jpeg(AppContext& ctx, const csrc::Camera::Frame& f,
                        std::vector<uint8_t>& out) {
     if (f.data.empty()) return false;
+    const StreamCfg sc = stream_cfg_snapshot(ctx);   // 运行时改档后立即用上新尺寸
     csrc::Camera::RgbFrame rgb;
-    if (!ctx.camera.latest_rgb(ctx.config.camera.stream_width, rgb) || rgb.data.empty())
+    if (!ctx.camera.latest_rgb(sc.width, rgb) || rgb.data.empty())
         return false;
-    return build_stream_jpeg_rgb(ctx, rgb, out);
+    return build_stream_jpeg_rgb(rgb, sc.width, sc.height, sc.quality, out);
 }
 
 // 由已解码的 RGB 帧出流（缓存命中路径）：缩放补齐 + 编码，不再重复解码。
-
-// 由已解码的 RGB 帧出流（缓存命中路径）：缩放补齐 + 编码，不再重复解码。
-bool build_stream_jpeg_rgb(AppContext& ctx, const csrc::Camera::RgbFrame& rgb,
-                           std::vector<uint8_t>& out) {
-    const int ow = ctx.config.camera.stream_width;
-    const int oh = ctx.config.camera.stream_height;
-    const int q = ctx.config.camera.stream_quality;
+bool build_stream_jpeg_rgb(const csrc::Camera::RgbFrame& rgb,
+                           int ow, int oh, int q, std::vector<uint8_t>& out) {
     if (ow <= 0 || oh <= 0 || q <= 0 || rgb.data.empty()) return false;
     const int w = rgb.w, h = rgb.h;
     if (w <= 0 || h <= 0) return false;

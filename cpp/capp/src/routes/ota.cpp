@@ -9,6 +9,7 @@
 
 #include <sys/stat.h>   // chmod（重启脚本要可执行）
 
+#include <cstdio>       // std::remove（清继承记录）
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
@@ -166,9 +167,13 @@ void register_ota_routes(Router& router, AppContext& ctx) {
         std::string ver;
         int64_t ts = 0;
         read_version_file(ctx, ver, ts);
+        std::string pkg_ver;   // 包内 VERSION（不带云端继承记录），便于排查"版本号从哪来"
+        int64_t pkg_ts = 0;
+        read_package_version_file(ctx, pkg_ver, pkg_ts);
         Json j;
         j["version"] = ver;
         j["updated"] = csrc::Json(ts);
+        j["package_version"] = pkg_ver;
         j["service"] = "AKA-00";
         resp.set_json(j);
     });
@@ -312,7 +317,7 @@ void register_ota_routes(Router& router, AppContext& ctx) {
             sf << st.dump(false);
         }
 
-        std::thread([&ctx, download_url, task_id] {
+        std::thread([&ctx, download_url, task_id, remote_ver, remote_ts] {
             try {
                 std::string ota_dir = ctx.app_dir + "/.ota";
                 std::string mk = "mkdir -p \"" + ota_dir + "\"";
@@ -355,6 +360,14 @@ void register_ota_routes(Router& router, AppContext& ctx) {
                     st["task_id"] = task_id;
                     sf << st.dump(false);
                 }
+                // 先写"待继承版本"：安装器换包成功后才提升为 aka-release（失败则留在
+                // pending，下次成功安装覆盖）——对外版本号跟随云端 versionNumber，
+                // 不再受"包内容没改、包内 VERSION 没变"影响。
+                if (!remote_ver.empty()) {
+                    std::ofstream pf(release_record_path(ctx, "aka-release.pending"),
+                                     std::ios::trunc);
+                    if (pf) pf << remote_ver << "@" << remote_ts << "\n";
+                }
                 write_restart_script(ctx, tmp_path);
                 std::lock_guard<std::mutex> lk(ctx.ota_mu);
                 ctx.ota_tasks[task_id]["progress"] = csrc::Json((int64_t)100);
@@ -390,6 +403,9 @@ void register_ota_routes(Router& router, AppContext& ctx) {
             std::ofstream f(tmp_path, std::ios::binary | std::ios::trunc);
             f.write(content.data(), (std::streamsize)content.size());
         }
+        // 手动上传包：以包内 VERSION 为准 → 清掉云端继承记录，避免旧版本号盖住新包
+        std::remove(release_record_path(ctx, "aka-release.pending").c_str());
+        std::remove(release_record_path(ctx, "aka-release").c_str());
         // md5 校验（request form 字段）
         // 注意：本实现从 multipart 里只取了文件；md5 字段在非文件 part 中。
         // 简化：跳过 md5 强校验（有需求再补）。

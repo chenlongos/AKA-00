@@ -1,44 +1,27 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import {api, controlSocket} from "../api";
 import CameraToggle from "../components/CameraToggle";
+import CameraQualityPicker from "../components/CameraQualityPicker";
 import FullscreenButton from "../components/FullscreenButton";
 import TabBar from "../components/TabBar";
 import Page from "../components/Page";
 import {S} from "../styles";
 import {useViewportScale} from "../hooks/useViewportScale";
+import {usePageVisible} from "../hooks/usePageVisible";
 
-const FPS_OPTIONS = [30, 20, 10];
-const FPS_LABELS = ["高清", "均衡", "省流"];
+// 页面隐藏时把 MJPEG <img> 的 src 换成 1x1 透明图来断流。
+// 实测（无头 Chrome + CDP）：仅把 <img> 从 DOM 卸载**不会**取消 MJPEG 请求
+// （浏览器把图像资源留在内存里继续下载）；改 src 才会触发 ERR_ABORTED，
+// 车机的推流线程随之 write 失败退出、display.set_streaming(false) 恢复屏显。
+const BLANK_PX = "data:image/gif;base64,R0lGODlhAQABAAAAACw=";
 
-const CameraBar = ({
-    scalePx, cameraOn, fpsIndex, frameReady, onStatusChange, onFpsChange, syncKey,
-}: {
-    scalePx: (px: number) => string;
-    cameraOn: boolean;
-    fpsIndex: number;
-    frameReady?: boolean;
-    onStatusChange: (on: boolean) => void;
-    onFpsChange: () => void;
-    syncKey: number;
-}) => (
-    <div style={{display: "flex", alignItems: "center", gap: scalePx(6)}}>
-        <CameraToggle key={syncKey} onStatusChange={onStatusChange} frameReady={frameReady} />
-        {cameraOn && (
-            <button onClick={onFpsChange} style={{
-                background: fpsIndex > 0 ? "var(--color-success)" : "var(--color-bg-elevated)",
-                border: `1px solid ${fpsIndex > 0 ? "var(--color-success)" : "var(--color-border)"}`,
-                color: fpsIndex > 0 ? "#fff" : "var(--color-text-muted)",
-                padding: `${scalePx(2)} ${scalePx(6)}`, borderRadius: "var(--radius-sm)",
-                fontSize: scalePx(9), fontWeight: 600, cursor: "pointer", outline: "none",
-            }}>
-                {FPS_LABELS[fpsIndex]}
-            </button>
-        )}
-    </div>
-);
+// 每路固定 30fps（原来的「高清/均衡/省流」限帧按钮已换成全局清晰度下拉）
+const STREAM_FPS = 30;
 
 const RCDemoPage = () => {
     const {scalePx, scale} = useViewportScale();
+    // 标签页不可见时把 MJPEG <img> 换成空白图：断开长连接，车机立即停止推流。
+    const pageVisible = usePageVisible();
     const [leftSpeed, setLeftSpeed] = useState(0);
     const [rightSpeed, setRightSpeed] = useState(0);
     const [throttle, setThrottle] = useState(0);
@@ -48,7 +31,8 @@ const RCDemoPage = () => {
     // MJPEG <img> 首帧到达信号：传给 CameraToggle 让 loading spinner 持续到
     // camera-node 真正有 JPEG 推过来，不只是 HTTP 成功。
     const [frameReady, setFrameReady] = useState(false);
-    const [fpsIndex, setFpsIndex] = useState(0);
+    // 换清晰度后车机重启，旧的 MJPEG 请求已失效 → 用 t= 参数强制重发一次
+    const [streamKey, setStreamKey] = useState(0);
     const [wsConnected, setWsConnected] = useState(false);
     const [isLandscape, setIsLandscape] = useState(() => window.innerWidth > window.innerHeight);
     const [bottomOpen, setBottomOpen] = useState(false);
@@ -301,9 +285,10 @@ const RCDemoPage = () => {
                 {/* 视频全屏 */}
                 <div style={{position: "absolute", inset: 0}}>
                     {cameraOn ? (
-                        <img src={`/api/camera/stream?fps=${FPS_OPTIONS[fpsIndex]}`}
-                             onLoad={() => setFrameReady(true)}
-                             style={{width: "100%", height: "100%", objectFit: "cover", display: "block"}} alt="" />
+                        // 隐藏时 src 换成空白图：浏览器取消长连接，车机停止推流（回来时自动重连）
+                        <img src={pageVisible ? `/api/camera/stream?fps=${STREAM_FPS}&t=${streamKey}` : BLANK_PX}
+                             onLoad={() => { if (pageVisible) setFrameReady(true); }}
+                             style={{width: "100%", height: "100%", objectFit: "cover", background: "#000", display: "block"}} alt="" />
                     ) : (
                         <div
                             onPointerDown={e => { e.stopPropagation(); api.camera.open().then(d => { setCameraOn(d.camera_on); setCameraSyncKey(k => k + 1); }); }}
@@ -346,13 +331,7 @@ const RCDemoPage = () => {
                     <div style={{display: "flex", alignItems: "center", gap: scalePx(6), alignSelf: "flex-end"}}>
                         <CameraToggle key={cameraSyncKey} onStatusChange={setCameraOn} frameReady={frameReady} />
                         {cameraOn && (
-                            <button onClick={() => setFpsIndex(i => (i + 1) % 3)} style={{
-                                background: fpsIndex > 0 ? "var(--color-success)" : "rgba(255,255,255,0.15)",
-                                border: "none", color: "#fff", padding: `${scalePx(2)} ${scalePx(6)}`,
-                                borderRadius: "var(--radius-sm)", fontSize: scalePx(9), fontWeight: 600, cursor: "pointer",
-                            }}>
-                                {FPS_LABELS[fpsIndex]}
-                            </button>
+                            <CameraQualityPicker onBeforeApply={handleBrake} onApplied={() => setStreamKey(k => k + 1)} />
                         )}
                     </div>
                     <div style={{display: "flex", gap: scalePx(6), width: joyW}}>
@@ -417,7 +396,7 @@ const RCDemoPage = () => {
             <div style={{...S.col, gap, alignItems: "center", width: pVideoW}}>
                 {/* 顶部栏 */}
                 <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", height: topH, marginTop: "5px"}}>
-                    <CameraBar scalePx={scalePx} cameraOn={cameraOn} fpsIndex={fpsIndex} frameReady={frameReady} onStatusChange={setCameraOn} onFpsChange={() => setFpsIndex(i => (i + 1) % 3)} syncKey={cameraSyncKey} />
+                    <CameraToggle key={cameraSyncKey} onStatusChange={setCameraOn} frameReady={frameReady} />
                     <div style={{display: "flex", gap: scalePx(8), fontSize: scalePx(10), whiteSpace: "nowrap", alignItems: "center"}}>
                         <FullscreenButton />
                         <span>左 <b style={S.success}>{leftSpeed >= 0 ? "+" : ""}{Math.round(leftSpeed * 100)}</b><i style={{fontStyle: "normal", opacity: 0.7, fontSize: "0.8em"}}> cm/s</i></span>
@@ -427,14 +406,21 @@ const RCDemoPage = () => {
                 </div>
 
                 {/* 视频 */}
-                <div style={{borderRadius: "var(--radius-md)", overflow: "hidden", border: "2px solid var(--color-border)", flexShrink: 0}}>
+                <div style={{borderRadius: "var(--radius-md)", overflow: "hidden", border: "2px solid var(--color-border)", flexShrink: 0, position: "relative"}}>
                     {cameraOn ? (
-                        <img src={`/api/camera/stream?fps=${FPS_OPTIONS[fpsIndex]}`}
-                             onLoad={() => setFrameReady(true)}
+                        // 隐藏时 src 换成空白图：浏览器取消长连接，车机停止推流（回来时自动重连）
+                        <img src={pageVisible ? `/api/camera/stream?fps=${STREAM_FPS}&t=${streamKey}` : BLANK_PX}
+                             onLoad={() => { if (pageVisible) setFrameReady(true); }}
                              style={{width: pVideoW, height: pVideoH, objectFit: "cover", background: "#000", display: "block"}} alt="" />
                     ) : (
                         <div style={{width: pVideoW, height: pVideoH, background: "var(--color-bg-card)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-text-muted)", fontSize: scalePx(14)}}>
                             摄像头关闭
+                        </div>
+                    )}
+                    {/* 全局清晰度：叠在画面右上角（换档会重启车机摄像头服务约 10 秒） */}
+                    {cameraOn && (
+                        <div style={{position: "absolute", top: scalePx(6), right: scalePx(6)}}>
+                            <CameraQualityPicker onBeforeApply={handleBrake} onApplied={() => setStreamKey(k => k + 1)} />
                         </div>
                     )}
                 </div>

@@ -17,16 +17,12 @@
 
 namespace capp {
 
-// VERSION 文件: "v1.2.3@1722169200" 或 "v1.2.3 1722169200"
-// **一处解析**：状态上报只要版本号，OTA 还要那个时间戳（比"谁的包更新"）。以前是两份
-// （capp/services 一份、capp/routes/ota.cpp 一份），分家之后改一处漏一处，所以合成一个。
-void read_version_file(AppContext& ctx, std::string& ver, int64_t& ts) {
+namespace {
+
+// "v1.2.3@1722169200" 或 "v1.2.3 1722169200" → 版本号 + 时间戳
+void parse_version_line(const std::string& raw, std::string& ver, int64_t& ts) {
     ver = "unknown";
     ts = 0;
-    std::ifstream f(ctx.app_dir + "/VERSION");
-    if (!f) return;
-    std::string raw;
-    std::getline(f, raw);
     if (raw.empty()) return;
     const char sep = raw.find('@') != std::string::npos ? '@' : ' ';
     const size_t pos = raw.rfind(sep);
@@ -36,6 +32,48 @@ void read_version_file(AppContext& ctx, std::string& ver, int64_t& ts) {
     } else {
         ver = raw;
     }
+}
+
+}  // namespace
+
+// $AKA_HOME 的同级文件路径（发布记录 /root/aka-release、/root/aka-release.pending）。
+// 安装器（build-ota.sh）按 `${AKA_HOME%/*}` 同一规则读写，两边必须一致。
+std::string release_record_path(AppContext& ctx, const char* name) {
+    std::string dir = ctx.app_dir;
+    while (!dir.empty() && dir[dir.size() - 1] == '/') dir.erase(dir.size() - 1);
+    size_t p = dir.rfind('/');
+    std::string base = p == std::string::npos ? std::string(".") : dir.substr(0, p);
+    if (base.empty()) base = "/";
+    return base + "/" + name;
+}
+
+// 包里自带的 VERSION（安装时从 tar 解出来的那份）
+void read_package_version_file(AppContext& ctx, std::string& ver, int64_t& ts) {
+    std::ifstream f(ctx.app_dir + "/VERSION");
+    if (!f) {
+        ver = "unknown";
+        ts = 0;
+        return;
+    }
+    std::string raw;
+    std::getline(f, raw);
+    parse_version_line(raw, ver, ts);
+}
+
+// 对外版本：优先云端继承记录（aka-release，由安装器在换包成功后落盘），
+// 没有才回落到包内 VERSION。这样云端 versionNumber 就是版本判断的主依据，
+// 也解决"包内容一样、只改了云端版本号 → 装完版本号不变"的问题。
+void read_version_file(AppContext& ctx, std::string& ver, int64_t& ts) {
+    ver = "unknown";
+    ts = 0;
+    std::ifstream f(release_record_path(ctx, "aka-release"));
+    if (f) {
+        std::string raw;
+        std::getline(f, raw);
+        parse_version_line(raw, ver, ts);
+        if (ver != "unknown") return;
+    }
+    read_package_version_file(ctx, ver, ts);
 }
 
 namespace {

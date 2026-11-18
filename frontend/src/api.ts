@@ -37,6 +37,9 @@ export const arm = {
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({driver, key, value, angles}),
         }).then(r => r.json()),
+    // 执行整段夹取/释放序列（后端 /api/control?action=grab|release）
+    action: (action: "grab" | "release") =>
+        fetch(`/api/control?action=${action}`).then(r => r.json()),
 };
 
 

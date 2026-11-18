@@ -33,6 +33,7 @@ const ArmAnglesPage = () => {
     const [angles, setAngles] = useState<ArmAnglesNew>(ZP10S_DEFAULTS);
     const [status, setStatus] = useState("");
     const [saving, setSaving] = useState(false);
+    const [actionBusy, setActionBusy] = useState<"grab" | "release" | null>(null);
     const location = useLocation();
     const isAdmin = location.pathname.endsWith("/admin");
     const previewTimerRef = useRef<number | null>(null);
@@ -120,8 +121,44 @@ const ArmAnglesPage = () => {
         }, 80);
     };
 
-    const statusBg = (s: string) => s.includes("成功") || s.includes("生效") ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)";
-    const statusClr = (s: string) => s.includes("成功") || s.includes("生效") ? "var(--color-success)" : "var(--color-danger)";
+    /** 执行整段夹取/释放序列：先同步当前角度，确保动作用的是屏幕上的值 */
+    const runArmAction = async (kind: "grab" | "release") => {
+        if (actionBusy) return;
+        // 取消尚未触发的角度预览，避免动作执行时被旧请求覆盖
+        if (previewTimerRef.current !== null) { clearTimeout(previewTimerRef.current); previewTimerRef.current = null; }
+        setActionBusy(kind);
+        setStatus(kind === "grab" ? "抓取中…" : "释放中…");
+        try {
+            const saved = await api.arm.saveAngles(driver, angles) as {error?: string};
+            if (saved?.error) throw new Error(saved.error);
+            const r = await api.arm.action(kind) as {status?: string; message?: string; error?: string};
+            if (r?.status === "error" || r?.error) throw new Error(r.message || r.error || "动作失败");
+            setStatus(kind === "grab" ? "抓取指令已发送" : "释放指令已发送");
+            setTimeout(() => setStatus(""), 2500);
+        } catch (e) {
+            setStatus((kind === "grab" ? "抓取失败: " : "释放失败: ") + e);
+        } finally {
+            setActionBusy(null);
+        }
+    };
+
+    const statusOk = (s: string) => !/失败|错误|error/i.test(s);
+    const statusBg = (s: string) => statusOk(s) ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)";
+    const statusClr = (s: string) => statusOk(s) ? "var(--color-success)" : "var(--color-danger)";
+
+    const actionBtnStyle = (kind: "grab" | "release"): React.CSSProperties => ({
+        flex: 1,
+        padding: `${scalePx(10)} 0`,
+        borderRadius: scalePx(10),
+        border: "none",
+        fontSize: scalePx(14),
+        fontWeight: 600,
+        cursor: actionBusy ? "not-allowed" : "pointer",
+        color: kind === "grab" ? "#fff" : "var(--color-text)",
+        background: kind === "grab" ? "var(--color-primary)" : "var(--color-bg-elevated)",
+        opacity: actionBusy ? 0.6 : 1,
+        transition: "opacity 0.15s",
+    });
 
     const sectionTitle = (t: string, subtitle?: string) => (
         <div style={{marginBottom: scalePx(8), marginTop: scalePx(4)}}>
@@ -235,6 +272,31 @@ const ArmAnglesPage = () => {
                         />
                     </div>
                 </Card>
+
+                {/* 动作测试：用当前角度执行整段夹取/释放序列 */}
+                {!isAdmin && (
+                    <Card>
+                        <div style={{padding: scalePx(4)}}>
+                            {sectionTitle("动作测试", "先用当前角度执行整段抓取/释放，验证配置是否正确")}
+                            <div style={{display: "flex", gap: scalePx(10)}}>
+                                <button
+                                    onClick={() => runArmAction("grab")}
+                                    disabled={actionBusy !== null}
+                                    style={actionBtnStyle("grab")}
+                                >
+                                    {actionBusy === "grab" ? "抓取中…" : "抓取"}
+                                </button>
+                                <button
+                                    onClick={() => runArmAction("release")}
+                                    disabled={actionBusy !== null}
+                                    style={actionBtnStyle("release")}
+                                >
+                                    {actionBusy === "release" ? "释放中…" : "释放"}
+                                </button>
+                            </div>
+                        </div>
+                    </Card>
+                )}
             </div>
         </div>
     );

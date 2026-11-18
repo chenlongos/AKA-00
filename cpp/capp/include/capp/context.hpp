@@ -83,6 +83,9 @@ struct AppContext {
     std::unique_ptr<csrc::YoloDetector> detector;  // 首次请求时才加载
 
     bool camera_on = false;
+    /// 保护 config.camera.stream_*：POST /api/config/camera 运行时就地改这四个值，
+    /// 流线程每帧读一次快照 —— 改完对已连接的观众立即生效，不重启、不断流。
+    std::mutex camera_cfg_mu;
 
     /// 优雅关闭标记（SIGTERM/SIGINT → main 设置 → accept 循环退出）
     std::atomic<bool> shutdown{false};
@@ -127,6 +130,27 @@ struct AppContext {
         if (command_log.size() > 20) command_log.erase(command_log.begin());
     }
 };
+
+/// 浏览器取流参数快照（[camera] stream_* 的四个值）。
+/// 运行时改档接口（POST /api/config/camera）会就地更新它们，所以取用时一律走这个
+/// 加锁快照，别直接读 ctx.config.camera.stream_*（那是并发读写同一批 int）。
+struct StreamCfg {
+    bool scale = false;
+    int width = 0;
+    int height = 0;
+    int quality = 0;
+};
+
+inline StreamCfg stream_cfg_snapshot(AppContext& ctx) {
+    std::lock_guard<std::mutex> lk(ctx.camera_cfg_mu);
+    const csrc::CameraConfig& c = ctx.config.camera;
+    StreamCfg s;
+    s.scale = c.stream_scale;
+    s.width = c.stream_width;
+    s.height = c.stream_height;
+    s.quality = c.stream_quality;
+    return s;
+}
 
 // ── 控制服务（对应 app/services/control_service.py）──
 
@@ -186,12 +210,12 @@ bool ensure_camera(AppContext& ctx);
 void close_camera(AppContext& ctx);
 /// 当前帧 → JPEG 字节（原生 MJPEG 直通；YUYV 先转 RGB 再编码）
 bool current_jpeg(AppContext& ctx, int quality, std::vector<uint8_t>& out);
-/// 流帧 → JPEG 字节：按 config.camera.stream_* 缩放重编码（=0 时等价直通）。
-/// 返回 false = 帧不可用。
+/// 流帧 → JPEG 字节：按当前 stream_* 快照缩放重编码。返回 false = 帧不可用。
 bool build_stream_jpeg(AppContext& ctx, const csrc::Camera::Frame& f, std::vector<uint8_t>& out);
 /// 流帧 → JPEG 字节（用共享解码结果版本）：屏幕显示与浏览器流共用一次解码。
-bool build_stream_jpeg_rgb(AppContext& ctx, const csrc::Camera::RgbFrame& rgb,
-                           std::vector<uint8_t>& out);
+/// 参数显式传入，调用方先取 stream_cfg_snapshot 快照 —— 与运行时改档并发也一致。
+bool build_stream_jpeg_rgb(const csrc::Camera::RgbFrame& rgb,
+                           int ow, int oh, int quality, std::vector<uint8_t>& out);
 
 // ── 单帧推理服务（GET /api/detect）──
 
@@ -290,7 +314,15 @@ void close_display(AppContext& ctx);
 
 /// 读 $AKA_HOME/VERSION（"v1.2.3@1722169200" 或 "v1.2.3 1722169200"）→ 版本号 + 时间戳。
 /// 状态上报与 OTA 比版本都用它（**只有这一份解析**）。
+/// 优先云端继承记录（$AKA_HOME 同级 aka-release），没有才回落到包内 VERSION。
 void read_version_file(AppContext& ctx, std::string& ver, int64_t& ts);
+
+/// 只读包内 VERSION（忽略 aka-release 继承记录）
+void read_package_version_file(AppContext& ctx, std::string& ver, int64_t& ts);
+
+/// $AKA_HOME 的同级文件路径（发布记录 aka-release / aka-release.pending）。
+/// 安装器 build-ota.sh 按 `${AKA_HOME%/*}` 同一规则读写，两边必须一致。
+std::string release_record_path(AppContext& ctx, const char* name);
 
 /// 启动云端状态上报线程（URL 为空则不启动）
 void start_status_reporter(AppContext& ctx);

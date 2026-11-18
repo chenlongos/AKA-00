@@ -86,9 +86,9 @@ bool compressible(const std::string& path) {
 }
 
 const char* cache_control_for(const std::string& rel) {
-    // assets 已带内容哈希（index-<hash>.js），可永久缓存；index.html 等 no-cache，
-    // 每次发版换哈希文件名 → 浏览器自动取新包，不再出现"改了看不到"。
-    return rel.rfind("/assets/", 0) == 0 ? "public, max-age=86400" : "no-cache";
+    // /assets/** 下全部是可版本化资源（js/css 内容哈希；实验入口页带 ?v=<EXP_VERSION>），
+    // 缓存 10 天；发版时换 URL 即可立刻生效。其余（根 index.html 等）保持 no-cache。
+    return rel.rfind("/assets/", 0) == 0 ? "public, max-age=864000" : "no-cache";
 }
 
 // 服务 `file`：按 Accept-Encoding 依次尝试 br、gzip 的预压缩兄弟文件，都没有再发

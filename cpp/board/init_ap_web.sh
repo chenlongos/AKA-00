@@ -25,24 +25,47 @@ AP_IP="${AP_IP:-192.168.4.1}"
 NETMASK="${NETMASK:-255.255.255.0}"
 DHCP_START="${DHCP_START:-192.168.4.100}"
 DHCP_END="${DHCP_END:-192.168.4.200}"
-CHANNEL="${CHANNEL:-6}"
+CHANNEL="${CHANNEL:-}"                 # 留空 = 按 wlan0 MAC 自动分 1/6/11
 AKA_HOME="${AKA_HOME:-$HOME/AKA-00}"
 
 MODE="${1:-all}"   # all | install | start
 
-# ── 1. 基于 wlan0 MAC 生成唯一 SSID（与 Python 版一致）──
-MAC_SUFFIX=$(cat /sys/class/net/${AP_IFACE}/address 2>/dev/null | tr -d ':' | tail -c 6)
+# ── 1. 基于 wlan0 MAC 生成唯一 SSID + 自动信道（与 Python 版一致）──
+MAC_HEX=$(cat /sys/class/net/${AP_IFACE}/address 2>/dev/null | tr -d ':')
+MAC_SUFFIX=$(printf '%s' "$MAC_HEX" | tail -c 6)
 [ -z "$MAC_SUFFIX" ] && MAC_SUFFIX="123456"
 RANDOM_ID=$((16#${MAC_SUFFIX} % 9999999 + 1))
 SSID="chenlong-robot-${RANDOM_ID}"
 
+# 信道 = MAC 最后一位十六进制 % 3 → 1/6/11（30 台车同房间时分散到三个
+# 互不重叠的信道，详见 board/init.sh 里的说明；init.sh 每次开机会幂等对齐）。
+if [ -z "$CHANNEL" ]; then
+    MAC_LAST=$(printf '%s' "$MAC_HEX" | tail -c 1)
+    case "$MAC_LAST" in
+        ""|*[!0-9a-fA-F]*) CHANNEL=6 ;;
+        *)
+            case $((16#${MAC_LAST} % 3)) in
+                0) CHANNEL=1 ;;
+                1) CHANNEL=6 ;;
+                *) CHANNEL=11 ;;
+            esac
+            ;;
+    esac
+fi
+
 # ── 2. hostapd 配置（开放热点，与 Python 版一致；如需 WPA2 见注释）──
+# ieee80211n/wmm_enabled/beacon_int/ctrl_interface：课堂多车场景下降低单车空口占用，
+# 与 board/init.sh 的 hostapd_conf_sync 保持一致（那边每次开机幂等对齐）。
 cat > /etc/hostapd.conf <<EOF
 interface=${AP_IFACE}
 driver=nl80211
 ssid=${SSID}
 hw_mode=g
 channel=${CHANNEL}
+ieee80211n=1
+wmm_enabled=1
+beacon_int=200
+ctrl_interface=/var/run/hostapd
 auth_algs=1
 # 如需 WPA2 加密，取消下面 4 行注释并设置密码：
 #wpa=2

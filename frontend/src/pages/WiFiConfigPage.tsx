@@ -1,14 +1,19 @@
-import React, {useEffect, useState} from "react";
+import React, {useEffect, useRef, useState} from "react";
 import Header from "../components/Header";
 import AlertDialog from "../components/AlertDialog";
 import {useViewportScale} from "../hooks/useViewportScale";
+import {carUrl, copyToClipboard, isValidIPv4} from "../utils/clipboard";
 
 interface WifiNetwork { id: string; ssid: string; signal: number; secured: boolean; is_connected: boolean; }
 
 const WiFiConfigPage = () => {
     const {scalePx} = useViewportScale();
     const [networks, setNetworks] = useState<WifiNetwork[]>([]);
-    const [connectionStatus, setConnectionStatus] = useState<React.ReactNode>("正在获取状态...");
+    // null 表示状态还没拿到
+    const [ssid, setSsid] = useState<string | null>(null);
+    const [ipAddr, setIpAddr] = useState("");
+    const [copied, setCopied] = useState(false);
+    const copiedTimerRef = useRef<number | null>(null);
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [scanning, setScanning] = useState(false);
     const [connecting, setConnecting] = useState(false);
@@ -18,6 +23,10 @@ const WiFiConfigPage = () => {
     const [retryCount, setRetryCount] = useState(0);
 
     useEffect(() => { updateStatus(); }, []);
+
+    useEffect(() => () => {
+        if (copiedTimerRef.current) window.clearTimeout(copiedTimerRef.current);
+    }, []);
 
     const getBars = (signal: number) => {
         const level = signal > -60 ? 4 : signal > -70 ? 3 : signal > -80 ? 2 : 1;
@@ -34,11 +43,45 @@ const WiFiConfigPage = () => {
         try {
             const [sr, ir] = await Promise.all([fetch("/api/wifi/status"), fetch("/api/wifi/ip")]);
             const [sd, id] = await Promise.all([sr.json(), ir.json()]);
-            setConnectionStatus(sd.ssid
-                ? <span><span style={{color: "#34c759"}}>●</span> 已连接: <b>{sd.ssid}</b> | IP: <b style={{color: "#007aff"}}>{id.ip}</b></span>
-                : <span><span style={{color: "#ff3b30"}}>○</span> 未连接 | IP: <b>{id.ip}</b></span>);
+            setSsid(sd.ssid || "");
+            setIpAddr((id.ip || "").trim());
         } catch {}
     };
+
+    const copyIp = async () => {
+        if (!ipAddr) return;
+        const ok = await copyToClipboard(ipAddr);
+        if (!ok) { setAlertMsg("复制失败，请手动长按选择复制"); return; }
+        setCopied(true);
+        if (copiedTimerRef.current) window.clearTimeout(copiedTimerRef.current);
+        copiedTimerRef.current = window.setTimeout(() => setCopied(false), 1500);
+    };
+
+    const ipNode = isValidIPv4(ipAddr) ? (
+        <span style={{display: "inline-flex", alignItems: "center", gap: scalePx(4)}}>
+            <a href={carUrl(ipAddr)} target="_blank" rel="noreferrer"
+               style={{color: "#007aff", fontWeight: 700, textDecoration: "underline"}}>{ipAddr}</a>
+            <button onClick={copyIp}
+                    style={{
+                        border: "1px solid #007aff", borderRadius: scalePx(4),
+                        background: copied ? "#007aff" : "transparent",
+                        color: copied ? "#fff" : "#007aff",
+                        fontSize: scalePx(10), lineHeight: 1.4, fontWeight: 600,
+                        padding: `${scalePx(1)} ${scalePx(5)}`, cursor: "pointer", outline: "none",
+                    }}>
+                {copied ? "已复制" : "复制"}
+            </button>
+        </span>
+    ) : <b>{ipAddr || "获取中..."}</b>;
+
+    const connectionStatus: React.ReactNode = ssid === null
+        ? "正在获取状态..."
+        : <span>
+            {ssid
+                ? <><span style={{color: "#34c759"}}>●</span> 已连接: <b>{ssid}</b></>
+                : <><span style={{color: "#ff3b30"}}>○</span> 未连接</>}
+            {" | "}IP: {ipNode}
+        </span>;
 
     const loadList = async (isRetry = false) => {
         if (scanning || connecting) return;

@@ -163,3 +163,53 @@ button:active {
   50% { opacity: 0.5; }
 }
 
+/* ===== Experiment cards (/experiment) ===== */
+/* 手机竖屏一排 2 个，平板/桌面一排 3 个，极窄屏兜底单列 */
+.exp-grid {
+  display: grid;
+  align-items: stretch;
+  gap: 10px;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 380px) {
+  .exp-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 880px) {
+  .exp-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.exp-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border-light);
+  text-decoration: none;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+@media (hover: hover) {
+  .exp-card:hover {
+    transform: translateY(-3px);
+    border-color: var(--exp-accent, var(--color-border));
+    box-shadow: 0 12px 26px rgba(2, 6, 23, 0.55);
+  }
+
+  .exp-card:hover .exp-arrow {
+    transform: translateX(4px);
+  }
+}
+
+.exp-card:active {
+  transform: scale(0.985);
+}
+
+.exp-arrow {
+  display: inline-block;
+  transition: transform 0.18s ease;
+}
+

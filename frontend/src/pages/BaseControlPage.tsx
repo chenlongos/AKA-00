@@ -1,4 +1,5 @@
 import {useEffect, useRef, useState} from "react";
+import {useNavigate} from "react-router-dom";
 import {config, controlSocket, type MotorLink} from "../api";
 import ControlButton from "../components/ControlButton.tsx";
 import CameraToggle from "../components/CameraToggle";
@@ -7,10 +8,14 @@ import Page from "../components/Page";
 import AlertDialog from "../components/AlertDialog";
 import {S} from "../styles";
 import {useViewportScale} from "../hooks/useViewportScale";
+import {carUrl, copyToClipboard, isValidIPv4} from "../utils/clipboard";
 
 const BaseControlPage = () => {
     const {scalePx, scale} = useViewportScale();
-    const [ip, setIp] = useState("获取中...");
+    const navigate = useNavigate();
+    const [ip, setIp] = useState("");
+    const [copied, setCopied] = useState(false);
+    const copiedTimerRef = useRef<number | null>(null);
     const [status, setStatus] = useState("准备就绪");
     const [leftSpeed, setLeftSpeed] = useState(0);
     const [rightSpeed, setRightSpeed] = useState(0);
@@ -50,10 +55,8 @@ const BaseControlPage = () => {
                     // 只接受有效的本机 IP；空/0.0.0.0/127.0.0.1（DHCP 未完成、拿不到
                     // 有效地址）一律保持"获取中..."，绝不显示过期的 static IP（如 .94）
                     const ip = (msg.ip || "").trim();
-                    const valid = /^\d+\.\d+\.\d+\.\d+$/.test(ip)
-                        && ip !== "0.0.0.0" && ip !== "127.0.0.1";
-                    if (valid) {
-                        setIp("IP: " + ip);
+                    if (isValidIPv4(ip)) {
+                        setIp(ip);
                         setStatus("准备就绪");
                         setWsReady(true);
                     }
@@ -122,10 +125,62 @@ const BaseControlPage = () => {
     const handlePressStart = (action: string, speed?: number) => { currentActionRef.current = action; send(action, speed ?? forwardSpeed); };
     const handlePressEnd = () => { currentActionRef.current = null; send("stop"); };
 
+    useEffect(() => () => {
+        if (copiedTimerRef.current) window.clearTimeout(copiedTimerRef.current);
+    }, []);
+
     const redirect = () => {
-        const ipStr = ip.replace("IP: ", "");
-        if (!ipStr || ipStr === "获取中...") { setAlertMsg("无法获取IP，请稍后重试"); return; }
-        window.location.replace(`https://labs.chenlongrobot.com/?ip=${encodeURIComponent(ipStr)}`);
+        if (!isValidIPv4(ip)) { setAlertMsg("无法获取IP，请稍后重试"); return; }
+        window.location.replace(`https://labs.chenlongrobot.com/?ip=${encodeURIComponent(ip)}`);
+    };
+
+    const copyIp = async () => {
+        if (!isValidIPv4(ip)) return;
+        const ok = await copyToClipboard(ip);
+        if (!ok) { setAlertMsg("复制失败，请手动长按选择复制"); return; }
+        setCopied(true);
+        if (copiedTimerRef.current) window.clearTimeout(copiedTimerRef.current);
+        copiedTimerRef.current = window.setTimeout(() => setCopied(false), 1500);
+    };
+
+    // IP 显示：可点击跳到车机网页，旁边带复制按钮
+    const IpBadge = ({fontSize = 13}: {fontSize?: number}) => {
+        const valid = isValidIPv4(ip);
+        return (
+            <div style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                gap: scalePx(6), marginTop: scalePx(2), fontFamily: "monospace",
+            }}>
+                <span style={{fontSize: scalePx(fontSize), fontWeight: 500, color: "var(--color-text-muted)"}}>IP:</span>
+                {valid ? (
+                    <a href={carUrl(ip)} target="_blank" rel="noreferrer"
+                       style={{
+                           fontSize: scalePx(fontSize), fontWeight: 600, color: "#93c5fd",
+                           textDecoration: "underline", fontFamily: "monospace",
+                           userSelect: "text", WebkitUserSelect: "text",
+                       }}>
+                        {ip}
+                    </a>
+                ) : (
+                    <span style={{
+                        fontSize: scalePx(fontSize), fontWeight: 500, color: "var(--color-text-muted)",
+                        userSelect: "text", WebkitUserSelect: "text",
+                    }}>获取中...</span>
+                )}
+                {valid && (
+                    <button onClick={copyIp}
+                            style={{
+                                border: "1px solid var(--color-primary)", borderRadius: scalePx(5),
+                                background: copied ? "var(--color-primary)" : "transparent",
+                                color: copied ? "#fff" : "var(--color-primary)",
+                                fontSize: scalePx(10), lineHeight: 1.5, fontWeight: 600,
+                                padding: `${scalePx(1)} ${scalePx(6)}`, cursor: "pointer", outline: "none",
+                            }}>
+                        {copied ? "已复制" : "复制"}
+                    </button>
+                )}
+            </div>
+        );
     };
 
     // 十字方向键尺寸 — 竖屏取宽度，横屏取高度
@@ -208,8 +263,13 @@ const BaseControlPage = () => {
                 <ControlButton variant="secondary" size="full" onClick={() => send("release")}>👐 释放</ControlButton>
             </div>
             <div style={{display: "flex", gap: scalePx(10), width: "100%"}}>
-                <ControlButton size="full" variant="primary" onClick={() => window.location.href = "/gravity"}>📱 重力遥控</ControlButton>
-                <ControlButton size="full" variant="secondary" onClick={() => redirect()}>🧪 试验平台</ControlButton>
+                <ControlButton size="full" variant="primary" onClick={() => navigate("/experiment")}>🔬 内置实验</ControlButton>
+                <ControlButton size="full" variant="secondary" onClick={() => redirect()}>
+                    <span style={{display: "flex", flexDirection: "column", alignItems: "center", lineHeight: 1.25}}>
+                        <span>🌐 线上实验</span>
+                        <span style={{fontSize: scalePx(11), fontWeight: 500, opacity: 0.75}}>（需配网）</span>
+                    </span>
+                </ControlButton>
             </div>
         </div>
     );
@@ -229,13 +289,7 @@ const BaseControlPage = () => {
                         <div style={{display: "flex", flexDirection: "column", gap: scalePx(8), justifyContent: "center", width: dpadSize}}>
                             <div style={{textAlign: "center", width: "100%"}}>
                                 <h2 style={{fontSize: scalePx(15), fontWeight: 700, margin: 0}}>辰龙机器人控制台</h2>
-                                <div style={{
-                                    fontSize: scalePx(13), fontWeight: 500,
-                                    color: "var(--color-text-muted)", marginTop: 2,
-                                    fontFamily: "monospace",
-                                    userSelect: "text", WebkitUserSelect: "text",
-                                    WebkitTouchCallout: "default",
-                                }}>{ip}</div>
+                                <IpBadge fontSize={13} />
                             </div>
 
                             <div style={{...S.rowBetween, width: "100%"}}>
@@ -266,13 +320,7 @@ const BaseControlPage = () => {
         <Page center padTop={10}>
             <div style={{textAlign: "center", width: "100%"}}>
                 <h2 style={{fontSize: scalePx(17), fontWeight: 700, margin: 20}}>辰龙机器人控制台</h2>
-                <div style={{
-                    fontSize: scalePx(15), fontWeight: 500,
-                    color: "var(--color-text-muted)", marginTop: scalePx(4),
-                    fontFamily: "monospace",
-                    userSelect: "text", WebkitUserSelect: "text",
-                    WebkitTouchCallout: "default",
-                }}>{ip}</div>
+                <IpBadge fontSize={15} />
             </div>
 
             <div style={{...S.rowBetween, width: "100%", maxWidth: contentW, marginTop: scalePx(8)}}>

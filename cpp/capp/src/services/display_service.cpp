@@ -16,7 +16,8 @@ namespace capp {
 // 不是 static：camera_service.cpp 里"摄像头一开就跟着起屏"也要用它（声明在 context.hpp）。
 bool start_display_locked_on_camera(AppContext& ctx) {
     csrc::DisplayConfig dc = ctx.config.display;
-    if (dc.decode_max_w <= 0) dc.decode_max_w = ctx.config.camera.stream_width;
+    // 走快照而不是直接读：POST /api/config/camera 会在别的线程改 stream_*（camera_cfg_mu）
+    if (dc.decode_max_w <= 0) dc.decode_max_w = stream_cfg_snapshot(ctx).width;
     if (!ctx.display.start(dc)) {
         CAM_INFO("[display] screen disabled (no framebuffer)");
         return false;

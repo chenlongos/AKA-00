@@ -12,6 +12,7 @@ const TABS: Tab[] = [
     {path: "/", label: "控制台", icon: "🏠", activeIcon: "🏠"},
     {path: "/rc", label: "摇杆驾驶", icon: "🕹️", activeIcon: "🕹️"},
     {path: "/demo", label: "Demo", icon: "📦", activeIcon: "📦"},
+    {path: "/experiment", label: "实验", icon: "▦", activeIcon: "▦"},
     {path: "/settings", label: "设置", icon: "⚙️", activeIcon: "⚙️"},
 ];
 

@@ -5,6 +5,8 @@ import Card from "../components/Card";
 import {S} from "../styles";
 import {api} from "../api";
 import {useViewportScale} from "../hooks/useViewportScale";
+import {CAMERA_PRESETS, type CameraPresetKey} from "../cameraProfile";
+import {useCameraPreset} from "../hooks/useCameraPreset";
 
 const SettingsPage = () => {
     const {scalePx} = useViewportScale();
@@ -37,10 +39,18 @@ const SettingsPage = () => {
             .finally(() => setScreenBusy(false));
     };
 
+    // 摄像头清晰度（全局）：写车机 config.toml，切换后 capp 会自动重启约 10 秒。
+    // 状态与下发逻辑在 useCameraPreset（摇杆页共用同一份实现）。
+    const {
+        current: camPreset, sel: camSel, setSel: setCamSel,
+        busy: camBusy, msg: camMsg, apply: applyCamera,
+    } = useCameraPreset();
+
     const items = [
         {icon: "📶", title: "WiFi 配置", desc: "扫描并连接无线网络", path: "/wifi"},
         {icon: "🔧", title: "舵机角度配置", desc: "调整抓取序列", path: "/arm-angles"},
         {icon: "🚗", title: "行驶速度", desc: "调整前进和转向速度百分比", path: "/speed-config"},
+        {icon: "🧪", title: "自动测试", desc: "逐项检查动作、摄像头、抓取、网络与舵机", path: "/self-test"},
         {icon: "⬆️", title: "固件升级", desc: "检查更新并升级系统固件", path: "/ota"},
     ];
 
@@ -101,6 +111,58 @@ const SettingsPage = () => {
                         </div>
                     </div>
                 </Card>}
+
+                {/* 摄像头清晰度：全局出流分辨率/质量（越清晰帧率越低，单核 CPU 限制） */}
+                <Card marginBottom={10}>
+                    <div style={{padding: `${scalePx(4)} 0`}}>
+                        <div style={{display: "flex", alignItems: "center", gap: scalePx(12)}}>
+                            <span style={{fontSize: scalePx(24)}}>🎥</span>
+                            <div style={{flex: 1}}>
+                                <div style={{fontSize: scalePx(15), fontWeight: 600, color: "var(--color-text)"}}>
+                                    摄像头清晰度
+                                </div>
+                                <div style={{...S.muted, marginTop: 2}}>
+                                    所有页面看到的画面；原画为直通（更清晰但占带宽），越清晰帧率越低
+                                </div>
+                            </div>
+                        </div>
+                        <div style={{display: "flex", gap: scalePx(8), marginTop: scalePx(10)}}>
+                            <select
+                                value={camSel}
+                                disabled={camBusy}
+                                onChange={e => setCamSel(e.target.value as CameraPresetKey)}
+                                style={{
+                                    flex: 1, minWidth: 0, padding: `${scalePx(8)} ${scalePx(10)}`,
+                                    borderRadius: "var(--radius-md)", border: "1px solid var(--color-border)",
+                                    background: "var(--color-bg-card)", color: "var(--color-text)",
+                                    fontSize: scalePx(14), opacity: camBusy ? 0.6 : 1,
+                                }}
+                            >
+                                {CAMERA_PRESETS.map(p => (
+                                    <option key={p.key} value={p.key}>
+                                        {p.label}（{p.width}×{p.height} · {p.fpsHint}）
+                                    </option>
+                                ))}
+                            </select>
+                            <button
+                                onClick={() => applyCamera()}
+                                disabled={camBusy || camSel === camPreset}
+                                style={{
+                                    padding: `${scalePx(8)} ${scalePx(16)}`,
+                                    background: camBusy ? "var(--color-bg-elevated)" : "var(--color-primary)",
+                                    color: camBusy ? "var(--color-text-dim)" : "#fff",
+                                    border: "none", borderRadius: "var(--radius-md)",
+                                    fontSize: scalePx(14), fontWeight: 600,
+                                    cursor: (camBusy || camSel === camPreset) ? "default" : "pointer",
+                                    opacity: (camBusy || camSel === camPreset) ? 0.6 : 1,
+                                }}
+                            >
+                                {camBusy ? "应用中…" : "应用"}
+                            </button>
+                        </div>
+                        {camMsg && <div style={{...S.muted, marginTop: scalePx(6)}}>{camMsg}</div>}
+                    </div>
+                </Card>
 
                 {/* 设备信息 */}
                 <Card marginBottom={10}>
