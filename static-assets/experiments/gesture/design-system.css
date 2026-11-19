@@ -1,0 +1,126 @@
+/* ===== AI 感知统一设计系统 =====
+   母版文件，每个应用复制一份，通过 data-theme 覆盖 --accent* 变量。
+*/
+
+:root {
+  /* 背景 */
+  --bg-base: #020617;
+  --bg-elevated: #0a0f1e;
+  --bg-panel: rgba(15, 23, 42, 0.72);
+  --bg-input: #111827;
+  --bg-hover: #1f2937;
+
+  /* 边框 */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-normal: rgba(255, 255, 255, 0.12);
+  --border-strong: rgba(255, 255, 255, 0.20);
+
+  /* 文本 */
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+
+  /* 语义色 */
+  --color-success: #22c55e;
+  --color-warning: #eab308;
+  --color-danger:  #ef4444;
+  --color-info:    #3b82f6;
+
+  /* 圆角 */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-2xl: 32px;
+  --radius-full: 9999px;
+
+  /* 间距 */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* 字体 */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+               "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, monospace;
+
+  /* 阴影 / 发光 */
+  --shadow-panel: 0 8px 32px rgba(0, 0, 0, 0.5);
+  --glow-accent: 0 0 16px var(--accent-glow);
+
+  /* 玻璃拟态 */
+  --blur-panel: 12px;
+
+  /* 默认主题色（兜底） */
+  --accent: #3b82f6;
+  --accent-strong: #2563eb;
+  --accent-soft: rgba(59, 130, 246, 0.12);
+  --accent-glow: rgba(59, 130, 246, 0.45);
+}
+
+/* 每应用专属主题色 */
+[data-theme="brain"]   { --accent: #10b981; --accent-strong: #059669; --accent-soft: rgba(16,185,129,0.12);  --accent-glow: rgba(16,185,129,0.45); }
+[data-theme="gesture"] { --accent: #3b82f6; --accent-strong: #2563eb; --accent-soft: rgba(59,130,246,0.12);  --accent-glow: rgba(59,130,246,0.45); }
+[data-theme="pose"]    { --accent: #0ea5e9; --accent-strong: #0284c7; --accent-soft: rgba(14,165,233,0.12);  --accent-glow: rgba(14,165,233,0.45); }
+[data-theme="voice"]   { --accent: #3b82f6; --accent-strong: #2563eb; --accent-soft: rgba(59,130,246,0.12);  --accent-glow: rgba(59,130,246,0.45); }
+[data-theme="gravity"] { --accent: #3b82f6; --accent-strong: #2563eb; --accent-soft: rgba(59,130,246,0.12);  --accent-glow: rgba(59,130,246,0.45); }
+
+/* ===== 统一工具类 ===== */
+.glass-panel {
+  background: var(--bg-panel);
+  backdrop-filter: blur(var(--blur-panel));
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+}
+
+.btn-accent {
+  background: var(--accent);
+  color: #fff;
+  border-radius: var(--radius-md);
+  font-weight: 800;
+  transition: transform .15s, filter .15s;
+}
+.btn-accent:hover  { filter: brightness(1.1); }
+.btn-accent:active { transform: scale(.95); }
+
+.btn-ghost {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: var(--radius-md);
+}
+
+.segmented {
+  display: flex; gap: 4px; padding: 4px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+.segmented .seg-item {
+  flex: 1; text-align: center; border-radius: var(--radius-sm);
+  color: var(--text-muted); font-weight: 700; cursor: pointer;
+  padding: 6px 0; transition: background .15s, color .15s;
+}
+.segmented .seg-item.active { background: var(--accent); color: #fff; }
+
+.hud-chip {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-normal);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius-lg);
+}
+
+.field-label {
+  font-size: 10px; font-weight: 800; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--text-muted);
+}
+
+.text-accent { color: var(--accent); }
+.bg-accent   { background-color: var(--accent); }
+.border-accent { border-color: var(--accent); }
+.glow-accent { box-shadow: var(--glow-accent); }

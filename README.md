@@ -76,6 +76,12 @@ cd frontend && npm run build            # 带屏版 → static/
 cd frontend && npm run build:noscreen   # 不带屏版 → static/
 ```
 
+**实验页面资源**单独维护在仓库根 `static-assets/experiments/`（5 个实验的构建产物，
+含模型，约 35MB），`make package` / `make ota` 会自动合并到
+`$DIST/static/assets/experiments/`。不能直接放 `static/`：那是 vite 的 outDir 且
+`emptyOutDir: true`，每次前端构建都会清空。更新实验页面时用 car-ai-senses 的
+`build-all-robot` 重新构建，按部署清单（去掉原模型二进制/`.js` 别名/`.gz`）同步这个目录。
+
 **带屏 / 不带屏**：编译期开关（后端 `AKA_WITH_SCREEN`、前端 `WITH_SCREEN`），
 构建目录与产物完全隔离、互不覆盖。
 

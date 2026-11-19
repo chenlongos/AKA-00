@@ -1,0 +1,3 @@
+# 实验静态资源是构建产物，必须逐字节原样（部署脚本按 sha256 校验、浏览器按内容缓存），
+# 禁止 git 做换行转换（core.autocrlf=true 时 .js/.css/.html 会被改成 CRLF）。
+static-assets/** -text

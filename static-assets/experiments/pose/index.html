@@ -1,0 +1,90 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>人体识别智能小车控制器</title>
+    <script src="/assets/experiments/pose/models/pose/pose.js" crossorigin="anonymous"></script>
+    <script src="/assets/experiments/pose/models/pose/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="/assets/experiments/pose/models/pose/drawing_utils.js" crossorigin="anonymous"></script>
+    <link rel="stylesheet" href="/assets/experiments/pose/design-system.css" />
+    <link rel="stylesheet" href="/assets/experiments/pose/fonts/jetbrains-mono.css" />
+    <style>
+        body {
+            margin: 0; 
+            padding: 0; 
+            background-color: #020617;          
+            color: #f8fafc; 
+            font-family: 'JetBrains Mono', 'PingFang SC', sans-serif;
+            overflow-x: hidden; 
+        }
+
+        .status-pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .canvas-container { 
+            position: relative; 
+            width: 100%; 
+            aspect-ratio: 4/3;
+            max-width: 800px; 
+            margin: 0 auto; 
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 0 40px rgba(56, 189, 248, 0.1);
+        }
+
+        video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            transform: scaleX(-1);
+        }
+
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 10;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            pointer-events: none;
+            transform: scaleX(-1);
+        }
+
+        /* 移动端适配 */
+        @media (max-width: 640px) {
+            .canvas-container {
+                aspect-ratio: 4/3;
+                max-width: 100%;
+                border-radius: 8px;
+            }
+        }
+
+        .command-badge {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .active-command {
+            background: #0ea5e9;
+            box-shadow: 0 0 20px #0ea5e9;
+            transform: scale(1.05);
+        }
+    </style>
+  <script type="module" crossorigin src="/assets/experiments/pose/assets/index-CdGyRWpR.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/experiments/pose/assets/index-Bzyqnlfy.css">
+</head>
+<body data-theme="pose">
+    <div id="root"></div>
+</body>
+</html>

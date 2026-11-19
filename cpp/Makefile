@@ -170,6 +170,9 @@ $(CAPP_BIN_NS): $(CSRC_LIB_NS) $(MBEDTLS) $(LUA) FORCE
 #           （构建产物本身仍区分：capp/bin/aka-capp 与 aka-capp-noscreen）
 # 前端产物只有一份（仓库根 static/）：两个版本共用，所以**打包前要 build 对版本**
 #   （带屏 npm run build / 不带屏 npm run build:noscreen）。拿错版本这里会报警。
+# 实验静态资源单独维护在仓库根 static-assets/experiments/（5 个实验的构建产物，含模型），
+#   打包时合并进 $DIST/static/assets/experiments/。不能直接放 static/：那是 vite 的
+#   outDir 且 emptyOutDir=true，每次 npm run build 都会被清空。
 define PACKAGE_RECIPE
 	@set -e; \
 	DIST="$(3)"; \
@@ -194,6 +197,13 @@ define PACKAGE_RECIPE
 	else \
 	    echo "  警告: 缺 $(ROOT)/static/index.html —— 这个包不会有前端页面"; \
 	    echo "        （前端不参与 make：先 cd frontend && npm run build$(if $(filter 0,$(1)),:noscreen,))"; \
+	fi; \
+	if [ -d "$(ROOT)/static-assets/experiments" ]; then \
+	    mkdir -p "$$DIST/static/assets"; \
+	    cp -r "$(ROOT)/static-assets/experiments" "$$DIST/static/assets/"; \
+	    echo "   实验资源: $$(find "$$DIST/static/assets/experiments" -type f | wc -l | tr -d ' ') 个文件"; \
+	else \
+	    echo "  警告: 缺 $(ROOT)/static-assets/experiments —— 包里的实验页面会打不开"; \
 	fi; \
 	mkdir -p "$$DIST/tools"; \
 	for t in tt_pid_test cam_probe screen_test; do \

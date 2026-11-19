@@ -1,0 +1,47 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>AI 智能小车控制器</title>
+    <style>
+        :root {
+            -webkit-user-select: none;
+            user-select: none;
+            touch-action: none;
+        }
+        body {
+            overscroll-behavior-y: contain; /* 禁止安卓下拉刷新 */
+            -webkit-tap-highlight-color: transparent;
+            background-color: var(--bg-base);
+            margin: 0;
+            padding: 0;
+        }
+        /* 针对安卓 Chrome 优化滑块外观 */
+        input[type="range"] {
+            -webkit-appearance: none;
+            background: var(--bg-hover);
+            border-radius: 10px;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 24px;
+            width: 24px;
+            border-radius: 50%;
+            background: var(--accent);
+            cursor: pointer;
+            box-shadow: 0 0 10px var(--accent-glow);
+            border: 2px solid white;
+        }
+    </style>
+    <link rel="stylesheet" href="/assets/experiments/gravity/design-system.css" />
+  <script type="module" crossorigin src="/assets/experiments/gravity/assets/index-46uoTQ8x.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/experiments/gravity/assets/index-DK_ZeUJy.css">
+</head>
+<body class="bg-[var(--bg-base)]" data-theme="gravity">
+    <div id="root"></div>
+</body>
+</html>
