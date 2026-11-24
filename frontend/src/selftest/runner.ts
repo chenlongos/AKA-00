@@ -19,6 +19,8 @@ export interface RunnerOptions {
   /** 自动抓网球脚本参数（直行 / 转弯速度、目标框宽） */
   demoParams: DemoParams;
   abortOnFailure: boolean;
+  /** 全自动（无人值守）：不弹确认/提示、动作失败不连锁跳过，判定只看接口结果 */
+  unattended?: boolean;
   client: Client;
   cameraFrame: (timeoutMs: number) => Promise<boolean>;
   confirm: (itemId: string, message: string) => Promise<boolean>;
@@ -133,7 +135,7 @@ export async function runSelfTest(opts: RunnerOptions): Promise<RunOutcome> {
         const passed = row.kind === "grab"
           ? await runGrab(row.id, opts, patch, now)
           : await runPair(row.id, row.first, row.second, opts, patch, now);
-        if (!passed && opts.abortOnFailure) skipRest = true;
+        if (!passed && opts.abortOnFailure && !opts.unattended) skipRest = true;
       }
     }
 
@@ -190,7 +192,7 @@ async function runPair(
   const auto: "pass" | "fail" = firstOk && secondOk ? "pass" : "fail";
   let status: ItemStatus = auto;
   let manual: "pass" | "fail" | null = null;
-  if (auto === "pass") {
+  if (auto === "pass" && !opts.unattended) {
     patch(id, {status: "confirm", auto});
     manual = await opts.confirm(id, "动作是否到位？（距离 / 角度）") ? "pass" : "fail";
     status = manual;
@@ -213,8 +215,8 @@ async function runGrab(
   steps.push({name: "抓取", ok: grab.ok, elapsedMs: grab.elapsedMs, error: grab.error});
   patch(id, {steps: steps.map(step => ({...step})), elapsedMs: now() - started});
 
-  let held = false;
-  if (grab.ok) {
+  let held: boolean | null = null;
+  if (grab.ok && !opts.unattended) {
     patch(id, {status: "confirm"});
     held = await opts.confirm(id, "是否夹住并抬起？");
   }
@@ -223,8 +225,8 @@ async function runGrab(
   steps.push({name: "放下", ok: release.ok, elapsedMs: release.elapsedMs, error: release.error});
 
   const auto: "pass" | "fail" = grab.ok && release.ok ? "pass" : "fail";
-  const manual: "pass" | "fail" = held ? "pass" : "fail";
-  const status: ItemStatus = auto === "pass" && held ? "pass" : "fail";
+  const manual: "pass" | "fail" | null = held === null ? null : held ? "pass" : "fail";
+  const status: ItemStatus = auto === "pass" && held !== false ? "pass" : "fail";
   patch(id, {
     status,
     auto,
@@ -248,15 +250,19 @@ async function openCameraItem(opts: ItemCtx, patch: Patch, now: () => number): P
     {name: "首帧到达", ok: frame, elapsedMs: 0},
   ];
   if (open.ok && frame) {
-    patch("camera_on", {status: "confirm", auto: "pass", steps});
-    const confirmed = await opts.confirm("camera_on", "画面是否正常？（网页与板载屏）");
-    patch("camera_on", {
-      status: confirmed ? "pass" : "fail",
-      auto: "pass",
-      manual: confirmed ? "pass" : "fail",
-      steps,
-      elapsedMs: now() - started,
-    });
+    if (opts.unattended) {
+      patch("camera_on", {status: "pass", auto: "pass", manual: null, steps, elapsedMs: now() - started});
+    } else {
+      patch("camera_on", {status: "confirm", auto: "pass", steps});
+      const confirmed = await opts.confirm("camera_on", "画面是否正常？（网页与板载屏）");
+      patch("camera_on", {
+        status: confirmed ? "pass" : "fail",
+        auto: "pass",
+        manual: confirmed ? "pass" : "fail",
+        steps,
+        elapsedMs: now() - started,
+      });
+    }
   } else {
     patch("camera_on", {
       status: "fail",
@@ -304,7 +310,9 @@ async function runDemo(
   const started = now();
   patch(id, {status: "running", steps: [], auto: null, manual: null, error: undefined, elapsedMs: 0});
 
-  const placed = await opts.notice?.(id, "请把网球放在小车正前方 30–60cm 处，并移开周围障碍物") ?? true;
+  const placed = opts.unattended
+    ? true
+    : (await opts.notice?.(id, "请把网球放在小车正前方 30–60cm 处，并移开周围障碍物")) ?? true;
   if (!placed) {
     patch(id, {status: "skip", error: "未放置网球，已跳过", elapsedMs: now() - started});
     return;
@@ -348,6 +356,11 @@ async function runDemo(
       elapsedMs: now() - started,
       error: timeoutError ?? (message || "脚本执行失败"),
     });
+    return;
+  }
+
+  if (opts.unattended) {
+    patch(id, {status: "pass", auto, manual: null, elapsedMs: now() - started});
     return;
   }
 
@@ -452,7 +465,9 @@ async function runArm(opts: ItemCtx, patch: Patch, now: () => number): Promise<A
   steps.push({name: "读取原始角度", ok: true, elapsedMs: 0, detail: read.driver});
   flush();
 
-  const allowed = await opts.confirm(id, "确认机械臂周围无障碍，开始逐个转动底座 / 腕部 / 夹爪？");
+  const allowed = opts.unattended
+    ? true
+    : await opts.confirm(id, "确认机械臂周围无障碍，开始逐个转动底座 / 腕部 / 夹爪？");
   if (!allowed) {
     patch(id, {status: "skip", steps: steps.map(step => ({...step})), error: "操作员取消"});
     return original;
@@ -487,10 +502,13 @@ async function runArm(opts: ItemCtx, patch: Patch, now: () => number): Promise<A
     await opts.client.sleep(1000);
   }
 
-  patch(id, {status: "confirm"});
-  const observed = await opts.confirm(id, "底座 / 腕部 / 夹爪是否都有动作？");
-  steps.push({name: "人工确认三个舵机动作", ok: observed, elapsedMs: 0});
-  flush();
+  let observed = true;
+  if (!opts.unattended) {
+    patch(id, {status: "confirm"});
+    observed = await opts.confirm(id, "底座 / 腕部 / 夹爪是否都有动作？");
+    steps.push({name: "人工确认三个舵机动作", ok: observed, elapsedMs: 0});
+    flush();
+  }
 
   // 逆序恢复：夹爪 → 腕部 → 底座，最后回到初始姿态
   let restored = true;
@@ -508,14 +526,15 @@ async function runArm(opts: ItemCtx, patch: Patch, now: () => number): Promise<A
   steps.push({name: "恢复后参数与原始值一致", ok: configOk, elapsedMs: 0});
   flush();
 
-  const allOk = movesOk && observed && restored && configOk;
+  const auto: "pass" | "fail" = movesOk && restored && configOk ? "pass" : "fail";
+  const allOk = auto === "pass" && (opts.unattended || observed);
   const error = !restored || !configOk
     ? "舵机恢复失败，请检查角度参数"
     : (movesOk && observed ? undefined : "舵机动作未全部确认");
   patch(id, {
     status: allOk ? "pass" : "fail",
-    auto: movesOk && restored && configOk ? "pass" : "fail",
-    manual: observed ? "pass" : "fail",
+    auto,
+    manual: opts.unattended ? null : observed ? "pass" : "fail",
     steps: steps.map(step => ({...step})),
     elapsedMs: now() - started,
     error,

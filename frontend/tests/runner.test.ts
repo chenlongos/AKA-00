@@ -60,6 +60,8 @@ async function run(groups: Group[], overrides: Partial<Client> = {}, options: {
   notice?: (id: string) => boolean;
   now?: () => number;
   demoParams?: DemoParams;
+  unattended?: boolean;
+  cameraFrame?: (timeoutMs: number) => Promise<boolean>;
 } = {}) {
   const fake = fakeClient();
   Object.assign(fake.client, overrides);
@@ -68,8 +70,9 @@ async function run(groups: Group[], overrides: Partial<Client> = {}, options: {
     speed: 25,
     demoParams: options.demoParams ?? {target_size: 280, speed: 30, turn_speed: 22},
     abortOnFailure: true,
+    unattended: options.unattended,
     client: fake.client,
-    cameraFrame: async () => true,
+    cameraFrame: options.cameraFrame ?? (async () => true),
     confirm: async (id) => options.confirm ? options.confirm(id) : true,
     notice: async (id) => options.notice ? options.notice(id) : true,
     isAborted: options.isAborted ?? (() => false),
@@ -293,4 +296,83 @@ test("单项重测：摄像头关闭项只关不开", async () => {
 
 test("单项重测：未知测试项直接报错", async () => {
   await assert.rejects(retest("nope"), /未知测试项/);
+});
+
+test("全自动：五组跑完且不调用任何确认/提示", async () => {
+  let confirmCalls = 0;
+  let noticeCalls = 0;
+  const {outcome} = await run(["motion", "camera", "demo", "wifi", "arm"], {}, {
+    unattended: true,
+    confirm: () => { confirmCalls += 1; return true; },
+    notice: () => { noticeCalls += 1; return true; },
+  });
+  assert.equal(confirmCalls, 0);
+  assert.equal(noticeCalls, 0);
+  assert.equal(outcome.state, "finished");
+  assert.equal(outcome.items.every(item => item.status === "pass"), true);
+  assert.equal(outcome.items.every(item => item.manual === null), true);
+});
+
+test("全自动：动作失败不连锁跳过，后续动作项继续", async () => {
+  let controlCalls = 0;
+  const {outcome} = await run(["motion"], {
+    control: async () => {
+      controlCalls += 1;
+      return controlCalls === 1
+        ? {ok: false, completed: false, error: "动作失败", elapsedMs: 1}
+        : {ok: true, completed: true, elapsedMs: 1};
+    },
+  }, {unattended: true});
+  const items = motionItems(outcome.items);
+  assert.equal(items[0].status, "fail");
+  assert.deepEqual(items.slice(1).map(item => item.status), Array(7).fill("pass"));
+  assert.equal(outcome.state, "finished");
+});
+
+test("全自动：抓球不弹放球提示，done 即通过", async () => {
+  let noticeCalls = 0;
+  const {outcome} = await run(["demo"], {}, {
+    unattended: true,
+    notice: () => { noticeCalls += 1; return true; },
+  });
+  assert.equal(noticeCalls, 0);
+  assert.equal(outcome.items.find(item => item.id === "demo_grab")!.status, "pass");
+});
+
+test("全自动：摄像头首帧超时后继续执行后续组", async () => {
+  const {outcome} = await run(["camera", "demo"], {}, {
+    unattended: true,
+    cameraFrame: async () => false,
+  });
+  const cameraOn = outcome.items.find(item => item.id === "camera_on")!;
+  const demo = outcome.items.find(item => item.id === "demo_grab")!;
+  assert.equal(cameraOn.status, "fail");
+  assert.equal(demo.status, "pass");
+});
+
+test("全自动：舵机无确认，失败后仍恢复原始角度", async () => {
+  const previews: number[] = [];
+  const writes: Record<string, unknown>[] = [];
+  let confirmCalls = 0;
+  const {outcome} = await run(["arm"], {
+    armPreview: async (_driver, key, value) => {
+      previews.push(value);
+      return key === "grab_position.servo0" && value === 188
+        ? {ok: false, error: "串口无响应"}
+        : {ok: true};
+    },
+    armWrite: async (_driver, next) => {
+      writes.push(structuredClone(next));
+      return {ok: true};
+    },
+  }, {
+    unattended: true,
+    confirm: () => { confirmCalls += 1; return true; },
+  });
+  const item = outcome.items.find(entry => entry.id === "arm_roundtrip")!;
+  assert.equal(item.status, "fail");
+  assert.equal(item.manual, null);
+  assert.equal(previews[previews.length - 1], 228);
+  assert.equal(confirmCalls, 0);
+  assert.deepEqual(writes[0], ARM_ANGLES());
 });
