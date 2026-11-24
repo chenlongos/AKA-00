@@ -8,6 +8,10 @@
 #   AKA_HOME=$HOME/AKA-00 ./init.sh
 # =============================================================================
 
+# 调试用：把 init.sh 自身和它拉起的 capp 的 stdout/stderr 落到 /root/aka-boot.log。
+# /tmp 是 tmpfs 存不住，root 分区每次开机覆盖写。排查完可以删掉这一行。
+exec > /root/aka-boot.log 2>&1
+
 AKA_HOME="${AKA_HOME:-$HOME/AKA-00}"
 BIN="$AKA_HOME/aka-capp"
 # OTA 锁。**原来在 /tmp** —— 那时是 tmpfs（内存盘），重启自动清掉，所以"陈旧锁"
@@ -253,12 +257,20 @@ wpa_conf_field() {
 }
 
 # 把配置文件里的网络同步到 capp 的 aka-wifi.json（$1=指定 ssid，空=第一个网络）
-# 只在配置文件不比 JSON 旧时同步 —— JSON 更新说明它才是"最后一次成功连接"，
-# 反过来覆盖会把用户刚连上的网络顶掉。
+#
+# **不能用 mtime 判断新旧**：本板没有 RTC，每次开机时钟从 1970 重新走，文件 mtime
+# 实际是"那一次开机的开机秒数"，跨重启完全不可比。踩过：conf 的 mtime(2236s) 恰好
+# 大于 json 的 mtime(341s)，两个反方向的迁移全被永久跳过，车永远去连出厂网络。
+#
+# 改用内容判断：
+#   - $1 非空（watchdog 看到当前已连接的网络）：以它为准，强制写回；
+#   - $1 为空（开机播种）：JSON 里已经有 ssid 就保持不动（它才是"最后一次成功
+#     连接"），只有 JSON 缺失/为空时才用 conf 的第一个网络播种。
 sync_aka_wifi_json() {
     [ -f "$WPA_CONF" ] || return 0
-    if [ -f "$WPA_JSON" ] && [ "$WPA_JSON" -nt "$WPA_CONF" ]; then
-        return 0
+    if [ -z "$1" ]; then
+        _js=$(sed -n 's/.*"ssid":"\([^"]*\)".*/\1/p' "$WPA_JSON" 2>/dev/null)
+        [ -n "$_js" ] && return 0
     fi
     if [ -n "$1" ]; then
         _ssid=$(wpa_conf_field ssid "$1")
@@ -282,7 +294,9 @@ sync_aka_wifi_json() {
     fi
 }
 
-# 反方向：JSON 比配置文件新时，用 JSON 重建配置文件。
+# 反方向：把 JSON（最后一次成功连接）落到配置文件 —— 内容不一致时才重建。
+# **不能按 mtime 判断谁更新**（无 RTC，见 sync_aka_wifi_json 上方的注释）；
+# 下面已有内容级判断：目标网络已在 conf 里且 psk 一致就什么都不做。
 #
 # 为什么需要：capp 的 POST /api/wifi/connect 只在"8 秒内连上"时才把凭据写进
 # /etc/aka-wifi.json（慢热点永远写不进去）；而 wpa_supplicant 可能一直是不带 -c 起的那种
@@ -296,9 +310,6 @@ sync_aka_wifi_json() {
 # 目标网络已在文件里且 psk 相同 → 不动。
 sync_conf_from_json() {
     [ -f "$WPA_JSON" ] || return 0
-    if [ -f "$WPA_CONF" ] && [ "$WPA_CONF" -nt "$WPA_JSON" ]; then
-        return 0            # 配置文件更新：它已经由 save_config 写过，别反过来覆盖
-    fi
     _j=$(cat "$WPA_JSON" 2>/dev/null) || return 0
     case "$_j" in
         *\\*) return 0 ;;   # JSON 里的转义在 shell 里解析不可靠，跳过
@@ -464,7 +475,11 @@ while true; do
     while [ -f "$LOCK_FILE" ]; do
         sleep 0.5
     done
-    "$BIN" &
+    # PATH 前缀带上 $AKA_HOME/bin：那里是本仓自带的 wpa_cli 包装，把 wpa_cli
+    # 输出里的 \xHH（非 ASCII SSID）还原成 UTF-8 —— 补上老 aka-capp 二进制缺的
+    # decode_ssid。只影响 capp 及其 popen 子进程；本脚本自己的 wpa_cli 调用
+    # 在下面其它位置，不受影响。
+    PATH="$AKA_HOME/bin:$PATH" "$BIN" &
     _pid=$!
     echo "$_pid" > "$PID_FILE"
     echo "[init] capp pid $_pid (waiting for exit...)"
