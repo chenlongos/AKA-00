@@ -40,12 +40,30 @@ function fakeClient(): Fake {
     demoStatus: async () => ({ok: true, state: "done"}),
     demoStop: async () => { calls.push("demo.stop"); },
     demoHasTennis: async () => true,
-    wifiScan: async () => ({ok: true, list: [{ssid: "Tsinghua-Dongsheng", signal: -40, secured: false}]}),
-    wifiConnect: async () => ({ok: true, ip: "192.168.9.9"}),
-    wifiStatus: async () => ({ok: true, ssid: "Tsinghua-Dongsheng", ip: "192.168.9.9"}),
-    armRead: async () => ({ok: true, driver: "zp10s", angles: ARM_ANGLES()}),
-    armWrite: async () => ({ok: true}),
-    armPreview: async () => ({ok: true}),
+    wifiScan: async () => {
+      calls.push("wifi.scan");
+      return {ok: true, list: [{ssid: "Tsinghua-Dongsheng", signal: -40, secured: false}]};
+    },
+    wifiConnect: async () => {
+      calls.push("wifi.connect");
+      return {ok: true, ip: "192.168.9.9"};
+    },
+    wifiStatus: async () => {
+      calls.push("wifi.status");
+      return {ok: true, ssid: "Tsinghua-Dongsheng", ip: "192.168.9.9"};
+    },
+    armRead: async () => {
+      calls.push("arm.read");
+      return {ok: true, driver: "zp10s", angles: ARM_ANGLES()};
+    },
+    armWrite: async () => {
+      calls.push("arm.write");
+      return {ok: true};
+    },
+    armPreview: async () => {
+      calls.push("arm.preview");
+      return {ok: true};
+    },
     motorConnected: async () => true,
     systemInfo: async () => ({mac: "AA:BB:CC:DD:EE:FF", ip: "1.2.3.4"}),
     version: async () => "v1",
@@ -375,4 +393,13 @@ test("全自动：舵机无确认，失败后仍恢复原始角度", async () =>
   assert.equal(previews[previews.length - 1], 228);
   assert.equal(confirmCalls, 0);
   assert.deepEqual(writes[0], ARM_ANGLES());
+});
+
+test("全自动：WiFi 三步骤排在舵机之后", async () => {
+  const {fake} = await run(["motion", "camera", "demo", "wifi", "arm"], {}, {unattended: true});
+  const lastArm = fake.calls.lastIndexOf("arm.preview");
+  const firstWifi = fake.calls.indexOf("wifi.scan");
+  assert.equal(firstWifi >= 0, true);
+  assert.equal(lastArm >= 0, true);
+  assert.equal(lastArm < firstWifi, true);
 });

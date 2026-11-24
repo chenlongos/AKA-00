@@ -59,10 +59,10 @@ const ITEM_DEFS: ItemDef[] = [
   {id: "camera_on", name: "摄像头 打开 / 显示", group: "camera"},
   {id: "camera_off", name: "摄像头关闭", group: "camera"},
   {id: "demo_grab", name: "自动抓网球", group: "demo"},
+  {id: "arm_roundtrip", name: "舵机角度 调整 / 恢复", group: "arm"},
   {id: "wifi_scan", name: "WiFi 扫描", group: "wifi"},
   {id: "wifi_connect", name: `WiFi 连接 ${WIFI_SSID}`, group: "wifi"},
   {id: "wifi_verify", name: "WiFi 验证", group: "wifi"},
-  {id: "arm_roundtrip", name: "舵机角度 调整 / 恢复", group: "arm"},
 ];
 
 export function initialItems(groups: Group[]): ItemResult[] {
@@ -147,12 +147,12 @@ export async function runSelfTest(opts: RunnerOptions): Promise<RunOutcome> {
       await runDemo(opts, patch, now, hasTennis);
     }
 
-    if (!aborted && !checkAbort() && opts.groups.includes("wifi")) {
-      await runWifi(opts, patch, now);
-    }
-
     if (!aborted && !checkAbort() && opts.groups.includes("arm")) {
       arm = await runArm(opts, patch, now);
+    }
+
+    if (!aborted && !checkAbort() && opts.groups.includes("wifi")) {
+      await runWifi(opts, patch, now);
     }
   } finally {
     await opts.client.stop().catch(() => {});
