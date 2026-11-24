@@ -3,6 +3,7 @@ import Header from "../components/Header";
 import AlertDialog from "../components/AlertDialog";
 import {useViewportScale} from "../hooks/useViewportScale";
 import {carUrl, copyToClipboard, isValidIPv4} from "../utils/clipboard";
+import {cleanWifiSsid} from "../utils/wifiSsid";
 
 interface WifiNetwork { id: string; ssid: string; signal: number; secured: boolean; is_connected: boolean; }
 
@@ -43,7 +44,7 @@ const WiFiConfigPage = () => {
         try {
             const [sr, ir] = await Promise.all([fetch("/api/wifi/status"), fetch("/api/wifi/ip")]);
             const [sd, id] = await Promise.all([sr.json(), ir.json()]);
-            setSsid(sd.ssid || "");
+            setSsid(cleanWifiSsid(sd.ssid || ""));
             setIpAddr((id.ip || "").trim());
         } catch {}
     };
@@ -88,7 +89,10 @@ const WiFiConfigPage = () => {
         setScanning(true);
         try {
             const r = await fetch("/api/wifi/scan"); const d = await r.json();
-            const list = d.list || [];
+            // 旧 capp 返回 \xHH 转义的中文 SSID：解码后再显示/回传，隐藏网络（全 NUL）直接丢弃
+            const list = (d.list || [])
+                .map((n: WifiNetwork) => ({...n, ssid: cleanWifiSsid(n.ssid || "")}))
+                .filter((n: WifiNetwork) => n.ssid.length > 0);
             setNetworks(list);
             await updateStatus();
             // 第一次扫描为空时自动重试一次

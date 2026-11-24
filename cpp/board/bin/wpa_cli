@@ -1,0 +1,60 @@
+#!/bin/sh
+# =============================================================================
+# wpa_cli 透明包装（只给 capp 用：init.sh 以 PATH="$AKA_HOME/bin:$PATH" 启动它）
+#
+# 背景：wpa_supplicant 的 wpa_cli 把非 ASCII 的 SSID 输出成 \xHH 转义
+# （如 "\xe4\xb8\xad\xe6\x96\x87" 表示 UTF-8 的「中文」），而现网固件里的
+# aka-capp 二进制没有上游 00cc52e 的 decode_ssid —— 于是 /api/wifi/scan|status
+# 把转义串直接交给前端，中文 WiFi 名显示成一串 \x，回车也连不上。
+# 解码细节见同目录的 wpa_cli_decode.py。
+#
+# 生效范围：只有拿到这个 PATH 的进程（capp 及其 popen）用包装；init.sh 自己的
+# watchdog 仍走系统原版 wpa_cli。python3 不存在时原样透传（退化成修复前行为）。
+# =============================================================================
+
+REAL=""
+for p in /usr/sbin/wpa_cli /sbin/wpa_cli /usr/bin/wpa_cli /bin/wpa_cli; do
+    if [ -x "$p" ]; then
+        REAL="$p"
+        break
+    fi
+done
+
+if [ -z "$REAL" ]; then
+    echo "wpa_cli: not found" >&2
+    exit 127
+fi
+
+# 交互模式（无参数）直接交回原程序，别包一层
+if [ $# -eq 0 ]; then
+    exec "$REAL"
+fi
+
+PY=""
+for p in /usr/bin/python3 /usr/local/bin/python3 /bin/python3; do
+    if [ -x "$p" ]; then
+        PY="$p"
+        break
+    fi
+done
+if [ -z "$PY" ]; then
+    PY=$(command -v python3 2>/dev/null)
+fi
+if [ -z "$PY" ]; then
+    # 没有 python3：原样透传，退化成修复前的行为（不会把 WiFi 弄坏）
+    exec "$REAL" "$@"
+fi
+
+_here=$(cd "$(dirname "$0")" 2>/dev/null && pwd)
+if [ ! -f "$_here/wpa_cli_decode.py" ]; then
+    # 某些 shell 把 $0 留成不带目录的名字：再从 PATH 里找回自己的真实路径
+    _self=$(command -v wpa_cli 2>/dev/null)
+    if [ -n "$_self" ]; then
+        _here=$(cd "$(dirname "$_self")" 2>/dev/null && pwd)
+    fi
+fi
+if [ ! -f "$_here/wpa_cli_decode.py" ]; then
+    exec "$REAL" "$@"
+fi
+
+exec "$PY" "$_here/wpa_cli_decode.py" "$REAL" "$@"

@@ -112,6 +112,8 @@ extract_payload() {
     chmod 755 "$_dest/aka-capp" 2>/dev/null || true
     chmod 755 "$_dest/aka-blockly-runner" 2>/dev/null || true
     if [ -d "$_dest/tools" ]; then chmod 755 "$_dest"/tools/* 2>/dev/null || true; fi
+    # 中文 SSID 修复用的 wpa_cli 包装（capp 通过 init.sh 的 PATH 前缀调用）
+    if [ -d "$_dest/bin" ]; then chmod 755 "$_dest"/bin/* 2>/dev/null || true; fi
     # macOS 打包可能带出来的元数据文件，清掉免干扰
     rm -f "$_dest"/._* 2>/dev/null || true
 }

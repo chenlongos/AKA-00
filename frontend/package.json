@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build && node scripts/sri-retry.mjs && node scripts/gzip-assets.mjs",
     "build:noscreen": "tsc -b && WITH_SCREEN=0 vite build && node scripts/sri-retry.mjs && node scripts/gzip-assets.mjs",
     "test:selftest": "node --experimental-strip-types --test tests/core.test.ts tests/history.test.ts tests/runner.test.ts",
+    "test:wifi-ssid": "node --experimental-strip-types --test tests/wifi-ssid.test.ts",
     "lint": "eslint .",
     "preview": "vite preview"
   },
