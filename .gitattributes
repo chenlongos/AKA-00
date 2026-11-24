@@ -1,3 +1,11 @@
 # 实验静态资源是构建产物，必须逐字节原样（部署脚本按 sha256 校验、浏览器按内容缓存），
 # 禁止 git 做换行转换（core.autocrlf=true 时 .js/.css/.html 会被改成 CRLF）。
 static-assets/** -text
+
+# 部署到车上的脚本必须是 LF：本机 core.autocrlf=true 会把检出改成 CRLF，
+# 而 busybox sh 遇到 `case ... in\r` 直接语法错误（2026-11-17 init_ap_web.sh 踩过，
+# 表现为板上脚本一行都跑不了）。这些文件一律不做换行转换。
+cpp/board/S97akaap -text
+cpp/board/*.sh -text
+cpp/board/bin/* -text
+cpp/scripts/build-ota.sh -text
