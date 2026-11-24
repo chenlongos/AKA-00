@@ -55,3 +55,12 @@ test("exportFilename: 去掉 MAC 冒号并带时间戳", () => {
   const ts = new Date(2026, 10, 13, 9, 5, 7).getTime();
   assert.equal(exportFilename("AA:BB:CC:DD:EE:FF", ts), "selftest-AA-BB-CC-DD-EE-FF-20261113-090507.json");
 });
+
+test("appendRecord/loadHistory: 保留 mode，旧记录无 mode 仍可读", () => {
+  const storage = memoryStorage();
+  appendRecord(storage, {...record(1), mode: "unattended"});
+  appendRecord(storage, record(2));
+  const list = loadHistory(storage);
+  assert.equal(list[0].mode, undefined);
+  assert.equal(list[1].mode, "unattended");
+});

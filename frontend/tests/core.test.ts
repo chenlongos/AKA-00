@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   DEMO_DEFAULTS,
   MOTION_ROWS,
+  UNATTENDED_GROUPS,
   buildControlUrl,
   classifyControl,
   normalizeDemoParams,
@@ -100,4 +101,8 @@ test("summarizeItems: 统计 pass/fail/skip/unconfirmed", () => {
   );
   assert.equal(summary.ok, false);
   assert.equal(summarizeItems([item("pass"), item("skip")]).ok, true);
+});
+
+test("UNATTENDED_GROUPS: 覆盖全部五组且 WiFi 最后", () => {
+  assert.deepEqual(UNATTENDED_GROUPS, ["motion", "camera", "demo", "arm", "wifi"]);
 });

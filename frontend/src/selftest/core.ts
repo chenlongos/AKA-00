@@ -2,6 +2,8 @@
 // 注意：Node 的 --experimental-strip-types 只支持可擦除语法（无 enum / namespace）。
 
 export type Group = "motion" | "camera" | "demo" | "wifi" | "arm";
+/** 全自动模式固定包含的测试组：WiFi 放最后，避免切网影响舵机测试 */
+export const UNATTENDED_GROUPS: Group[] = ["motion", "camera", "demo", "arm", "wifi"];
 export type RunState = "idle" | "precheck" | "running" | "finished" | "aborted";
 export type ItemStatus = "pending" | "running" | "confirm" | "pass" | "fail" | "skip" | "unconfirmed";
 
@@ -56,6 +58,8 @@ export interface SelfTestRecord {
   items: ItemResult[];
   summary: SelfTestSummary;
   remark: string;
+  /** 手动逐项确认 / 全自动无人值守（旧记录缺省视为手动） */
+  mode?: "manual" | "unattended";
 }
 
 export function buildControlUrl(action: string, opts: ControlOptions = {}): string {
