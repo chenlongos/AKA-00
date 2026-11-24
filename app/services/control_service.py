@@ -1,6 +1,7 @@
 import threading
 import time
 
+from app.motor_config import load as load_motor_config
 from src.arm_control.interfaces import create_gripper
 from src.base_control.interfaces import create_motor_pair
 from src.state import get_state_collector
@@ -26,9 +27,19 @@ class ControlService:
         motor_pair = create_motor_pair(
             port=self._config.base_port,
             backend=self._config.base_driver,
+            # 左右接线标定：网页「左右方向切换」（motor_config.json）开机生效
+            swap_lr=load_motor_config()["swap_lr"],
         )
         get_state_collector().set_motor_pair(motor_pair)
         return motor_pair
+
+    def set_swap_lr(self, on: bool) -> bool:
+        """左右通道对调（网页「左右方向切换」）：立即生效，下发/回读/闭环转向一起翻。"""
+        setter = getattr(self._motor_pair, "set_swap_lr", None)
+        if callable(setter):
+            setter(bool(on))
+        getter = getattr(self._motor_pair, "swap_lr", None)
+        return bool(getter()) if callable(getter) else bool(on)
 
     def execute_action(self, action: str, speed: int = 50, milliseconds: float = 0) -> dict:
         # speed: 电机百分比 (1~100)，默认 50

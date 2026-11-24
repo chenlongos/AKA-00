@@ -54,6 +54,8 @@ struct MotorConfig {
     //   不对称，对调或取反都能翻它 —— 所以两个开关能分开组合出上面三种。）
     // 首选还是断电把底盘电机插头/线序归位（硬件标定，全车队行为一致）；
     // 不方便开壳时才用这两个软件开关。属每台车标定，放 config.toml（OTA 保留）。
+    // 网页「设置 → 左右方向切换」改的是 motor_config.json（Python 路径共用），
+    // 它存在时优先于这里的 swap_lr（见 capp/services/motor_config.cpp）。
     bool swap_lr = false;   // 交换左右通道
     bool invert = false;    // 两路极性取反
 };

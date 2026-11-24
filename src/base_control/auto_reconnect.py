@@ -25,6 +25,23 @@ _BACKOFF_CAP = 30.0
 _PING_INTERVAL = 2.0
 _PING_FAILS_BEFORE_DROP = 2
 
+# CMD_MOVE_DISTANCE(0x23) 的 dir 编码：0 前进 / 1 后退 / 2 左转 / 3 右转
+_CMD_MOVE_DISTANCE = 0x23
+_MOVE_LEFT = 2
+_MOVE_RIGHT = 3
+
+
+def _swap_move_dir(payload: bytes) -> bytes:
+    """把闭环指令的 dir 字节左右对调（2↔3），其余字段原样。"""
+    if not payload:
+        return payload
+    d = payload[0]
+    if d == _MOVE_LEFT:
+        d = _MOVE_RIGHT
+    elif d == _MOVE_RIGHT:
+        d = _MOVE_LEFT
+    return bytes((d,)) + payload[1:]
+
 
 class AutoReconnectMotorPair:
     """自动重连底盘代理（backend="tt_pid" 时后台建连；否则退化为纯 Mock）。"""
@@ -36,6 +53,7 @@ class AutoReconnectMotorPair:
         baudrate: int = 115200,
         ppr: int = 4680,
         pwm_freq: int = 20000,
+        swap_lr: bool = False,
     ) -> None:
         from src.base_control.interfaces import MockMotorPair
 
@@ -44,6 +62,9 @@ class AutoReconnectMotorPair:
         self._baudrate = baudrate
         self._ppr = ppr
         self._pwm_freq = pwm_freq
+        # 左右通道对调（对应 C++ AutoReconnectMotorPair::swap_lr_）：下发/回读/闭环
+        # 转向都在这一层统一变换，上层 left/right 语义与物理左右轮一致。可运行时改。
+        self._swap_lr = bool(swap_lr)
 
         self._enabled = backend == "tt_pid"
         self._mock = MockMotorPair()
@@ -70,10 +91,21 @@ class AutoReconnectMotorPair:
             return self._active
 
     def set_speed(self, left: int, right: int) -> None:
+        if self._swap_lr:
+            left, right = right, left
         self._driver().set_speed(left, right)
 
     def get_speeds(self) -> tuple:
-        return self._driver().get_speeds()
+        left, right = self._driver().get_speeds()
+        return (right, left) if self._swap_lr else (left, right)
+
+    # ── 左右接线标定（网页「左右方向切换」→ /api/config/motor）──
+    def set_swap_lr(self, on: bool) -> None:
+        """立即生效，不用重启；与构造参数 swap_lr 同义。"""
+        self._swap_lr = bool(on)
+
+    def swap_lr(self) -> bool:
+        return self._swap_lr
 
     def brake(self) -> None:
         self._driver().brake()
@@ -96,6 +128,8 @@ class AutoReconnectMotorPair:
     def _send_cmd_noresp(self, cmd: int, payload: bytes = b"") -> None:
         fn = getattr(self._driver(), "_send_cmd_noresp", None)
         if fn is not None:
+            if self._swap_lr and cmd == _CMD_MOVE_DISTANCE:
+                payload = _swap_move_dir(payload)
             fn(cmd, payload)
 
     # ── 连接管理 ──────────────────────────────────────────────────

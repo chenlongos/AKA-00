@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <memory>
@@ -92,6 +93,11 @@ public:
     /// 打断退避等待并立刻重试连接（异步；drop + 唤醒 worker）
     void request_reconnect();
 
+    /// 左右通道对调（网页「左右方向切换」→ POST /api/config/motor）：**立即生效**，
+    /// 与构造参数 swap_lr 同义 —— 下发/回读/闭环转向一起翻，不用重启。
+    void set_swap_lr(bool on) { swap_lr_.store(on, std::memory_order_relaxed); }
+    bool swap_lr() const { return swap_lr_.load(std::memory_order_relaxed); }
+
 private:
     void worker_loop();
     /// 同步尝试连接一次（必须在 attempt_mu_ 持有时调用）；成功则切换 active_。
@@ -112,7 +118,8 @@ private:
     int ppr_;
     // 左右通道对调 / 两路取反（见 Config.MotorConfig.swap_lr / invert）：下发/回读/闭环
     // 转向都在代理层统一下变换，使上层的 left/right 与物理左右轮一致；两个开关可叠加。
-    const bool swap_lr_;
+    // swap_lr_ 可在运行时改（网页标定就地翻转，不必重启）；invert_ 只在启动时读配置。
+    std::atomic<bool> swap_lr_;
     const bool invert_;
 
     // 驱动切换保护（命令线程与 worker 并发访问 active_）

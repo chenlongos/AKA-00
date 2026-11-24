@@ -141,6 +141,23 @@ POST /api/config/speed
 
 ---
 
+## 左右方向切换（电机接线标定）
+
+```
+GET  /api/config/motor        → {"ok":true,"swap_lr":false}
+POST /api/config/motor  body: {"swap_lr":true}
+```
+
+用于适配“前进后退正常、只有左右转反”的单体底盘接线差异：`swap_lr=true` 时在自动重连
+代理层把左右通道对调（下发/回读/闭环转向一起翻），**改完立即生效，不用重启**。
+
+- 落盘 `$AKA_HOME/motor_config.json`（`{"swap_lr":false}`），Python 路径（`run.py`）与
+  C++ 路径（`aka-capp`）**共用同一份**，换固件不用重新标定。
+- 该文件存在时优先于 `config.toml` 的 `[motor] swap_lr`（`invert` 仍只在 config.toml 里）。
+- 老固件没有这个接口（404），前端会把「行驶速度」页里的开关整块隐藏。
+
+---
+
 ## 摄像头
 
 ### 状态

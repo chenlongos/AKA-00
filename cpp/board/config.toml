@@ -54,6 +54,8 @@ ppr = 4680
 #   前进后退反、 左右转也反      → invert = true
 #   前进后退反、 左右转正常      → swap_lr = true 且 invert = true
 # config.toml 在 OTA --update 时会被保留，所以这个标定不会被升级冲掉。
+# 网页「设置 → 左右方向切换」写的是 $AKA_HOME/motor_config.json（Python/C++ 两条路径
+# 共用一份），那个文件存在时会覆盖这里的 swap_lr —— 网页点过开关就以网页为准。
 swap_lr = false
 invert = false
 

@@ -89,7 +89,9 @@ PAYLOAD_OFFSET=0000000
 # `static/camera-profile.json` 是"摄像头清晰度档位"的每车状态（前端下拉读它）。
 # 档位真正生效的值在 config.toml（已在名单里），这个文件只是给它起名字对号；
 # 不保留的话，升级后实际出流还是用户选的尺寸，UI 却回落显示默认「均衡」。
-KEEP_FILES="config.toml speed_config.json arm_angles.json cert.pem key.pem static/camera-profile.json"
+# `motor_config.json` 是网页「行驶速度 → 左右方向切换」的标定（swap_lr）：写的是每台车
+# 的接线差异，丢了就等于转向又反了。注意它优先于 config.toml 的 [motor] swap_lr。
+KEEP_FILES="config.toml speed_config.json motor_config.json arm_angles.json cert.pem key.pem static/camera-profile.json"
 
 # 云端继承版本记录（capp 的 /api/ota/version 优先读它，见 status_reporter.cpp）：
 # 云端升级下载成功时 capp 先写 aka-release.pending，这里换包成功后才提升为
