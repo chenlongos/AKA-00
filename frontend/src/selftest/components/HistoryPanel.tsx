@@ -5,6 +5,8 @@ interface HistoryPanelProps {
   records: SelfTestRecord[];
   remark: string;
   saved: boolean;
+  /** 本次记录是全自动结束后自动写入的 */
+  autoSaved?: boolean;
   canSave: boolean;
   onChangeRemark: (value: string) => void;
   onSave: () => void;
@@ -15,7 +17,7 @@ interface HistoryPanelProps {
 const formatTime = (ts: number) => new Date(ts).toLocaleString("zh-CN", {hour12: false});
 
 const HistoryPanel = ({
-  records, remark, saved, canSave, onChangeRemark, onSave, onExport, onClear,
+  records, remark, saved, autoSaved = false, canSave, onChangeRemark, onSave, onExport, onClear,
 }: HistoryPanelProps) => {
   const {scalePx} = useViewportScale();
 
@@ -58,7 +60,7 @@ const HistoryPanel = ({
           opacity: canSave ? 1 : 0.5,
         }}
       >
-        {saved ? "✓ 已保存" : "保存本次记录"}
+        {saved ? (autoSaved ? "✓ 已自动保存（无人值守）" : "✓ 已保存") : "保存本次记录"}
       </button>
 
       <div style={{display: "flex", alignItems: "center", marginTop: scalePx(16), marginBottom: scalePx(4)}}>
@@ -88,6 +90,16 @@ const HistoryPanel = ({
         <div key={record.id} style={{padding: `${scalePx(6)} 0`, borderBottom: "1px solid var(--color-border-light)"}}>
           <div style={{display: "flex", alignItems: "center", gap: scalePx(6)}}>
             <span style={{flex: 1, fontSize: scalePx(12), color: "var(--color-text-muted)"}}>{formatTime(record.ts)}</span>
+            {record.mode === "unattended" && (
+              <span style={{
+                fontSize: scalePx(9),
+                fontWeight: 700,
+                color: "#0a84ff",
+                background: "rgba(10,132,255,0.10)",
+                borderRadius: "var(--radius-full)",
+                padding: `${scalePx(1)} ${scalePx(6)}`,
+              }}>全自动</span>
+            )}
             <span style={{fontSize: scalePx(11), color: "var(--color-text-dim)"}}>
               通过 {record.summary.pass} / 失败 {record.summary.fail}
               {record.summary.skip > 0 ? ` / 跳过 ${record.summary.skip}` : ""}

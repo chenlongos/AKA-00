@@ -12,6 +12,7 @@ import type { ArmSnapshot } from "../selftest/runner.ts";
 import {appendRecord, clearHistory, exportFilename, loadHistory} from "../selftest/history.ts";
 import {
   DEMO_DEFAULTS,
+  UNATTENDED_GROUPS,
   normalizeDemoParams,
   summarizeItems,
   type DemoParams,
@@ -55,9 +56,9 @@ const DEMO_FIELDS: Array<{
 const FLOW_ITEMS = [
   {icon: "🚗", title: "动作", desc: "前进/后退 10cm 与 2s，左右转向 30/60/90/180° 与 2s，抓取/放下"},
   {icon: "📷", title: "摄像头", desc: "打开摄像头、行内预览画面、关闭并确认"},
-  {icon: "🎾", title: "自动抓网球", desc: "提示放球后启动视觉抓取脚本，需人工确认夹起"},
-  {icon: "📶", title: "WiFi（可选）", desc: "扫描并连接 Tsinghua-Dongsheng，不恢复原网络"},
-  {icon: "🦾", title: "舵机（可选）", desc: "底座 / 腕部 / 夹爪逐个大幅转动，最后恢复原始参数"},
+  {icon: "🎾", title: "自动抓网球", desc: "提示放球后启动视觉抓取脚本；全自动模式不提示、done 即通过"},
+  {icon: "🦾", title: "舵机（全自动固定包含）", desc: "底座 / 腕部 / 夹爪逐个大幅转动，最后恢复原始参数"},
+  {icon: "📶", title: "WiFi（全自动固定包含）", desc: "扫描并连接 Tsinghua-Dongsheng，不恢复原网络"},
 ];
 
 const Toggle = ({on, disabled, onChange}: {
@@ -245,6 +246,8 @@ const SelfTestPage = () => {
 
   const [remark, setRemark] = useState("");
   const [saved, setSaved] = useState(false);
+  const [autoSaved, setAutoSaved] = useState(false);
+  const [runMode, setRunMode] = useState<"manual" | "unattended">("manual");
   const [history, setHistory] = useState<SelfTestRecord[]>(() => loadHistory(window.localStorage));
   const [showClear, setShowClear] = useState(false);
 
@@ -306,6 +309,8 @@ const SelfTestPage = () => {
     abortRef.current = false;
     setPrecheckError("");
     setSaved(false);
+    setAutoSaved(false);
+    setRunMode("manual");
     setRemark("");
 
     const groups: Group[] = ["motion", "camera", "demo"];
@@ -337,11 +342,58 @@ const SelfTestPage = () => {
     setRunState(outcome.state);
   };
 
+  const startUnattended = async () => {
+    if (!checked || running) return;
+    abortRef.current = false;
+    setPrecheckError("");
+    setSaved(false);
+    setAutoSaved(false);
+    setRemark("");
+    setRunMode("unattended");
+
+    const outcome = await runSelfTest({
+      groups: [...UNATTENDED_GROUPS],
+      speed,
+      demoParams,
+      abortOnFailure: false,
+      unattended: true,
+      client,
+      cameraFrame,
+      confirm: askConfirm,
+      notice: askNotice,
+      isAborted: () => abortRef.current,
+      onUpdate: (next, state) => {
+        setItems(next);
+        setRunState(state);
+      },
+      onArmSnapshot: setArmSnapshot,
+      onCamera: on => {
+        if (!on) setCameraSrc("");
+      },
+    });
+
+    setItems(outcome.items);
+    setPrecheckError(outcome.precheckError ?? "");
+    setRunState(outcome.state);
+
+    const remarkText = outcome.precheckError
+      ? "无人值守（预检失败）"
+      : outcome.state === "aborted" ? "无人值守（中途中止）" : "无人值守";
+    setRemark(remarkText);
+    setHistory(appendRecord(
+      window.localStorage,
+      buildRecord(outcome.items, remarkText, "unattended"),
+    ));
+    setSaved(true);
+    setAutoSaved(true);
+  };
+
   const retest = async (id: string) => {
     if (running) return;
     abortRef.current = false;
     setPrecheckError("");
     setSaved(false);
+    setAutoSaved(false);
     setRetestId(id);
     setRunState("running");
     try {
@@ -380,11 +432,14 @@ const SelfTestPage = () => {
     void client.armWrite(armSnapshot.driver, armSnapshot.angles);
   };
 
-  const saveRecord = () => {
-    if (items.length === 0) return;
+  const buildRecord = (
+    sourceItems: ItemResult[],
+    remarkText: string,
+    mode: "manual" | "unattended",
+  ): SelfTestRecord => {
     const ts = Date.now();
-    const summary = summarizeItems(items);
-    const record: SelfTestRecord = {
+    const sum = summarizeItems(sourceItems);
+    return {
       id: `${ts}-${Math.random().toString(36).slice(2, 8)}`,
       ts,
       mac: info.mac,
@@ -392,15 +447,21 @@ const SelfTestPage = () => {
       ip: info.ip,
       speed,
       demo: demoParams,
-      items,
+      items: sourceItems,
       summary: {
-        pass: summary.pass,
-        fail: summary.fail,
-        skip: summary.skip,
-        unconfirmed: summary.unconfirmed,
+        pass: sum.pass,
+        fail: sum.fail,
+        skip: sum.skip,
+        unconfirmed: sum.unconfirmed,
       },
-      remark: remark.trim(),
+      remark: remarkText,
+      mode,
     };
+  };
+
+  const saveRecord = () => {
+    if (items.length === 0) return;
+    const record = buildRecord(items, remark.trim(), runMode);
     setHistory(appendRecord(window.localStorage, record));
     setSaved(true);
   };
@@ -435,7 +496,7 @@ const SelfTestPage = () => {
             : "准备就绪";
 
   const heroSubtitle =
-    runState === "idle" ? "勾选安全确认后一次点完：动作 → 摄像头 → 自动抓取，WiFi / 舵机按需开启"
+    runState === "idle" ? "勾选安全确认后选择「开始测试」（逐项人工确认）或「全自动测试」（五组跑完、自动保存）"
       : runState === "precheck" ? "检查底盘连接与网球模型"
         : runState === "running"
           ? `已完成 ${done} / ${items.length} 项 · ${activeItem?.status === "confirm" ? "等待人工确认" : "正在执行"}`
@@ -551,6 +612,14 @@ const SelfTestPage = () => {
             disabled={running}
             onChange={setContinueOnFailure}
           />
+          <div style={{
+            marginTop: scalePx(2),
+            fontSize: scalePx(9),
+            lineHeight: 1.5,
+            color: "var(--color-text-dim)",
+          }}>
+            以上开关只影响「开始测试」；「全自动测试」固定包含全部 5 组、失败不中断。
+          </div>
           {enableWifi && (
             <div style={{
               marginTop: scalePx(4),
@@ -650,47 +719,104 @@ const SelfTestPage = () => {
           </Card>
         )}
 
+        {!running && (
+          <Card marginBottom={10} style={{background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.25)"}}>
+            <div style={{fontSize: scalePx(13), fontWeight: 800, color: "#b45309", marginBottom: scalePx(3)}}>
+              全自动测试（无人值守）
+            </div>
+            <div style={{fontSize: scalePx(10), lineHeight: 1.7, color: "#b45309"}}>
+              <div>按 动作 → 摄像头 → 抓球 → 舵机 → WiFi 一次跑完，中途无确认，失败不中断，结束自动保存历史。</div>
+              <div>开始前：网球放在车前 30–60cm；车前后留 ≥1m；机械臂周围清空。</div>
+              <div>只按接口成功判定，不检查转向方向 / 距离 / 夹持效果，结果标「无人值守」。</div>
+              <div>WiFi 组会切到 Tsinghua-Dongsheng 且不恢复；请通过本车热点 192.168.4.1 打开本页。</div>
+            </div>
+          </Card>
+        )}
+
         {/* 主按钮 */}
         <div style={{display: "flex", gap: scalePx(8), marginBottom: scalePx(10)}}>
-          <button
-            onClick={start}
-            disabled={!checked || running}
-            style={{
-              flex: 1,
-              padding: `${scalePx(13)} 0`,
-              border: "none",
-              borderRadius: scalePx(13),
-              background: checked || running
-                ? "linear-gradient(135deg, #0a84ff, #5e5ce6)"
-                : "#c7c7cc",
-              color: "#fff",
-              fontSize: scalePx(15),
-              fontWeight: 800,
-              cursor: !checked || running ? "not-allowed" : "pointer",
-              boxShadow: checked && !running ? "0 4px 16px rgba(10,132,255,0.35)" : "none",
-              transition: "background 0.2s, box-shadow 0.2s",
-            }}
-          >
-            {running
-              ? (runState === "precheck" ? "预检中…" : "测试进行中…")
-              : (runState === "idle" ? "开始测试" : "重新测试")}
-          </button>
-          {running && (
-            <button
-              onClick={abort}
-              style={{
-                padding: `0 ${scalePx(18)}`,
-                border: "none",
-                borderRadius: scalePx(13),
-                background: "var(--color-danger)",
-                color: "#fff",
-                fontSize: scalePx(14),
-                fontWeight: 700,
-                cursor: "pointer",
-              }}
-            >
-              中止
-            </button>
+          {running ? (
+            <>
+              <button
+                disabled
+                style={{
+                  flex: 1,
+                  padding: `${scalePx(13)} 0`,
+                  border: "none",
+                  borderRadius: scalePx(13),
+                  background: "linear-gradient(135deg, #0a84ff, #5e5ce6)",
+                  color: "#fff",
+                  fontSize: scalePx(15),
+                  fontWeight: 800,
+                  cursor: "not-allowed",
+                  opacity: 0.75,
+                }}
+              >
+                {runState === "precheck"
+                  ? "预检中…"
+                  : runMode === "unattended" ? "全自动进行中…" : "测试进行中…"}
+              </button>
+              <button
+                onClick={abort}
+                style={{
+                  padding: `0 ${scalePx(18)}`,
+                  border: "none",
+                  borderRadius: scalePx(13),
+                  background: "var(--color-danger)",
+                  color: "#fff",
+                  fontSize: scalePx(14),
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                中止
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={start}
+                disabled={!checked}
+                style={{
+                  flex: 1,
+                  padding: `${scalePx(13)} 0`,
+                  border: "none",
+                  borderRadius: scalePx(13),
+                  background: checked
+                    ? "linear-gradient(135deg, #0a84ff, #5e5ce6)"
+                    : "#c7c7cc",
+                  color: "#fff",
+                  fontSize: scalePx(15),
+                  fontWeight: 800,
+                  cursor: checked ? "pointer" : "not-allowed",
+                  boxShadow: checked ? "0 4px 16px rgba(10,132,255,0.35)" : "none",
+                  transition: "background 0.2s, box-shadow 0.2s",
+                }}
+              >
+                {runState === "idle" ? "开始测试" : "重新测试"}
+              </button>
+              <button
+                onClick={startUnattended}
+                disabled={!checked}
+                style={{
+                  flex: 1,
+                  padding: `${scalePx(13)} 0`,
+                  border: "none",
+                  borderRadius: scalePx(13),
+                  background: checked
+                    ? "linear-gradient(135deg, #30d158, #0a84ff)"
+                    : "#c7c7cc",
+                  color: "#fff",
+                  fontSize: scalePx(15),
+                  fontWeight: 800,
+                  cursor: checked ? "pointer" : "not-allowed",
+                  boxShadow: checked ? "0 4px 16px rgba(48,209,88,0.30)" : "none",
+                  transition: "background 0.2s, box-shadow 0.2s",
+                }}
+              >
+                全自动测试
+              </button>
+            </>
           )}
         </div>
 
@@ -760,6 +886,7 @@ const SelfTestPage = () => {
               records={history}
               remark={remark}
               saved={saved}
+              autoSaved={autoSaved}
               canSave={canSave}
               onChangeRemark={setRemark}
               onSave={saveRecord}
