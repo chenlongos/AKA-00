@@ -131,6 +131,27 @@ test("动作组：7 对 + 抓取按顺序执行，全部通过", async () => {
   ]);
 });
 
+test("手动模式：动作与抓取不弹确认，manual 为空", async () => {
+  let confirmCalls = 0;
+  const {outcome} = await run(["motion"], {}, {
+    confirm: () => { confirmCalls += 1; return true; },
+  });
+  assert.equal(confirmCalls, 0);
+  const items = motionItems(outcome.items);
+  assert.equal(items.every(item => item.status === "pass"), true);
+  assert.equal(items.every(item => item.manual === null), true);
+});
+
+test("手动模式：摄像头与自动抓球仍各弹一次确认", async () => {
+  const seen: string[] = [];
+  const {outcome} = await run(["camera", "demo"], {}, {
+    confirm: (id) => { seen.push(id); return true; },
+  });
+  assert.deepEqual(seen, ["camera_on", "demo_grab"]);
+  const tested = outcome.items.filter(item => item.group === "camera" || item.group === "demo");
+  assert.equal(tested.every(item => item.status === "pass"), true);
+});
+
 test("动作失败：默认跳过后续动作项，但仍执行清理", async () => {
   let controlCalls = 0;
   const {fake, outcome} = await run(["motion"], {
@@ -204,7 +225,7 @@ test("WiFi 组：连接失败时 verify 跳过", async () => {
   assert.deepEqual(items.map(item => item.status), ["pass", "fail", "skip"]);
 });
 
-test("舵机组：三个舵机逐个大幅摆动，人工确认后逆序恢复", async () => {
+test("舵机组：三个舵机逐个大幅摆动并逆序恢复，不弹确认", async () => {
   const previews: Array<{key: string; value: number}> = [];
   const writes: Record<string, unknown>[] = [];
   let confirms = 0;
@@ -222,6 +243,7 @@ test("舵机组：三个舵机逐个大幅摆动，人工确认后逆序恢复",
   });
   const item = outcome.items.find(entry => entry.id === "arm_roundtrip")!;
   assert.equal(item.status, "pass");
+  assert.equal(item.manual, null);
   assert.deepEqual(previews, [
     {key: "grab_position.servo0", value: 188},
     {key: "grab_position.servo1", value: 126},
@@ -230,7 +252,7 @@ test("舵机组：三个舵机逐个大幅摆动，人工确认后逆序恢复",
     {key: "grab_position.servo1", value: 86},
     {key: "grab_position.servo0", value: 228},
   ]);
-  assert.equal(confirms, 2);  // 开始确认 + 人工确认动作
+  assert.equal(confirms, 0);
   assert.equal(writes.length, 1);  // finally 写回原始配置
   assert.deepEqual(writes[0], ARM_ANGLES());
 });
