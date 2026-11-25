@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import {
   DEMO_DEFAULTS,
   MOTION_ROWS,
-  UNATTENDED_GROUPS,
   buildControlUrl,
+  buildGroups,
   classifyControl,
   normalizeDemoParams,
   planArmSweep,
@@ -103,6 +103,12 @@ test("summarizeItems: 统计 pass/fail/skip/unconfirmed", () => {
   assert.equal(summarizeItems([item("pass"), item("skip")]).ok, true);
 });
 
-test("UNATTENDED_GROUPS: 覆盖全部五组且 WiFi 最后", () => {
-  assert.deepEqual(UNATTENDED_GROUPS, ["motion", "camera", "demo", "arm", "wifi"]);
+test("buildGroups: 动作与摄像头必测，其余按开关，WiFi 最后", () => {
+  assert.deepEqual(buildGroups({demo: false, arm: false, wifi: false}), ["motion", "camera"]);
+  assert.deepEqual(buildGroups({demo: true, arm: false, wifi: false}), ["motion", "camera", "demo"]);
+  assert.deepEqual(
+    buildGroups({demo: true, arm: true, wifi: true}),
+    ["motion", "camera", "demo", "arm", "wifi"],
+  );
+  assert.equal(buildGroups({demo: false, arm: false, wifi: false}).includes("wifi"), false);
 });
