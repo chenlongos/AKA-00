@@ -12,11 +12,10 @@ import type { ArmSnapshot } from "../selftest/runner.ts";
 import {appendRecord, clearHistory, exportFilename, loadHistory} from "../selftest/history.ts";
 import {
   DEMO_DEFAULTS,
-  UNATTENDED_GROUPS,
+  buildGroups,
   normalizeDemoParams,
   summarizeItems,
   type DemoParams,
-  type Group,
   type ItemResult,
   type RunState,
   type SelfTestRecord,
@@ -56,9 +55,9 @@ const DEMO_FIELDS: Array<{
 const FLOW_ITEMS = [
   {icon: "🚗", title: "动作", desc: "前进/后退 10cm 与 2s，左右转向 30/60/90/180° 与 2s，抓取/放下"},
   {icon: "📷", title: "摄像头", desc: "打开摄像头、行内预览画面、关闭并确认"},
-  {icon: "🎾", title: "自动抓网球", desc: "提示放球后启动视觉抓取脚本；全自动模式不提示、done 即通过"},
-  {icon: "🦾", title: "舵机（全自动固定包含）", desc: "底座 / 腕部 / 夹爪逐个大幅转动，最后恢复原始参数"},
-  {icon: "📶", title: "WiFi（全自动固定包含）", desc: "扫描并连接 Tsinghua-Dongsheng，不恢复原网络"},
+  {icon: "🎾", title: "自动抓网球（可选）", desc: "提示放球后启动视觉抓取脚本；可在选项里关闭"},
+  {icon: "🦾", title: "舵机角度（可选）", desc: "底座 / 腕部 / 夹爪逐个大幅转动，最后恢复原始参数"},
+  {icon: "📶", title: "WiFi（可选）", desc: "扫描并连接 Tsinghua-Dongsheng，不恢复原网络"},
 ];
 
 const Toggle = ({on, disabled, onChange}: {
@@ -220,6 +219,7 @@ const SelfTestPage = () => {
   const [checked, setChecked] = useState(false);
   const [enableWifi, setEnableWifi] = useState(false);
   const [enableArm, setEnableArm] = useState(false);
+  const [enableDemo, setEnableDemo] = useState(true);
   const [continueOnFailure, setContinueOnFailure] = useState(false);
   const [speed, setSpeed] = useState(25);
   const [demoForm, setDemoForm] = useState({
@@ -313,9 +313,7 @@ const SelfTestPage = () => {
     setRunMode("manual");
     setRemark("");
 
-    const groups: Group[] = ["motion", "camera", "demo"];
-    if (enableWifi) groups.push("wifi");
-    if (enableArm) groups.push("arm");
+    const groups = buildGroups({demo: enableDemo, arm: enableArm, wifi: enableWifi});
 
     const outcome = await runSelfTest({
       groups,
@@ -352,7 +350,7 @@ const SelfTestPage = () => {
     setRunMode("unattended");
 
     const outcome = await runSelfTest({
-      groups: [...UNATTENDED_GROUPS],
+      groups: buildGroups({demo: enableDemo, arm: enableArm, wifi: enableWifi}),
       speed,
       demoParams,
       abortOnFailure: false,
@@ -496,7 +494,7 @@ const SelfTestPage = () => {
             : "准备就绪";
 
   const heroSubtitle =
-    runState === "idle" ? "勾选安全确认后选择「开始测试」（逐项人工确认）或「全自动测试」（五组跑完、自动保存）"
+    runState === "idle" ? "勾选安全确认后选择「开始测试」（摄像头/抓球人工确认）或「全自动测试」（全接口判定、自动保存）"
       : runState === "precheck" ? "检查底盘连接与网球模型"
         : runState === "running"
           ? `已完成 ${done} / ${items.length} 项 · ${activeItem?.status === "confirm" ? "等待人工确认" : "正在执行"}`
@@ -589,6 +587,14 @@ const SelfTestPage = () => {
           />
           <div style={{height: 1, background: "var(--color-border-light)", margin: `${scalePx(3)} 0`}}/>
           <OptionRow
+            icon="🎾"
+            title="自动抓网球测试"
+            desc="识别并抓取网球（需要放球）；关闭后不测该项"
+            on={enableDemo}
+            disabled={running}
+            onChange={setEnableDemo}
+          />
+          <OptionRow
             icon="📶"
             title="WiFi 测试"
             desc="扫描并连接 Tsinghua-Dongsheng（不恢复原网络）"
@@ -618,7 +624,7 @@ const SelfTestPage = () => {
             lineHeight: 1.5,
             color: "var(--color-text-dim)",
           }}>
-            以上开关只影响「开始测试」；「全自动测试」固定包含全部 5 组、失败不中断。
+            以上开关对「开始测试」和「全自动测试」都生效；动作与摄像头为必测项，全自动失败不中断。
           </div>
           {enableWifi && (
             <div style={{
@@ -725,10 +731,10 @@ const SelfTestPage = () => {
               全自动测试（无人值守）
             </div>
             <div style={{fontSize: scalePx(10), lineHeight: 1.7, color: "#b45309"}}>
-              <div>按 动作 → 摄像头 → 抓球 → 舵机 → WiFi 一次跑完，中途无确认，失败不中断，结束自动保存历史。</div>
+              <div>按所选项目一次跑完（动作 → 摄像头 → 可选的抓球 → 可选的舵机 → 可选的 WiFi），中途无确认，失败不中断，结束自动保存历史。</div>
               <div>开始前：网球放在车前 30–60cm；车前后留 ≥1m；机械臂周围清空。</div>
               <div>只按接口成功判定，不检查转向方向 / 距离 / 夹持效果，结果标「无人值守」。</div>
-              <div>WiFi 组会切到 Tsinghua-Dongsheng 且不恢复；请通过本车热点 192.168.4.1 打开本页。</div>
+              <div>勾选 WiFi 时会切换并保留到 Tsinghua-Dongsheng；请通过本车热点 192.168.4.1 打开本页。</div>
             </div>
           </Card>
         )}
