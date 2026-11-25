@@ -576,4 +576,6 @@ Expected: 以上 4 点全部符合；结束后手动/全自动记录分别正常
 - Task 1-3 完成：`npx tsc -b` 无错误；`npm run test:selftest` **39 pass / 0 fail**（新增 `buildGroups`、手动模式不弹确认、摄像头/抓球仍各确认一次等用例）。
 - Task 4 构建：noscreen 产物 `static/index.html` 2,915B、`assets/index.js` 376,721B、`.br` 94,650B、`.gz` 111,679B、`index.css` 3,078B；`index.js?v=afc5482c → 238fc910`（CSS 未改，hash 不变）。
 - Task 5 部署：车 **172.16.203.25**（MAC `14:0a:02:d9:3d:bd`）上传 5 文件 `== ok 5 bad 0`；HTTP 复核 `/assets/index.js?v=238fc910` 200 / 376,721B，`/self-test` 200，首页引用新 hash。
+- 合并 `origin/main`（`53c823f` 网页左右方向切换）后重建并二次部署：`index.js?v=3132f435`（378,475B），5 文件 sha 校验通过、`/self-test` 与 `/speed-config` 均 200。
+- 车端 `GET /api/config/motor` 返回 **404**：车上 `aka-capp` 仍是旧二进制（不含 swap_lr 与该校准接口），设置页「左右方向切换」按能力探测整块隐藏；需交叉编译新 capp 的 OTA 包后才会出现。
 - 待办：操作员按 Task 5 Step 3 的 4 条清单真机验收（动作不弹确认、抓球关闭跳过、全自动不勾 WiFi 不测 WiFi、勾 WiFi 最后执行）。
