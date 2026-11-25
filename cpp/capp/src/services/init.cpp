@@ -21,6 +21,10 @@ bool init_services(AppContext& ctx) {
                                              ctx.config.motor.baudrate, ctx.config.motor.ppr,
                                              ctx.config.motor.swap_lr, ctx.config.motor.invert);
     ctx.motor_link = dynamic_cast<csrc::AutoReconnectMotorPair*>(ctx.motor_pair.get());
+    // 网页标定（motor_config.json）优先于 config.toml：存在就按网页上的开关走，
+    // 否则沿用 config.toml [motor] swap_lr（现场手改/老固件带过来的值）。
+    ctx.config.motor.swap_lr = load_motor_swap_lr(ctx, ctx.config.motor.swap_lr);
+    if (ctx.motor_link != nullptr) ctx.motor_link->set_swap_lr(ctx.config.motor.swap_lr);
     ctx.collector.set_motor_pair(ctx.motor_pair.get());
 
     // 夹爪

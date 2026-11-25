@@ -68,6 +68,16 @@ export const config = {
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({forward_speed, turn_speed}),
         }).then(r => r.json()),
+    // 左右方向切换（底盘电机接线标定）：swap_lr=true 时左右轮通道对调。
+    // Python（run.py）与 C++（aka-capp）两条路径都实现了这个接口，
+    // 落盘是同一个 motor_config.json，改了立即生效（不用重启）。
+    motor: () => fetch("/api/config/motor").then(r => r.json()),
+    setSwapLr: (swap_lr: boolean) =>
+        fetch("/api/config/motor", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({swap_lr}),
+        }).then(r => r.json()),
 };
 
 // Demo

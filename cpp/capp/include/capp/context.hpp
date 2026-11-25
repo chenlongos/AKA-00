@@ -157,6 +157,16 @@ inline StreamCfg stream_cfg_snapshot(AppContext& ctx) {
 /// 初始化硬件服务（启动 StateCollector）。返回值恒为 true（底盘已无 mock，见 motor_pair.hpp）。
 bool init_services(AppContext& ctx);
 
+// ── 底盘左右接线标定（网页「左右方向切换」，对应 app/motor_config.py）──
+//
+// 落盘 $AKA_HOME/motor_config.json（与 Python 路径共用同一份文件）。
+// 优先于 config.toml 的 [motor] swap_lr：网页点过就以网页为准。
+
+/// 读 swap_lr；文件缺失/损坏返回 fallback（启动时传 config.toml 的值）
+bool load_motor_swap_lr(const AppContext& ctx, bool fallback);
+/// 写 swap_lr（只写这一个字段，原子替换）；成功返回 true
+bool save_motor_swap_lr(const AppContext& ctx, bool swap_lr);
+
 /// 动作控制: action = up/down/left/right/stop/grab/release
 /// wait_done=true 且带时长时：阻塞到运动执行完（自动停车）后才返回确认 ACK。
 csrc::Json execute_action(AppContext& ctx, const std::string& action, int speed,

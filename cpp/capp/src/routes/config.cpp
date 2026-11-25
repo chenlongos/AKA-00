@@ -197,6 +197,25 @@ bool write_camera_profile(AppContext& ctx, const std::string& preset, const Stre
 
 }  // namespace
 
+// ── 左右方向切换（底盘电机接线标定）──
+//
+// 现场问题：部分单体底盘电机接线左右对调，表现为“前进后退正常、只有左右转反”。
+// 这里把代理层的 swap_lr 开关暴露给网页：改了立即生效（下发/回读/闭环转向一起 翻），
+// 并落 motor_config.json（Python 路径共用同一份，见 services/motor_config.cpp）。
+
+namespace {
+
+/// GET/POST 共用的返回体：以代理层为准（网页改的就是它；非 tt_pid 后端退回配 置值）
+Json motor_cfg_json(AppContext& ctx) {
+    Json j;
+    j["ok"] = true;
+    j["swap_lr"] = ctx.motor_link != nullptr ? ctx.motor_link->swap_lr()
+                                             : ctx.config.motor.swap_lr;
+    return j;
+}
+
+}  // namespace
+
 // ── 速度配置 ──
 
 void register_config_routes(Router& router, AppContext& ctx) {
@@ -283,6 +302,35 @@ void register_config_routes(Router& router, AppContext& ctx) {
         Json out = camera_cfg_json(ctx, cfg_path);
         out["preset"] = preset;
         resp.set_json(out);
+    });
+
+    // ── /api/config/motor（左右方向切换）──
+    router.add("GET", "/api/config/motor", [&ctx](const HttpRequest&, HttpResponse& resp, ClientConn&, AppContext&) {
+        resp.set_json(motor_cfg_json(ctx));
+    });
+
+    router.add("POST", "/api/config/motor", [&ctx](const HttpRequest& req, HttpResponse& resp, ClientConn&, AppContext&) {
+        Json payload = req.json();
+        if (!payload.is_object()) {
+            resp.set_error("json body required", 400);
+            return;
+        }
+        const Json* p = payload.get("swap_lr");
+        if (p == nullptr || !p->is_bool()) {
+            resp.set_error("swap_lr 须为 true/false", 400);
+            return;
+        }
+        const bool v = p->as_int(0) != 0;
+        // 先落盘再改内存：写失败就整体失败，不留“改了但不持久”的状态
+        if (!save_motor_swap_lr(ctx, v)) {
+            resp.set_error("写 motor_config.json 失败", 500);
+            return;
+        }
+        ctx.config.motor.swap_lr = v;
+        if (ctx.motor_link != nullptr) ctx.motor_link->set_swap_lr(v);
+        CAM_INFO("[motor] 左右方向标定已更新：swap_lr=%d（立即生效，已落 motor_config.json）",
+                 v ? 1 : 0);
+        resp.set_json(motor_cfg_json(ctx));
     });
 }
 }  // namespace routes

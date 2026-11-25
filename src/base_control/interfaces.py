@@ -74,16 +74,19 @@ class MockMotorPair:
 def create_motor_pair(
     port: str = "/dev/ttyS1",
     backend: str = "tt_pid",
+    swap_lr: bool = False,
 ) -> MockMotorPair | TtPidChassis | AutoReconnectMotorPair:
     """创建双轮底盘。backend: tt_pid（ESP32 编码器） 或 mock（开发用）。
 
     tt_pid 返回自动重连代理：构造永不抛异常（服务必然能起），后台线程按退避
     策略持续尝试连真底盘，连上即自动切换为真实驱动；期间命令落到 Mock。
+
+    swap_lr: 左右通道对调（网页「左右方向切换」的标定，见 app/motor_config.py）。
     """
     if os.name == "nt" or sys.platform == "darwin":
         return MockMotorPair()
 
     if backend == "tt_pid":
-        return AutoReconnectMotorPair(port=port)
+        return AutoReconnectMotorPair(port=port, swap_lr=swap_lr)
 
     return MockMotorPair()

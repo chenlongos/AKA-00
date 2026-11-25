@@ -261,6 +261,7 @@ HTTPS `https://192.168.4.1`），**无需鉴权**，默认返回 JSON。前端�
 | 模型管理 | `POST /api/models/upload?name=`、`POST /api/models/delete`、`POST /api/model/upload`（训练平台契约） |
 | Demo | `GET /api/demo/list`、`POST /api/demo/init`（或 `/run`）、`GET /api/demo/status`、`POST /api/demo/stop`、`GET/POST /api/demo/config`、`POST /api/demo/delete`、`GET /api/demo/name` |
 | 速度配置 | `GET/POST /api/config/speed` |
+| 左右方向切换 | `GET/POST /api/config/motor`（电机接线标定，落 `motor_config.json`） |
 | WiFi | `GET /api/wifi/scan`、`POST /api/wifi/connect`、`GET /api/wifi/status`、`GET /api/wifi/ip` |
 | OTA | `GET /api/ota/version`、`GET /api/ota/check`、`POST /api/ota/upgrade`、`GET /api/ota/status`、`GET /api/ota/upgrade/progress`、`POST /api/ota/update`（直接传固件） |
 | 系统 | `GET /api/system/info`、`GET /api/system/ip`、`GET /api/system/heartbeat` |
@@ -392,6 +393,7 @@ POST /api/demo/delete                            # {"name":"..."}
 
 ```bash
 GET/POST /api/config/speed                 # {"forward_speed":50,"turn_speed":50}
+GET/POST /api/config/motor                 # {"swap_lr":false} 左右方向切换（接线标定，立即生效）
 
 GET  /api/wifi/scan                        # 扫描附近 WiFi（wlan1）
 POST /api/wifi/connect                     # {"ssid":"...","password":"..."}，无密码传空串

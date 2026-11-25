@@ -16,6 +16,7 @@
 | 精确控制左右轮（差速、自己算闭环） | `GET /api/motor/direct?left=&right=&duration=` |
 | 显示速度 / 连接状态 / 夹爪 | `GET /api/motor/status`（轮询）或 WS 推送 |
 | 界面上的"默认速度" | `GET/POST /api/config/speed`（后端只存不读，见 §4） |
+| 左右转方向反了（接线差异） | `GET/POST /api/config/motor`（标定，立即生效，见 §4.1） |
 
 ---
 
@@ -124,6 +125,26 @@ POST /api/config/speed  body: {"forward_speed":55,"turn_speed":40}
 > 现在的前端是 `BaseControlPage` 拿 `forward_speed`（并 clamp 到 ≤60）当摇杆的初始速度、
 > `SpeedConfigPage` 拿它当设置页的初值 —— **发指令时速度是显式带的**（WS/HTTP 参数），
 > 所以改了这里不会影响已经发出去的指令，也不会影响 demo 脚本（脚本的速度来自卡片参数）。
+
+---
+
+## 4.1 `GET/POST /api/config/motor` —— 左右方向切换（接线标定）
+
+```jsonc
+GET  /api/config/motor        → {"ok":true,"swap_lr":false}
+POST /api/config/motor  body: {"swap_lr":true}
+```
+
+现场症状：部分单体底盘电机接线左右对调 —— **前进后退正常，只有左右转反**。打开这个开关后，
+自动重连代理层会把 `(left,right)` 换成 `(right,left)`，下发/回读/闭环转向一起翻，
+上层拿到的 left/right 仍然对应物理左右轮。**改完立即生效，不用重启**。
+
+存在 `$AKA_HOME/motor_config.json`，**Python（`run.py`）与 C++（`aka-capp`）两条路径共用同一份**；
+文件存在时优先于 `config.toml` 的 `[motor] swap_lr`（后者还能翻 `invert`，见 config.toml 注释）。
+网页上的入口在**「设置 → 行驶速度」**页里：点一下立即生效并落盘，不走旁边的「保存设置」按钮；
+断电重启与 OTA 升级后都保持（`motor_config.json` 在 OTA 保留名单里）。
+
+> 首选还是断电把底盘电机插头/线序归位（硬件标定，全车队一致）；这个开关是"不方便开壳"时的兜底。
 
 ---
 
