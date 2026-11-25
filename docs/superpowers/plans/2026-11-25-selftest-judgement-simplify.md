@@ -578,4 +578,11 @@ Expected: 以上 4 点全部符合；结束后手动/全自动记录分别正常
 - Task 5 部署：车 **172.16.203.25**（MAC `14:0a:02:d9:3d:bd`）上传 5 文件 `== ok 5 bad 0`；HTTP 复核 `/assets/index.js?v=238fc910` 200 / 376,721B，`/self-test` 200，首页引用新 hash。
 - 合并 `origin/main`（`53c823f` 网页左右方向切换）后重建并二次部署：`index.js?v=3132f435`（378,475B），5 文件 sha 校验通过、`/self-test` 与 `/speed-config` 均 200。
 - 车端 `GET /api/config/motor` 返回 **404**：车上 `aka-capp` 仍是旧二进制（不含 swap_lr 与该校准接口），设置页「左右方向切换」按能力探测整块隐藏；需交叉编译新 capp 的 OTA 包后才会出现。
+
+### 2026-11-25 重编 capp 测试车 172.16.203.38
+
+- capp 为新二进制：6,237,000 B，md5 `2fd0fba5…`，`strings` 含 `swap_lr` 5 处；`GET /api/config/motor` 200。
+- 实测 POST `{"swap_lr":true}` → 回读 true → POST `false` 恢复；落盘 `/root/AKA-00/motor_config.json`（已恢复为 `{"swap_lr":false}`）。
+- 原前端为 11-24 11:47 的 `2bb07b19`（含左右方向切换 UI，不含全自动测试/本次判定简化）；已部署最新 bundle `index.js?v=3132f435`（5 文件 sha ok，`/self-test`、`/speed-config` 200，正文含「自动抓网球测试」「左右方向切换」）。
+- 注意：该车 `VERSION` 仍为 `0.6@1790584944`（无 `/root/aka-release`），重打包发布前应更新版本时间戳；`config.toml` 无 `swap_lr/invert` 两行（默认 false 行为不变，`invert` 仍需手改）。
 - 待办：操作员按 Task 5 Step 3 的 4 条清单真机验收（动作不弹确认、抓球关闭跳过、全自动不勾 WiFi 不测 WiFi、勾 WiFi 最后执行）。
